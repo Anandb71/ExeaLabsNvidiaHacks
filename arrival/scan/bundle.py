@@ -8,6 +8,7 @@ from pathlib import Path
 
 GEOMETRY_SOURCES = ("authored_sample", "roomplan", "four_photo_unmeasured")
 OPTIONAL_LISTS = ("doors", "windows", "openings", "floors")
+HINGES = ("left", "right")  # a fixture's optional `hinge`: the edge its door turns on, the fixture's own left or right
 
 
 MAX_DIM_M = 100.0  # no single fixture, wall or floor edge is longer than this
@@ -62,6 +63,8 @@ def _check_geometry(bundle: dict) -> None:
                                       f"got {item.get('position')!r}")
             if numbers([item.get("yaw", 0.0)], 1) is None:
                 raise ScanBundleError(f"{what}: yaw must be a finite number")
+            if key == "fixtures" and item.get("hinge", "left") not in HINGES:
+                raise ScanBundleError(f"{what}: hinge must be 'left' or 'right', got {item['hinge']!r}")
     for key in ("doors", "windows", "openings"):
         for item in bundle.get(key, []):
             size, pos = numbers(item.get("size"), 3), numbers(item.get("position"), 3)

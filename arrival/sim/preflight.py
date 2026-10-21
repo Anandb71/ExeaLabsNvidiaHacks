@@ -13,7 +13,7 @@ import math
 
 import numpy as np
 
-from arrival.sim.scene import DRAWER_W, drawer_x, front_stand
+from arrival.sim.scene import DRAWER_W, drawer_x, front_stand, hinge_side
 from arrival.twin.compile import is_counter_host, to_local, to_world
 
 BASE_CLEAR = 0.15  # the base column is 0.12 m in radius
@@ -171,11 +171,12 @@ def _stand_rule(twin: dict, task: dict, obj_xy, mobile: bool, arm: str) -> tuple
         src = fx[task["fixture"]]
         base = park(src, math.copysign(DISHWASHER_SIDE, to_local(obj_xy[:2], src)[0]), 0.28)
     elif fam == "open_fridge":
-        # beside the door's free edge and out of its swing (the hinge is on the fixture's left edge), facing the
-        # front like the cabinet door tasks
+        # beside the door's free edge and out of its swing (the hinge is on the fixture's left edge unless the twin
+        # says right, and then this is the mirror image), facing the front like the cabinet door tasks
         src = fx[task["fixture"]]
-        base = park(src, src["size"][0] / 2 + FRIDGE_BASE_ALONG, FRIDGE_BASE_OUT)
-        yaw_off = -FRIDGE_BASE_YAW
+        side = hinge_side(src)
+        base = park(src, side * (src["size"][0] / 2 + FRIDGE_BASE_ALONG), FRIDGE_BASE_OUT)
+        yaw_off = -side * FRIDGE_BASE_YAW
     else:
         src = fx[task["fixture"]]
         base = park(src, *front_stand(src, fam, fixtures))

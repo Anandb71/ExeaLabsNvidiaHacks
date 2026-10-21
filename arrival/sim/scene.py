@@ -8,7 +8,7 @@ import math
 import random
 
 from arrival.catalog.objects import object_spec
-from arrival.scan.bundle import ScanBundleError
+from arrival.scan.bundle import HINGES, ScanBundleError
 from arrival.sim import people, robot
 from arrival.twin.compile import COUNTER_HEIGHT, is_counter_host, to_local
 
@@ -455,33 +455,51 @@ def microwave_xml(f: dict) -> str:
     return f'<body name="{fid}" pos="{cx} {cy} {cz - h / 2:.4f}" euler="0 0 {f.get("yaw", 0)}">' + "".join(g) + "</body>"
 
 
+def hinge_side(f: dict) -> int:
+    """1 for a door hinged on the fixture's left edge (local -x, the default), -1 for its right edge (`hinge:
+    right`). Left and right are the fixture's own, looking out of its front: a person facing the door sees them
+    swapped, so the hero fridge, hinged at the west wall, is `left`."""
+    hinge = f.get("hinge", "left")
+    if hinge not in HINGES:
+        raise ScanBundleError(f"{f['id']}: hinge must be 'left' or 'right', got {hinge!r}")
+    return 1 if hinge == "left" else -1
+
+
 def fridge_door_frame(f: dict) -> dict:
-    """The fridge door in the fixture's frame: hinge xy (left edge, just behind the front), the panel's length
-    along local +x when closed, the handle in the door's frame, and the front face's local y. people.py drives
-    the door from these numbers, so they live in one place."""
+    """The fridge door in the fixture's frame: `side` (hinge_side), the hinge xy (on that edge, just behind the
+    front), the panel's length, the handle as (along the panel from the hinge, out of its front face, height),
+    and the front face's local y. q > 0 swings the free edge out from the front: counter-clockwise from above for
+    a left hinge, clockwise for a right one. people.py drives the door from these numbers, so they live in one place."""
     sx, sy, h = f["size"]
-    return {"hinge": (-sx / 2, sy / 2 - 0.03), "length": sx, "handle": (sx - 0.07, 0.09, h * 0.57), "front": sy / 2}
+    side = hinge_side(f)
+    return {"side": side, "hinge": (-side * sx / 2, sy / 2 - 0.03), "length": sx, "handle": (sx - 0.07, 0.09, h * 0.57),
+            "front": sy / 2}
 
 
 def fridge_xml(f: dict) -> str:
+    """Bottom-freezer fridge: carcass, a fixed freezer front with a bar, and the door on the hinge fridge_door_frame
+    names. A right-hinged door is the left one mirrored: every x in the door body changes sign and the axis flips."""
     (cx, cy, _), (sx, sy, h) = f["position"], f["size"]
     fid, yaw = f["id"], f.get("yaw", 0.0)
-    yd = fridge_door_frame(f)["hinge"][1]
+    g = fridge_door_frame(f)
+    s, yd = g["side"], g["hinge"][1]
     zf = h * 0.25 - 0.006
     fx = sx / 2 - 0.005
     zb = zf - 0.05
-    hx, hy, hz = fridge_door_frame(f)["handle"]
+    hx, hy, hz = g["handle"]
+    hx *= s
     vis = (_vr(-fx, fx, yd, sy / 2 + 0.02, 0.02, zf, "0.9 0.9 0.92 1")
            + "".join(_vcyl(STEEL, 0.005, (x, sy / 2 + 0.019, zb), (x, sy / 2 + 0.06, zb)) for x in (-0.22, 0.22))
            + _vcyl(STEEL, 0.012, (-0.26, sy / 2 + 0.06, zb), (0.26, sy / 2 + 0.06, zb), "capsule")
            + _vr(-sx / 2 + 0.01, sx / 2 - 0.01, sy / 2 - 0.06, yd - 0.002, 0.01, h - 0.01, DARK))
     return (f'<body name="{fid}" pos="{cx} {cy} 0" euler="0 0 {yaw}">'
             + _box(f"{fid}_box", (0, -0.03, h / 2), (sx, sy - 0.06, h), "0.85 0.86 0.88 1") + vis
-            + f'<body name="{fid}_door" pos="{-sx / 2:.3f} {yd:.3f} 0">'
-              f'<joint name="{fid}_door" type="hinge" axis="0 0 1" range="0 2.0" damping="3" frictionloss="0.3"/>'
-              f'<inertial pos="{sx / 2:.3f} 0.02 {h * 0.6:.3f}" mass="4" diaginertia="0.3 0.3 0.3"/>'
-            + _box(f"{fid}_door_panel", (sx / 2, 0.025, h * 0.62), (sx - 0.01, 0.05, h * 0.74), "0.9 0.9 0.92 1", DRAWER)
-            + _box(f"{fid}_freezer_panel", (sx / 2, 0.025, h * 0.12), (sx - 0.01, 0.05, h * 0.22), "0.9 0.9 0.92 1",
+            + f'<body name="{fid}_door" pos="{-s * sx / 2:.3f} {yd:.3f} 0">'
+              f'<joint name="{fid}_door" type="hinge" axis="0 0 {s}" range="0 2.0" damping="3" frictionloss="0.3"/>'
+              f'<inertial pos="{s * sx / 2:.3f} 0.02 {h * 0.6:.3f}" mass="4" diaginertia="0.3 0.3 0.3"/>'
+            + _box(f"{fid}_door_panel", (s * sx / 2, 0.025, h * 0.62), (sx - 0.01, 0.05, h * 0.74), "0.9 0.9 0.92 1",
+                   DRAWER)
+            + _box(f"{fid}_freezer_panel", (s * sx / 2, 0.025, h * 0.12), (sx - 0.01, 0.05, h * 0.22), "0.9 0.9 0.92 1",
                    f'{DRAWER} group="3"')
             + f'<geom name="{fid}_door_handle" type="capsule" size="0.015" fromto="{hx:.3f} {hy} {h * 0.45:.3f} '
               f'{hx:.3f} {hy} {h * 0.7:.3f}" rgba="{STEEL}" {DRAWER}/>'

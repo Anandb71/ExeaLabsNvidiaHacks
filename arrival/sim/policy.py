@@ -219,20 +219,31 @@ class ScriptedExpert(Policy):
             out.append((out[-1][0] + 0.15 * up, out[-1][1], o, s))
             return out
         if fam == "open_fridge":
-            # The door is hinged at the fixture's left and swings out into the room. From this base the arm can
-            # follow the bar's arc only to about 40 deg, so the plan has two parts: the fingers close round the
-            # vertical bar from beyond the free edge and pull to 40 deg, then slide off the bar's free side, round
-            # the free edge to the inside face and push the door on with the closed fingertips.
+            # The door swings out into the room. From this base the arm can follow the bar's arc only to about
+            # 40 deg, so the plan has two parts: the fingers close round the vertical bar from beyond the free edge
+            # and pull to 40 deg, then slide off the bar's free side, round the free edge to the inside face and push
+            # the door on with the closed fingertips. Angles are the door's own, 0 shut, in the frame of the shut
+            # panel, so a door hinged on the fixture's right (clockwise from above) gets the mirror image of the plan
+            # for the usual left hinge, and the fixture may face any wall.
             hinge, h, _ = env.door_geometry(task)
+            n0 = env.pull_axis(task)  # outward normal of the shut panel
+            x0 = np.array([n0[1], -n0[0], 0.0])  # the fixture's local +x
+            side = np.sign(np.dot(h - hinge, x0))  # 1: the bar is on +x of the hinge (a left hinge), -1: mirrored
+            e0 = side * x0  # along the shut panel from the hinge toward the free edge
             r = np.linalg.norm((h - hinge)[:2])
-            a0 = np.arctan2(*(h - hinge)[[1, 0]])
+            a0 = np.arctan2(np.dot(h - hinge, n0), np.dot(h - hinge, e0))
             s, up = self.seg_steps, np.array([0, 0, 1.0])
+            # The mirror image of a roll is the opposite roll. With it every hand frame is the arm's own mirror image
+            # (joints 1, 3, 5 negated, joint 7 at pi/2 minus its angle); that would put joint 7 at 3.13 rad, past its
+            # 2.90 stop, but the half-turned grasp reset() also plans stays inside its range and keeps the mirrored
+            # roll through the edge: rolling the other way there knocks the door shut.
+            roll = FRIDGE_PUSH_ROLL if side > 0 else FRIDGE_PUSH_ROLL.T
 
             def along(a):  # from the hinge toward the free edge at door angle a
-                return np.array([np.cos(a), np.sin(a), 0.0])
+                return np.cos(a) * e0 + np.sin(a) * n0
 
-            def nrm(a):  # outward normal of the panel (the door swings counter-clockwise from above)
-                return np.array([-np.sin(a), np.cos(a), 0.0])
+            def nrm(a):  # outward normal of the panel at door angle a (the free edge swings out along n0)
+                return np.cos(a) * n0 - np.sin(a) * e0
 
             def pt(a):
                 return hinge + (r + FRIDGE_HOOK_ALONG) * along(a) + FRIDGE_HOOK_OUT * nrm(a) + (h[2] - hinge[2]) * up
@@ -244,7 +255,7 @@ class ScriptedExpert(Policy):
                 return hinge + FRIDGE_PUSH_AT * along(q) - FRIDGE_PUSH_GAP * nrm(q) + (h[2] - hinge[2]) * up
 
             def pori(q):
-                return ik.facing(nrm(q)[:2]) @ FRIDGE_PUSH_ROLL
+                return ik.facing(nrm(q)[:2]) @ roll
 
             d0, g = along(a0), pt(a0)
             out = [(g + 0.25 * d0 + 0.15 * up, ori(a0), o, s), (g + 0.25 * d0, ori(a0), o, s),
