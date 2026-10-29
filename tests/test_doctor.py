@@ -1,14 +1,26 @@
 """arrival doctor: offline environment checks before a run."""
 
 import json
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 from arrival import cli, doctor
-import sys
-from arrival.doctor import Check, _gl_hint, check_core, check_disk, check_env, check_ffmpeg, check_mujoco, check_python, check_rendering, exit_code, render, render_json, run_checks
+from arrival.doctor import (
+    Check,
+    _gl_hint,
+    check_core,
+    check_disk,
+    check_env,
+    check_ffmpeg,
+    check_mujoco,
+    check_python,
+    check_rendering,
+    exit_code,
+    render,
+    render_json,
+    run_checks,
+)
 
 
 def test_check_python():

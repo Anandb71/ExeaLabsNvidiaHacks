@@ -10,9 +10,15 @@ Referenced paths come from index.html (src, href, importmap), css/*.css (url(...
 specifiers, new URL('...', import.meta.url), and fetched data paths), plus the files the data README promises
 (6 episodes, 24 previews). Standard library only.
 """
-import argparse, re, sys, urllib.request, urllib.error
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 
 SITE = Path(__file__).resolve().parent.parent / "site"
 FAMILIES = ["counter_to_sink", "open_drawer", "open_door", "open_fridge", "put_in_drawer", "wipe_counter"]
@@ -97,7 +103,8 @@ def main():
         try:
             rel = p.relative_to(SITE.resolve()).as_posix()
         except ValueError:
-            bad.append((src, str(p), "escapes site/")); continue
+            bad.append((src, str(p), "escapes site/"))
+            continue
         if a.offline:
             if not p.is_file():
                 bad.append((src, rel, "missing on disk"))
