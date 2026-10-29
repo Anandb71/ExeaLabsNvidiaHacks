@@ -10,13 +10,13 @@ import pytest
 
 mujoco = pytest.importorskip("mujoco")
 
+from conftest import REPO, SCANS  # noqa: E402
+
 from arrival.cli import run_demo  # noqa: E402
 from arrival.export.loader_check import check_loader, format_report  # noqa: E402
 from arrival.scan.bundle import load_room  # noqa: E402
 from arrival.sim.collect import collect  # noqa: E402
 from arrival.twin.compile import compile_twin  # noqa: E402
-
-from conftest import REPO, SCANS  # noqa: E402
 
 sys.path.insert(0, str(REPO / "scripts"))
 from check_dataset_loader import main as check_main  # noqa: E402
@@ -88,8 +88,9 @@ def test_nan_action(copy):
     t = pq.read_table(p)
     a = np.asarray(t.column("action").to_pylist(), dtype=np.float32)
     a[3, 2] = np.nan
-    t = t.set_column(t.schema.get_field_index("action"), t.schema.field("action"),
-                     pa.array(list(a), type=pa.list_(pa.float32())))
+    t = t.set_column(
+        t.schema.get_field_index("action"), t.schema.field("action"), pa.array(list(a), type=pa.list_(pa.float32()))
+    )
     pq.write_table(t, p)
     assert "nonfinite" in codes(check_loader(copy))
 
@@ -109,6 +110,7 @@ def test_missing_wrist_mp4(copy):
 def test_stats_std_zero_on_moving_dim(copy):
     def zero(d):
         d["action"]["std"][0] = 0.0
+
     edit_json(copy / "meta" / "stats.json", zero)
     assert codes(check_loader(copy)) == {"stats_std_zero"}
 
@@ -116,6 +118,7 @@ def test_stats_std_zero_on_moving_dim(copy):
 def test_stats_mean_mismatch(copy):
     def shift(d):
         d["observation.state"]["mean"][1] += 1.0
+
     edit_json(copy / "meta" / "stats.json", shift)
     assert codes(check_loader(copy)) == {"stats_mismatch"}
 
@@ -140,11 +143,20 @@ def test_cli_exit_codes(sim_ds, copy, capsys):
 
 # ---- the 11-float schema: base x, y, yaw at state/action[8:11] (MAN-3, L13) ----
 
+
 @pytest.fixture(scope="module")
 def mobile_ds(tmp_path_factory):
     twin = compile_twin(load_room("hero_kitchen", "scans"))
-    res = collect(twin, ["counter_to_counter"], 1, tmp_path_factory.mktemp("mobile"), people=0, res=64,
-                  base="mobile", log=lambda *_: None)
+    res = collect(
+        twin,
+        ["counter_to_counter"],
+        1,
+        tmp_path_factory.mktemp("mobile"),
+        people=0,
+        res=64,
+        base="mobile",
+        log=lambda *_: None,
+    )
     assert res["report_data"]["successes"] == 1
     return res["dataset"]
 
@@ -160,8 +172,12 @@ def _set_col(path: Path, col: str, fn):
     t = pq.read_table(path)
     x = np.asarray(t.column(col).to_pylist(), dtype=np.float32)
     fn(x)
-    pq.write_table(t.set_column(t.schema.get_field_index(col), t.schema.field(col),
-                                pa.array(list(x), type=pa.list_(pa.float32()))), path)
+    pq.write_table(
+        t.set_column(
+            t.schema.get_field_index(col), t.schema.field(col), pa.array(list(x), type=pa.list_(pa.float32()))
+        ),
+        path,
+    )
 
 
 def test_fixed_base_dataset_is_11_wide_and_the_parked_base_is_a_warning_not_a_defect(sim_ds):
@@ -200,6 +216,7 @@ def test_a_teleporting_base_is_an_error(mcopy):
 def test_base_slice_must_be_8_to_11(mcopy):
     def shrink(d):
         d["action"]["base"]["end"] = 10
+
     edit_json(mcopy / "meta" / "modality.json", shrink)
     assert "base_slice" in codes(check_loader(mcopy))
 
@@ -208,6 +225,7 @@ def test_embodiment_with_a_base_needs_the_slice(mcopy):
     def drop(d):
         d["state"].pop("base")
         d["action"].pop("base")
+
     edit_json(mcopy / "meta" / "modality.json", drop)
     assert "base_slice" in codes(check_loader(mcopy))  # dof_base 3 in embodiment.json, no base slice in modality.json
 
@@ -221,5 +239,7 @@ def test_episode_stats_wrong_shape_is_reported(copy, shape):
     path.write_text("".join(json.dumps(row) + "\n" for row in rows))
     res = check_loader(copy)
     assert not res["ok"]
-    assert any(e["code"] == "stats_mismatch" and "episodes_stats.jsonl episode 0 action.mean" in e["msg"]
-               for e in res["errors"])
+    assert any(
+        e["code"] == "stats_mismatch" and "episodes_stats.jsonl episode 0 action.mean" in e["msg"]
+        for e in res["errors"]
+    )

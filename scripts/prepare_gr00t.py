@@ -50,12 +50,29 @@ def prepare(dataset: str | Path, gr00t_root: str | Path, output: str | Path, ste
     if "human.task_description" not in modality.get("annotation", {}):
         raise ValueError("modality.json lacks the human.task_description language annotation")
     if embodiment.get("control") != "absolute_joint_position" or any(
-            modality["action"][key].get("absolute") is not True for key in keys):
+        modality["action"][key].get("absolute") is not True for key in keys
+    ):
         raise ValueError("GR00T config expects absolute joint, gripper and base targets in the dataset")
-    return ["python", "gr00t/experiment/launch_finetune.py", "--base-model-path", "nvidia/GR00T-N1.7-3B",
-            "--dataset-path", str(dataset), "--embodiment-tag", "NEW_EMBODIMENT",
-            "--modality-config-path", str(config), "--num-gpus", "1", "--output-dir", str(output),
-            "--max-steps", str(steps), "--global-batch-size", "8"]
+    return [
+        "python",
+        "gr00t/experiment/launch_finetune.py",
+        "--base-model-path",
+        "nvidia/GR00T-N1.7-3B",
+        "--dataset-path",
+        str(dataset),
+        "--embodiment-tag",
+        "NEW_EMBODIMENT",
+        "--modality-config-path",
+        str(config),
+        "--num-gpus",
+        "1",
+        "--output-dir",
+        str(output),
+        "--max-steps",
+        str(steps),
+        "--global-batch-size",
+        "8",
+    ]
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -6,12 +6,11 @@ import zlib
 from pathlib import Path
 
 import pytest
+from conftest import SCANS
 
 from arrival.scan import bundle, roomplan
 from arrival.scan.four_photo import bundle_from_photos
 from arrival.twin.compile import compile_twin
-
-from conftest import SCANS
 
 
 def test_sink_coordinate_conversion():
@@ -62,10 +61,16 @@ def test_rejects_bad_bundle(tmp_path, hero_bundle, key, value):
 
 def _tiny_png(path):
     raw = b"\x00\xff\x00\x00"
+
     def chunk(t, d):
         return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d))
-    path.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
-                     + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+
+    path.write_bytes(
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(raw))
+        + chunk(b"IEND", b"")
+    )
     return path
 
 
@@ -114,13 +119,32 @@ def test_roomplan_fixture_normalizes_and_compiles(path):
 
 def test_keyed_enum_camelcase_and_low_confidence():
     eye = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, -1.0, -1, 1]
-    rp = {"floors": [{"transform": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, -1.5, 0, 1]}],
-          "walls": [{"identifier": "w", "dimensions": [4, 2.5, 0], "transform":
-                     [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 2, -0.25, 0, 1]}],
-          "objects": [{"identifier": "a", "category": {"washerDryer": {}}, "confidence": {"high": {}},
-                       "dimensions": [0.6, 0.9, 0.6], "transform": eye},
-                      {"identifier": "b", "category": {"sink": {}}, "confidence": {"low": {}},
-                       "dimensions": [0.6, 0.2, 0.5], "transform": eye}]}
+    rp = {
+        "floors": [{"transform": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, -1.5, 0, 1]}],
+        "walls": [
+            {
+                "identifier": "w",
+                "dimensions": [4, 2.5, 0],
+                "transform": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 2, -0.25, 0, 1],
+            }
+        ],
+        "objects": [
+            {
+                "identifier": "a",
+                "category": {"washerDryer": {}},
+                "confidence": {"high": {}},
+                "dimensions": [0.6, 0.9, 0.6],
+                "transform": eye,
+            },
+            {
+                "identifier": "b",
+                "category": {"sink": {}},
+                "confidence": {"low": {}},
+                "dimensions": [0.6, 0.2, 0.5],
+                "transform": eye,
+            },
+        ],
+    }
     b = roomplan.to_bundle(rp, "r")
     assert [f["category"] for f in b["fixtures"]] == ["washer_dryer"]
     assert b["fixtures"][0]["position"][2] == pytest.approx(0.5)
@@ -141,7 +165,7 @@ def _overlap(a, b, tol=1e-6):
 def test_hero_fixtures_tile_without_overlap(hero_bundle):
     fx = {f["id"]: f for f in hero_bundle["fixtures"]}
     sink = fx.pop("sink_1")  # the sink is inset into counter_a by design
-    pairs = [(a, b) for i, a in enumerate(fx.values()) for b in list(fx.values())[i + 1:]]
+    pairs = [(a, b) for i, a in enumerate(fx.values()) for b in list(fx.values())[i + 1 :]]
     clashes = [(a["id"], b["id"]) for a, b in pairs if _overlap(a, b)]
     assert not clashes, clashes
     cx0, cx1, _, _ = _footprint(fx["counter_a"])
@@ -158,8 +182,11 @@ def test_hero_objects_rest_on_a_counter_outside_appliances(hero_bundle):
     appliances = [f for f in fixtures if f["category"] in ("refrigerator", "stove")]
     for o in hero_bundle["objects"]:
         x0, x1, y0, y1 = _footprint(o)
-        inside = [c for c in counters if _footprint(c)[0] <= x0 and x1 <= _footprint(c)[1]
-                  and _footprint(c)[2] <= y0 and y1 <= _footprint(c)[3]]
+        inside = [
+            c
+            for c in counters
+            if _footprint(c)[0] <= x0 and x1 <= _footprint(c)[1] and _footprint(c)[2] <= y0 and y1 <= _footprint(c)[3]
+        ]
         assert inside, (o["id"], "not fully on a counter top")
         assert not [a for a in appliances if _overlap(o, a)], (o["id"], "inside an appliance")
 
@@ -183,8 +210,23 @@ def test_four_photo_rerun_clears_stale_and_rejects_bad_room_id(tmp_path):
 
 def test_select_story_ignores_low_confidence_objects():
     def obj(i, story, conf):
-        return {"identifier": i, "story": story, "confidence": conf, "category": {"table": {}},
-                "transform": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], "dimensions": [1, 1, 1]}
-    rp = {"walls": [], "objects": [obj("a", 0, "high"), obj("b", 0, "high"),
-                                   obj("c", 1, "low"), obj("d", 1, "low"), obj("e", 1, "low")]}
+        return {
+            "identifier": i,
+            "story": story,
+            "confidence": conf,
+            "category": {"table": {}},
+            "transform": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+            "dimensions": [1, 1, 1],
+        }
+
+    rp = {
+        "walls": [],
+        "objects": [
+            obj("a", 0, "high"),
+            obj("b", 0, "high"),
+            obj("c", 1, "low"),
+            obj("d", 1, "low"),
+            obj("e", 1, "low"),
+        ],
+    }
     assert roomplan._select_story(rp, None)[1] == 0

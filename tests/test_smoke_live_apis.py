@@ -27,10 +27,17 @@ def test_no_key_is_exit_2_and_writes_nothing(tmp_path, monkeypatch, capsys):
 
 def test_report_records_each_call_and_never_the_key(tmp_path, monkeypatch):
     secret = "tf-secret-value-123"
-    _env(monkeypatch, tmp_path, TOKEN_FACTORY_API_KEY=secret, NEMOTRON_SUPER_MODEL="nvidia/super",
-         NEMOTRON_LIGHTNING_MODEL="nvidia/lightning")
-    replies = {"super": '{"family": "counter_to_sink", "object": "mug_1", "target": "sink_1"}',
-               "lightning": '["Put the mug in the sink.", "Move the mug to the sink.", "Sink the mug.", "Mug to sink."]'}
+    _env(
+        monkeypatch,
+        tmp_path,
+        TOKEN_FACTORY_API_KEY=secret,
+        NEMOTRON_SUPER_MODEL="nvidia/super",
+        NEMOTRON_LIGHTNING_MODEL="nvidia/lightning",
+    )
+    replies = {
+        "super": '{"family": "counter_to_sink", "object": "mug_1", "target": "sink_1"}',
+        "lightning": '["Put the mug in the sink.", "Move the mug to the sink.", "Sink the mug.", "Mug to sink."]',
+    }
     monkeypatch.setattr("arrival.models.token_factory.complete", lambda messages, role="super", **k: replies[role])
     out = tmp_path / "r.json"
     assert smoke.main(["--out", str(out)]) == 0
@@ -74,8 +81,9 @@ def test_a_failed_wordings_call_says_why(tmp_path, monkeypatch, capsys):
     monkeypatch.delenv("NEMOTRON_LIGHTNING_MODEL", raising=False)
     real = tf.complete
     plan = '{"family": "counter_to_sink", "object": "mug_1", "target": "sink_1"}'
-    monkeypatch.setattr(tf, "complete", lambda messages, role="super", **k: plan if role == "super"
-                        else real(messages, role=role, **k))
+    monkeypatch.setattr(
+        tf, "complete", lambda messages, role="super", **k: plan if role == "super" else real(messages, role=role, **k)
+    )
     out = tmp_path / "r.json"
     assert smoke.main(["--out", str(out)]) == 1
     wordings = json.loads(out.read_text())["checks"]["token_factory_wordings"]
@@ -85,8 +93,14 @@ def test_a_failed_wordings_call_says_why(tmp_path, monkeypatch, capsys):
 
 
 def test_detect_check_places_the_fixture_mug_and_only_runs_what_is_asked(tmp_path, monkeypatch):
-    _env(monkeypatch, tmp_path, TOKEN_FACTORY_API_KEY="k", NEMOTRON_SUPER_MODEL="m", NEMOTRON_LIGHTNING_MODEL="m",
-         NEMOTRON_OMNI_MODEL="nvidia/vl")
+    _env(
+        monkeypatch,
+        tmp_path,
+        TOKEN_FACTORY_API_KEY="k",
+        NEMOTRON_SUPER_MODEL="m",
+        NEMOTRON_LIGHTNING_MODEL="m",
+        NEMOTRON_OMNI_MODEL="nvidia/vl",
+    )
     calls = []
 
     def reply(messages, role="super", **k):  # the same box in every frame: the empty room must still place nothing

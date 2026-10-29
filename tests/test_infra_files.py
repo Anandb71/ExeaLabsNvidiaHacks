@@ -89,7 +89,9 @@ def _docker_up():
     if shutil.which("docker") is None:
         return False
     try:
-        probe = subprocess.run(["docker", "info", "--format", "{{.OSType}}"], capture_output=True, text=True, timeout=15)
+        probe = subprocess.run(
+            ["docker", "info", "--format", "{{.OSType}}"], capture_output=True, text=True, timeout=15
+        )
     except subprocess.TimeoutExpired:
         return False
     return probe.returncode == 0 and probe.stdout.strip() == "linux"
@@ -99,12 +101,17 @@ def _docker_up():
 def test_docker_image_builds_and_runs():
     b = subprocess.run(["docker", "build", "-q", "-t", "arrival-test", "."], cwd=ROOT, capture_output=True, text=True)
     assert b.returncode == 0, b.stderr
-    r = subprocess.run(["docker", "run", "--rm", "arrival-test", "python", "-m", "arrival", "validate", "--help"],
-                       capture_output=True, text=True)
+    r = subprocess.run(
+        ["docker", "run", "--rm", "arrival-test", "python", "-m", "arrival", "validate", "--help"],
+        capture_output=True,
+        text=True,
+    )
     assert r.returncode == 0, r.stderr
 
 
-@pytest.mark.parametrize("script", ["fetch_menagerie", "make_demo_video", "make_detection_fixture", "render_contributors"])
+@pytest.mark.parametrize(
+    "script", ["fetch_menagerie", "make_demo_video", "make_detection_fixture", "render_contributors"]
+)
 def test_generator_scripts_answer_help_instead_of_running(script):
     """These take no options and rewrite tracked files (docs/media, test fixtures, README) or clone 34 MB when run."""
     if script in ("make_demo_video", "make_detection_fixture"):

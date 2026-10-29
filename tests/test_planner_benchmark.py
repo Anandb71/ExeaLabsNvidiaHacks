@@ -1,11 +1,11 @@
 """scripts/planner_benchmark.py offline: complete() is stubbed, so the scoring, the rejected-reply accounting and the
 v1 report keys are checked with no network and no key."""
+
 import importlib.util
 import json
 import urllib.error
 
 import pytest
-
 from conftest import REPO
 
 from arrival.sim.tasks import SIM_FAMILIES
@@ -17,19 +17,76 @@ _spec.loader.exec_module(bench)
 V1 = json.loads((REPO / "docs" / "results" / "planner-benchmark-2026-10-26.json").read_text(encoding="utf-8"))
 SECRET = "tf-secret-value-123"
 # a family's verb, fixture or object; an out_of_scope request that names one would blur the false-positive count
-FAMILY_WORDS = ("fridge", "freezer", "wipe", "scrub", "clean", "drawer", "door", "sink", "close", "shut", "push",
-                "pull", "open", "oven", "stove", "dish", "faucet", "tap", "water", "table", "counter", "cabinet",
-                "cupboard", "move", "put", "place", "load", "slide", "shift", "carry", "lower", "mug", "bowl", "sponge",
-                "plate", "cup", "apple", "laptop", "book", "chair")
-REJECT = {"There are crumbs everywhere, clean up the counter.":  # the rule parser gets this one right
-          '{"family": "wipe_counter", "object": null, "target": "counter_z"}',
-          "Let me check if we're out of milk.": "I would open the fridge."}
-BLIND = [{"text": "Could you get the fridge open?", "inventory": "hero_kitchen", "family": "open_fridge",
-          "object": None, "author": "A"},
-         {"text": "Nudge the book along the table.", "inventory": "office", "family": "move_on_table",
-          "object": "book_1", "author": "B"},
-         {"text": "Slide the laptop over on the table.", "inventory": "office", "family": "move_on_table",
-          "object": "laptop_1", "author": "B"}]
+FAMILY_WORDS = (
+    "fridge",
+    "freezer",
+    "wipe",
+    "scrub",
+    "clean",
+    "drawer",
+    "door",
+    "sink",
+    "close",
+    "shut",
+    "push",
+    "pull",
+    "open",
+    "oven",
+    "stove",
+    "dish",
+    "faucet",
+    "tap",
+    "water",
+    "table",
+    "counter",
+    "cabinet",
+    "cupboard",
+    "move",
+    "put",
+    "place",
+    "load",
+    "slide",
+    "shift",
+    "carry",
+    "lower",
+    "mug",
+    "bowl",
+    "sponge",
+    "plate",
+    "cup",
+    "apple",
+    "laptop",
+    "book",
+    "chair",
+)
+REJECT = {
+    "There are crumbs everywhere, clean up the counter.":  # the rule parser gets this one right
+    '{"family": "wipe_counter", "object": null, "target": "counter_z"}',
+    "Let me check if we're out of milk.": "I would open the fridge.",
+}
+BLIND = [
+    {
+        "text": "Could you get the fridge open?",
+        "inventory": "hero_kitchen",
+        "family": "open_fridge",
+        "object": None,
+        "author": "A",
+    },
+    {
+        "text": "Nudge the book along the table.",
+        "inventory": "office",
+        "family": "move_on_table",
+        "object": "book_1",
+        "author": "B",
+    },
+    {
+        "text": "Slide the laptop over on the table.",
+        "inventory": "office",
+        "family": "move_on_table",
+        "object": "laptop_1",
+        "author": "B",
+    },
+]
 
 
 def _env(monkeypatch):
@@ -72,8 +129,11 @@ def test_scores_rejections_and_keeps_v1_keys(tmp_path, monkeypatch):
     rep = json.loads(text)
     # no key, no header: of the call only the model id, the temperature and the base URL
     assert SECRET not in text and "Bearer" not in text and "Authorization" not in text
-    assert rep["planner_params"] == {"model": "nvidia/super", "temperature": 0,
-                                     "base_url": "https://api.tokenfactory.nebius.com/v1"}
+    assert rep["planner_params"] == {
+        "model": "nvidia/super",
+        "temperature": 0,
+        "base_url": "https://api.tokenfactory.nebius.com/v1",
+    }
 
     assert rep["version"] == 2 and set(V1) <= set(rep)
     assert rep["objects"] == V1["objects"] and rep["fixtures"] == V1["fixtures"]
@@ -218,13 +278,16 @@ def test_429_and_5xx_are_retried_three_times_and_nothing_else(tmp_path, monkeypa
     assert SECRET not in out.read_text()
 
 
-@pytest.mark.parametrize("err, kind", [(TimeoutError("timed out"), "timeout"),
-                                       (urllib.error.URLError(TimeoutError("timed out")),
-                                        "timeout"),
-                                       (urllib.error.HTTPError("u", 403, "Forbidden", {}, None),
-                                        "http_403"),
-                                       (TypeError("x"), "other"),
-                                       (ValueError("x"), "other")])
+@pytest.mark.parametrize(
+    "err, kind",
+    [
+        (TimeoutError("timed out"), "timeout"),
+        (urllib.error.URLError(TimeoutError("timed out")), "timeout"),
+        (urllib.error.HTTPError("u", 403, "Forbidden", {}, None), "http_403"),
+        (TypeError("x"), "other"),
+        (ValueError("x"), "other"),
+    ],
+)
 def test_call_error_kind(err, kind):
     assert bench.call_error_kind(err) == kind
 

@@ -1,10 +1,8 @@
-"""Where the base stands for a task, and a pre-flight on that spot, before any scene model is built.
+"""Where the base stands for a task, before any scene model is built, and whether that spot is clear.
 
 `base_pose` is the one place the stand rule lives (SimEnv uses it too), written in the fixture's own frame so it holds
-on any wall. `check_task` then rejects a task whose stand spot is outside the room, too close to a wall or a fixture,
-or from which the arm cannot reach the expert's waypoints: an IK solve on an arm-only model (`arrival.sim.reach`),
-joint limits included, collisions not. A task that passes can still miss in physics (that is counted as a dropped
-attempt, not a skip), but a layout the base cannot stand in or reach from never costs sim time or a traceback.
+on any wall. `stand_problem` says why a spot is unusable: outside the room, too close to a wall or a fixture, or in
+the way of an open door or drawer. `arrival.sim.reach.check_task` combines it with the arm's IK reach check.
 """
 
 from __future__ import annotations
@@ -13,7 +11,15 @@ import math
 
 import numpy as np
 
-from arrival.sim.scene import DRAWER_W, door_hinge_x, door_w, drawer_x, front_stand
+from arrival.sim.geometry import (
+    DRAWER_W,
+    door_hinge_x,
+    door_w,
+    drawer_x,
+    fridge_mirror,
+    front_stand,
+    point_segment_distance,
+)
 from arrival.twin.compile import is_counter_host, to_local, to_world
 
 BASE_CLEAR = 0.15  # the base column is 0.12 m in radius
@@ -28,6 +34,7 @@ OPEN_DOOR_WALL_OUT = 0.12  # open_door: the base stands this much further out wh
 # in: 22 steps, 0.9 mm; 15 steps at 0.06 out). In fuzzed rooms no door that opened from a run flush with a wall
 # grazed it, and there the further spot cost one door its last few degrees (1.067 to 1.024 rad)
 OPEN_DOOR_INSIDE, OPEN_DOOR_ROOM = 0.005, 0.06
+DOOR_OPEN = np.radians(70)  # start state for close_door; open_door counts > 60 deg as open
 DRAWER_OPEN_PUT = 0.14  # start state for put_in_drawer: wide enough for a mug on the exposed tray, and the base
 # can then park straight in front without the pulled-out front reaching its column
 FRIDGE_BASE_ALONG = 0.1  # base centre past the door's free edge, along the front
@@ -40,7 +47,9 @@ FAUCET_STANDOFF = 0.34  # base column to counter front for turn_on_faucet (0.28 
 # of the counter above shoulder height, and a horizontal hand reaches it with less joint strain from further out
 ARM_STANDOFF_TRIM = {"procedural": 0.0, "menagerie": 0.02}  # the real hand's closed fingertips reach 8 mm past the eef,
 # the procedural fingers 23 mm: the faucet push stands 2 cm closer with it (0.34 misses the lever, 0.32 turns it to 1.10 rad)
-DISHWASHER_SIDE = 0.55  # load/unload_dishwasher: the base parks this far beside the dishwasher centre, clear of its door
+DISHWASHER_SIDE = (
+    0.55  # load/unload_dishwasher: the base parks this far beside the dishwasher centre, clear of its door
+)
 RACK_FRONT = 0.15  # the rack spot an object is set into (or taken from) lies this far out from the dishwasher front
 FLAP_DOOR_BELOW = {"open_oven": 0.24, "open_dishwasher": 0.18}  # fixture height minus the door's height, per family
 PICK_PLACE = ("counter_to_sink", "counter_to_counter")
@@ -74,8 +83,11 @@ def top(f: dict) -> float:
 def park(c: dict, along: float, out: float) -> tuple[float, float, float]:
     """Base centre `along` the fixture's run (its local x) and `out` beyond its front face."""
     yaw, d = c.get("yaw", 0.0), c["size"][1] / 2 + out
-    return (c["position"][0] + np.cos(yaw) * along - np.sin(yaw) * d,
-            c["position"][1] + np.sin(yaw) * along + np.cos(yaw) * d, 0.75)
+    return (
+        c["position"][0] + np.cos(yaw) * along - np.sin(yaw) * d,
+        c["position"][1] + np.sin(yaw) * along + np.cos(yaw) * d,
+        0.75,
+    )
 
 
 def place_point(twin: dict, task: dict) -> np.ndarray:
@@ -120,8 +132,9 @@ def rack_spot(d: dict) -> tuple[float, float]:
     return float(d["position"][0] + n[0] * out), float(d["position"][1] + n[1] * out)
 
 
-def base_pose(twin: dict, task: dict, obj_xy=None, mobile: bool = False, arm: str = "procedural"
-              ) -> tuple[tuple[float, float, float], float, dict]:
+def base_pose(
+    twin: dict, task: dict, obj_xy=None, mobile: bool = False, arm: str = "procedural"
+) -> tuple[tuple[float, float, float], float, dict]:
     """(base position, base yaw in degrees, anchor fixture): in front of the fixture the task works at, facing it,
     on any wall. `obj_xy` is the object's xy at the start (the task's `start` when omitted). `mobile` moves the
     counter_to_counter stand spot MOBILE_STEP toward the target instead of midway: the base drives the rest.
@@ -136,7 +149,7 @@ def base_pose(twin: dict, task: dict, obj_xy=None, mobile: bool = False, arm: st
         if hinge_gap < -OPEN_DOOR_INSIDE and handle_gap < OPEN_DOOR_ROOM:
             n = front(src)
             out = (base[0] + n[0] * OPEN_DOOR_WALL_OUT, base[1] + n[1] * OPEN_DOOR_WALL_OUT, base[2])
-            if _stand_problem(twin, np.array(out[:2]), src, task=task) is None:
+            if stand_problem(twin, np.array(out[:2]), src, task=task) is None:
                 base = out
     if task.get("base_shift"):
         along, out = task["base_shift"]
@@ -147,7 +160,9 @@ def base_pose(twin: dict, task: dict, obj_xy=None, mobile: bool = False, arm: st
     return base, yaw, src
 
 
-def _stand_rule(twin: dict, task: dict, obj_xy, mobile: bool, arm: str) -> tuple[tuple[float, float, float], float, dict]:
+def _stand_rule(
+    twin: dict, task: dict, obj_xy, mobile: bool, arm: str
+) -> tuple[tuple[float, float, float], float, dict]:
     fx = {f["id"]: f for f in twin["fixtures"]}
     fam, fixtures = task["family"], twin["fixtures"]
     if obj_xy is None and "object_id" in task:
@@ -186,7 +201,7 @@ def _stand_rule(twin: dict, task: dict, obj_xy, mobile: bool, arm: str) -> tuple
         src = fx[task["fixture"]]
         out = src["size"][2] - FLAP_DOOR_BELOW[fam] + 0.12 + FLAP_MARGIN
         spots = [park(src, a, out) for a in ((OVEN_ALONG, -OVEN_ALONG, 0.0) if fam == "open_oven" else (0.0,))]
-        base = next((b for b in spots if _stand_problem(twin, np.array(b[:2]), src, task=task) is None), spots[-1])
+        base = next((b for b in spots if stand_problem(twin, np.array(b[:2]), src, task=task) is None), spots[-1])
     elif fam == "turn_on_faucet":
         # in front of the counter run at the sink, closer than for counter_to_sink: the lever is at the back of the
         # counter, at the edge of what a horizontal hand reaches from the usual parking spot
@@ -202,8 +217,6 @@ def _stand_rule(twin: dict, task: dict, obj_xy, mobile: bool, arm: str) -> tuple
         # beside the door's free edge and out of its swing (the hinge is on the fixture's left edge), facing the
         # front like the cabinet door tasks
         src = fx[task["fixture"]]
-        from arrival.sim.scene import fridge_mirror
-
         m = fridge_mirror(src)  # a right-hinged door's free edge is the fixture's left one
         base = park(src, m * (src["size"][0] / 2 + FRIDGE_BASE_ALONG), FRIDGE_BASE_OUT)
         yaw_off = -m * FRIDGE_BASE_YAW
@@ -214,17 +227,10 @@ def _stand_rule(twin: dict, task: dict, obj_xy, mobile: bool, arm: str) -> tuple
         hinge_gap, handle_gap = _close_door_gaps(twin, src) if fam == "close_door" else (math.inf, math.inf)
         if hinge_gap < CLOSE_DOOR_FLUSH and handle_gap < CLOSE_DOOR_ROOM:
             nearer = park(src, along + CLOSE_DOOR_WALL_ALONG, out)
-            if _stand_problem(twin, np.array(nearer[:2]), src, task=task) is None:
+            if stand_problem(twin, np.array(nearer[:2]), src, task=task) is None:
                 base = nearer
     n = front(src)
     return base, float(np.degrees(np.arctan2(-n[1], -n[0])) + yaw_off), src
-
-
-def _segment_distance(p, a, b) -> float:
-    a, b, p = np.asarray(a, float), np.asarray(b, float), np.asarray(p, float)
-    ab = b - a
-    t = float(np.clip((p - a) @ ab / max(float(ab @ ab), 1e-12), 0.0, 1.0))
-    return float(np.linalg.norm(a + t * ab - p))
 
 
 def _close_door_gaps(twin: dict, c: dict) -> tuple[float, float]:
@@ -232,8 +238,6 @@ def _close_door_gaps(twin: dict, c: dict) -> tuple[float, float]:
     nearest wall face square to the run (within 5 deg; a skewed wall leaves a different gap). The offsets are
     counter_xml's: the hinge on the door's right edge (door_hinge_x) and 1 cm behind the top's edge, the
     handle 6 cm in from the free edge and 5 cm out from the panel, the door turning clockwise from above."""
-    from arrival.sim.collect import DOOR_OPEN
-
     r, a = door_w(c, twin["fixtures"]) - 0.06, DOOR_OPEN
     hx = door_hinge_x(c, twin["fixtures"]) - r * math.cos(a) + 0.05 * math.sin(a)
     hy = c["size"][1] / 2 - 0.01 + r * math.sin(a) + 0.05 * math.cos(a)
@@ -244,10 +248,13 @@ def _close_door_gaps(twin: dict, c: dict) -> tuple[float, float]:
         return abs(dx * n[1] - dy * n[0]) < math.sin(math.radians(5)) * math.hypot(dx, dy)
 
     walls = [w for w in twin.get("walls") or [] if square(w)]
-    return tuple(min((_segment_distance(p, w["start"], w["end"]) - w.get("thickness", 0.0) / 2 for w in walls),
-                     default=math.inf)
-                 for p in (to_world((door_hinge_x(c, twin["fixtures"]) + 0.02, c["size"][1] / 2), c),
-                           to_world((hx, hy), c)))
+    return tuple(
+        min(
+            (point_segment_distance(p, w["start"], w["end"]) - w.get("thickness", 0.0) / 2 for w in walls),
+            default=math.inf,
+        )
+        for p in (to_world((door_hinge_x(c, twin["fixtures"]) + 0.02, c["size"][1] / 2), c), to_world((hx, hy), c))
+    )
 
 
 def _footprint_distance(xy, f: dict) -> float:
@@ -270,10 +277,13 @@ def _door_wall_gaps(twin: dict, c: dict, a: float) -> tuple[float, float]:
         return abs(dx * n[1] - dy * n[0]) < math.sin(math.radians(5)) * math.hypot(dx, dy)
 
     walls = [w for w in twin.get("walls") or [] if square(w)]
-    return tuple(min((_segment_distance(p, w["start"], w["end"]) - w.get("thickness", 0.0) / 2 for w in walls),
-                     default=math.inf)
-                 for p in (to_world((door_hinge_x(c, twin["fixtures"]) + 0.02, c["size"][1] / 2), c),
-                           to_world((hx, hy), c)))
+    return tuple(
+        min(
+            (point_segment_distance(p, w["start"], w["end"]) - w.get("thickness", 0.0) / 2 for w in walls),
+            default=math.inf,
+        )
+        for p in (to_world((door_hinge_x(c, twin["fixtures"]) + 0.02, c["size"][1] / 2), c), to_world((hx, hy), c))
+    )
 
 
 def open_parts(twin: dict, task: dict) -> list[tuple[str, dict, tuple[float, float, float, float]]]:
@@ -290,8 +300,13 @@ def open_parts(twin: dict, task: dict) -> list[tuple[str, dict, tuple[float, flo
         return [(f"{f['id']} door lying open", f, (-sx / 2, sx / 2, sy / 2, sy / 2 + 0.016 + sz - below))]
     if fam in DRAWER_TRAVEL:
         dx = drawer_x(f, twin["fixtures"])
-        return [(f"{f['id']} drawer pulled out", f,
-                 (dx - DRAWER_W / 2, dx + DRAWER_W / 2, sy / 2, sy / 2 + DRAWER_TRAVEL[fam] + DRAWER_HANDLE))]
+        return [
+            (
+                f"{f['id']} drawer pulled out",
+                f,
+                (dx - DRAWER_W / 2, dx + DRAWER_W / 2, sy / 2, sy / 2 + DRAWER_TRAVEL[fam] + DRAWER_HANDLE),
+            )
+        ]
     return []
 
 
@@ -301,7 +316,9 @@ def _part_distance(xy, f: dict, rect) -> float:
     return math.hypot(max(x0 - lx, lx - x1, 0.0), max(y0 - ly, ly - y1, 0.0))
 
 
-def _stand_problem(twin: dict, b, anchor: dict, what: str = "base stand spot", task: dict | None = None) -> str | None:
+def stand_problem(twin: dict, b, anchor: dict, what: str = "base stand spot", task: dict | None = None) -> str | None:
+    """Why the base cannot stand at `b` (one sentence), or None: outside the walls' extent, closer than WALL_CLEAR to a
+    wall, BASE_CLEAR to a fixture footprint, or PART_CLEAR to a door or drawer the task opens."""
     walls = twin.get("walls") or []
     if walls:
         xs = [p[0] for w in walls for p in (w["start"], w["end"])]
@@ -309,7 +326,7 @@ def _stand_problem(twin: dict, b, anchor: dict, what: str = "base stand spot", t
         if not (min(xs) < b[0] < max(xs) and min(ys) < b[1] < max(ys)):
             return f"{what} ({b[0]:.2f}, {b[1]:.2f}) at {anchor['id']} is outside the room"
         for w in walls:
-            d = _segment_distance(b, w["start"], w["end"]) - w.get("thickness", 0.0) / 2
+            d = point_segment_distance(b, w["start"], w["end"]) - w.get("thickness", 0.0) / 2
             if d < WALL_CLEAR:
                 return f"{what} at {anchor['id']} is {max(d, 0.0):.2f} m from {w.get('id', 'a wall')}, needs {WALL_CLEAR:.2f} m"
     for f in twin["fixtures"]:
@@ -320,41 +337,4 @@ def _stand_problem(twin: dict, b, anchor: dict, what: str = "base stand spot", t
         d = _part_distance(b, f, rect)
         if d < PART_CLEAR:
             return f"{what} at {anchor['id']} is {d:.2f} m from the {name}, needs {PART_CLEAR:.2f} m"
-    return None
-
-
-def check_task(twin: dict, task: dict, obj_xy=None, mobile: bool = False, arm: str = "procedural") -> str | None:
-    """None when the base can stand where the task needs it and reach what it needs; otherwise one sentence saying
-    why not. `task` is a pool entry (fixture, or object_id, source and start) or a finished task. On a mobile base
-    a counter_to_counter task is checked at both stand spots and along the straight drive between them. Reach is an
-    IK solve of the expert's waypoints from the stand spot (`arrival.sim.reach`); families whose hand targets come
-    from the built model (doors, drawers, the fridge, flap doors, the faucet) get the stand checks only."""
-    from arrival.sim import reach
-
-    try:
-        base, yaw, anchor = base_pose(twin, task, obj_xy, mobile, arm)
-    except (KeyError, StopIteration, IndexError, TypeError, ValueError) as e:  # a task naming a fixture the twin lacks
-        return f"no stand spot: the task does not match the twin ({type(e).__name__}: {e})"
-    b = np.array(base[:2])
-    why = _stand_problem(twin, b, anchor, task=task)
-    if why:
-        return why
-    wps = reach.waypoints(twin, task, obj_xy, mobile, b)
-    spots = [(b, "the base", [w for w in wps if not w[3]])]
-    if mobile_drive(task, mobile):
-        end = np.array(drive_spot(twin, task)[:2])
-        for k in range(1, 9):  # the drive is one straight line: its whole length must be clear, not just its ends
-            why = _stand_problem(twin, b + (end - b) * k / 8, anchor, "base drive path", task)
-            if why:
-                return why
-        spots.append((end, "the drive spot", [w for w in wps if w[3]]))
-    for xy, name, chain in spots:
-        if not chain:
-            continue
-        m = reach.miss(reach.chain_errors(chain, xy, math.radians(yaw), arm), task["family"])
-        if m:
-            k, at, err, tol = m
-            d = float(np.linalg.norm(chain[k][1][:2] - xy))
-            return (f"{at} ({d:.2f} m out) is beyond the arm's reach from {name} at {anchor['id']}: "
-                    f"the IK solve misses it by {err * 100:.1f} cm (allowed {tol * 100:.1f} cm)")
     return None

@@ -14,13 +14,15 @@ def _unsharded(monkeypatch):
 def test_no_render_covers_shared_fixtures(pytester):
     pytester.makeconftest((REPO / "tests" / "conftest.py").read_text(encoding="utf-8"))
     pytester.makeini("[pytest]\nmarkers = render: needs an OpenGL context\n")
-    pytester.makepyfile(mujoco="""
+    pytester.makepyfile(
+        mujoco="""
         from pathlib import Path
 
         def Renderer():
             Path("renderer-called").touch()
             return "frame"
-    """, test_fixtures="""
+    """,
+        test_fixtures="""
         from pathlib import Path
         import mujoco
         from mujoco import Renderer
@@ -61,7 +63,8 @@ def test_no_render_covers_shared_fixtures(pytester):
 
         def test_without_graphics():
             assert callable(mujoco.Renderer)
-    """)
+    """,
+    )
 
     portable = pytester.runpytest_subprocess("--no-render", "-q", "-p", "no:cacheprovider")
     portable.assert_outcomes(passed=1, skipped=4)
@@ -78,23 +81,27 @@ def test_no_render_covers_shared_fixtures(pytester):
 
 def test_no_render_precedes_plugin_session_fixture(pytester):
     pytester.makeconftest((REPO / "tests" / "conftest.py").read_text(encoding="utf-8"))
-    pytester.makepyfile(mujoco="""
+    pytester.makepyfile(
+        mujoco="""
         from pathlib import Path
 
         def Renderer():
             Path("renderer-called").touch()
             return "frame"
-    """, early_render="""
+    """,
+        early_render="""
         import mujoco
         import pytest
 
         @pytest.fixture(scope="session", autouse=True)
         def plugin_frame():
             return mujoco.Renderer()
-    """, test_plugin="""
+    """,
+        test_plugin="""
         def test_frame(plugin_frame):
             assert plugin_frame == "frame"
-    """)
+    """,
+    )
     portable = pytester.runpytest_subprocess("--no-render", "-p", "early_render", "-q")
     portable.assert_outcomes(skipped=1)
     assert not (pytester.path / "renderer-called").exists()

@@ -13,16 +13,16 @@ import zipfile
 
 import numpy as np
 import pytest
+from conftest import REPO
 from PIL import Image
 
 from arrival.scan import rgbd
 from arrival.web import frames as frames_mod
 from arrival.web.app import make_server
 
-from conftest import REPO
-
-pytestmark = pytest.mark.skipif(platform.system() != "Darwin" or shutil.which("swiftc") is None,
-                                reason="needs swiftc on macOS")
+pytestmark = pytest.mark.skipif(
+    platform.system() != "Darwin" or shutil.which("swiftc") is None, reason="needs swiftc on macOS"
+)
 
 APP = REPO / "ios" / "ArrivalCapture" / "ArrivalCapture"
 SWIFT = [REPO / "ios" / "BundleCheck" / "main.swift", APP / "FrameBundle.swift", APP / "ArrivalAPI.swift"]
@@ -63,17 +63,29 @@ def recorded(bundle_check, tmp_path_factory):
         depth.astype("<f4").tofile(tmp / f"depth{i}.f32")
         conf.tofile(tmp / f"conf{i}.u8")
         to_world = np.linalg.inv(Y_UP_TO_Z_UP) @ T_room  # what ARKit reports: camera to its Y-up world
-        spec.append({"timestamp": 10.0 + i, "rgb_jpeg": str(tmp / f"rgb{i}.jpg"), "rgb_size": [W, H],
-                     "depth_f32": str(tmp / f"depth{i}.f32"), "conf_u8": str(tmp / f"conf{i}.u8"),
-                     "depth_size": [DW, DH], "intrinsics": {"fx": K[0, 0], "fy": K[1, 1], "cx": K[0, 2], "cy": K[1, 2]},
-                     "camera_to_world": to_world.ravel().tolist()})
+        spec.append(
+            {
+                "timestamp": 10.0 + i,
+                "rgb_jpeg": str(tmp / f"rgb{i}.jpg"),
+                "rgb_size": [W, H],
+                "depth_f32": str(tmp / f"depth{i}.f32"),
+                "conf_u8": str(tmp / f"conf{i}.u8"),
+                "depth_size": [DW, DH],
+                "intrinsics": {"fx": K[0, 0], "fy": K[1, 1], "cx": K[0, 2], "cy": K[1, 2]},
+                "camera_to_world": to_world.ravel().tolist(),
+            }
+        )
         inputs.append({"T_room": T_room, "depth": depth, "conf": conf})
     repeat = dict(spec[2], timestamp=spec[2]["timestamp"])  # does not increase: skipped
     bad = dict(spec[3], timestamp=99.0, camera_to_world=["nan"] * 16)  # non-finite pose: skipped
     frames = spec[:3] + [repeat] + spec[3:] + [bad]
     (tmp / "spec.json").write_text(json.dumps({"room_id": "ios_kitchen", "frames": frames}))
-    out = subprocess.run([str(bundle_check), str(tmp / "spec.json"), str(tmp / "bundle"), str(tmp / "frames.zip")],
-                         capture_output=True, text=True, timeout=120)
+    out = subprocess.run(
+        [str(bundle_check), str(tmp / "spec.json"), str(tmp / "bundle"), str(tmp / "frames.zip")],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
     return tmp, out, inputs
 
 
@@ -124,14 +136,22 @@ def test_app_upload_body_with_frames_is_queued(bundle_check, recorded, tmp_path)
     tmp, _, _ = recorded
     boundary = "ArrivalBoundary-3F2504E0-4F89-11D3-9A0C-0305E82C3301"
     scan = REPO / "tests" / "fixtures" / "roomplan" / "office.json"
-    subprocess.run([str(bundle_check), "multipart", boundary, str(scan), str(tmp / "frames.zip"), str(tmp_path / "body")],
-                   check=True, capture_output=True, timeout=60)
+    subprocess.run(
+        [str(bundle_check), "multipart", boundary, str(scan), str(tmp / "frames.zip"), str(tmp_path / "body")],
+        check=True,
+        capture_output=True,
+        timeout=60,
+    )
     srv = make_server(port=0, out_dir=tmp_path / "out", scans_dir=REPO / "scans", rate_limit=0)
     threading.Thread(target=srv.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
     try:
         conn = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=10)
-        conn.request("POST", "/jobs", body=(tmp_path / "body").read_bytes(),
-                     headers={"Content-Type": f"multipart/form-data; boundary={boundary}", "Accept": "application/json"})
+        conn.request(
+            "POST",
+            "/jobs",
+            body=(tmp_path / "body").read_bytes(),
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}", "Accept": "application/json"},
+        )
         resp = conn.getresponse()
         data = json.loads(resp.read())
         conn.close()
@@ -161,8 +181,9 @@ def test_failed_ios_zip_preserves_destination(bundle_check, tmp_path, existing):
     try:
         if os.access(unreadable, os.R_OK):
             pytest.skip("requires file read permission enforcement")
-        result = subprocess.run([str(bundle_check), "zip", str(folder), str(output)],
-                                capture_output=True, text=True, timeout=10)
+        result = subprocess.run(
+            [str(bundle_check), "zip", str(folder), str(output)], capture_output=True, text=True, timeout=10
+        )
         assert result.returncode == 1
         if existing:
             assert output.read_bytes() == previous
@@ -179,47 +200,62 @@ def test_ios_zip_replaces_existing_archive(bundle_check, tmp_path):
     (folder / "frame.txt").write_text("complete frame")
     output = tmp_path / "frames.zip"
     output.write_bytes(b"old archive")
-    subprocess.run([str(bundle_check), "zip", str(folder), str(output)],
-                   check=True, capture_output=True, timeout=10)
+    subprocess.run([str(bundle_check), "zip", str(folder), str(output)], check=True, capture_output=True, timeout=10)
     with zipfile.ZipFile(output) as archive:
         assert archive.testzip() is None
         assert archive.read("frame.txt") == b"complete frame"
     assert {p.name for p in tmp_path.iterdir()} == {"frames", "frames.zip"}
-@pytest.mark.parametrize(("server", "expected"), [
-    ("192.168.1.20:8000", "http://192.168.1.20:8000"),
-    ("  http://localhost:8000/\n", "http://localhost:8000"),
-    ("https://arrival.example///", "https://arrival.example"),
-    ("https://arrival.example/capture/", "https://arrival.example/capture"),
-    ("http://[::1]:8000", "http://[::1]:8000"),
-])
+
+
+@pytest.mark.parametrize(
+    ("server", "expected"),
+    [
+        ("192.168.1.20:8000", "http://192.168.1.20:8000"),
+        ("  http://localhost:8000/\n", "http://localhost:8000"),
+        ("https://arrival.example///", "https://arrival.example"),
+        ("https://arrival.example/capture/", "https://arrival.example/capture"),
+        ("http://[::1]:8000", "http://[::1]:8000"),
+    ],
+)
 def test_ios_server_url_normalization(bundle_check, server, expected):
-    result = subprocess.run([str(bundle_check), "base-url", server],
-                            capture_output=True, text=True, timeout=10)
+    result = subprocess.run([str(bundle_check), "base-url", server], capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == expected
 
 
-@pytest.mark.parametrize("server", [
-    "ftp://arrival.example", "file://localhost/tmp/arrival", "ws://localhost:8000",
-    "", "   ", "http://", "https:///",
-])
+@pytest.mark.parametrize(
+    "server",
+    [
+        "ftp://arrival.example",
+        "file://localhost/tmp/arrival",
+        "ws://localhost:8000",
+        "",
+        "   ",
+        "http://",
+        "https:///",
+    ],
+)
 def test_ios_rejects_invalid_server_addresses(bundle_check, server):
-    result = subprocess.run([str(bundle_check), "base-url", server],
-                            capture_output=True, text=True, timeout=10)
+    result = subprocess.run([str(bundle_check), "base-url", server], capture_output=True, text=True, timeout=10)
     assert result.returncode == 1
     assert "Not a server URL" in result.stderr
+
+
 @pytest.mark.parametrize(("focal", "value"), [("fx", 0), ("fx", -1), ("fy", 0), ("fy", -1)])
 def test_nonpositive_focal_frame_is_skipped(bundle_check, recorded, tmp_path, focal, value):
     recorded_path, _, _ = recorded
     spec = json.loads((recorded_path / "spec.json").read_text())
-    invalid = dict(spec["frames"][0], timestamp=0,
-                   intrinsics=dict(spec["frames"][0]["intrinsics"], **{focal: value}))
+    invalid = dict(spec["frames"][0], timestamp=0, intrinsics=dict(spec["frames"][0]["intrinsics"], **{focal: value}))
     spec["frames"].insert(0, invalid)
     spec_path = tmp_path / "spec.json"
     spec_path.write_text(json.dumps(spec))
     bundle = tmp_path / "bundle"
-    result = subprocess.run([str(bundle_check), str(spec_path), str(bundle), str(tmp_path / "frames.zip")],
-                            capture_output=True, text=True, timeout=30)
+    result = subprocess.run(
+        [str(bundle_check), str(spec_path), str(bundle), str(tmp_path / "frames.zip")],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "6"
     manifest = rgbd.load_manifest(bundle)

@@ -21,6 +21,9 @@ REDACTED = "[redacted]"
 
 @dataclass(frozen=True)
 class Setting:
+    """One environment variable Arrival reads: which module reads it, whether its value is secret (never printed,
+    scrubbed by redact), and its default."""
+
     used_by: str
     secret: bool = False
     default: str | None = None
@@ -74,7 +77,7 @@ def _dotenv_value(value: str) -> str:
     if len(value) >= 2 and value[0] in "'\"":
         end = value.find(value[0], 1)
         while end > 0:
-            rest = value[end + 1:].lstrip()
+            rest = value[end + 1 :].lstrip()
             if not rest or rest.startswith("#"):
                 return value[1:end]
             end = value.find(value[0], end + 1)
@@ -119,8 +122,16 @@ def get(name: str, default: str | None = None) -> str | None:
 def status() -> list[dict]:
     """One row per known setting: name, whether it is set, whether it is a secret, who reads it. No values."""
     load_dotenv()
-    return [{"name": n, "set": bool(os.environ.get(n)), "secret": s.secret, "used_by": s.used_by,
-             "has_default": s.default is not None} for n, s in SETTINGS.items()]
+    return [
+        {
+            "name": n,
+            "set": bool(os.environ.get(n)),
+            "secret": s.secret,
+            "used_by": s.used_by,
+            "has_default": s.default is not None,
+        }
+        for n, s in SETTINGS.items()
+    ]
 
 
 def redact(text) -> str:

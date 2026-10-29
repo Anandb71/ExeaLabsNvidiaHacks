@@ -13,8 +13,15 @@ from arrival.scan.bundle import load_room  # noqa: E402
 from arrival.sim import menagerie  # noqa: E402
 from arrival.sim.collect import SimEnv, run_episode  # noqa: E402
 from arrival.sim.policy import ScriptedExpert  # noqa: E402
-from arrival.sim.preflight import base_pose, check_task  # noqa: E402
-from arrival.sim.reach import arm_model, chain_errors, find_shift, miss, waypoints  # noqa: E402
+from arrival.sim.reach import (  # noqa: E402
+    arm_model,
+    chain_errors,
+    check_task,  # noqa: E402
+    find_shift,
+    miss,
+    waypoints,
+)
+from arrival.sim.stand import base_pose  # noqa: E402
 from arrival.sim.tasks import _fx, _offset_start, finish_task, make_tasks  # noqa: E402
 from arrival.tasks.propose import POSE_OFFSETS, top_z  # noqa: E402
 from arrival.twin.compile import compile_twin, to_local  # noqa: E402
@@ -44,7 +51,9 @@ def test_hover_waypoints_get_more_slack_than_contact_ones():
 
 
 def test_rim_grasp_waypoint_is_the_rim_nearest_the_base(hero_twin):
-    task = next(t for t in make_tasks(hero_twin, ["counter_to_sink"], 8, seed=0, log=QUIET) if t["object_id"] == "bowl_1")
+    task = next(
+        t for t in make_tasks(hero_twin, ["counter_to_sink"], 8, seed=0, log=QUIET) if t["object_id"] == "bowl_1"
+    )
     base, _, _ = base_pose(hero_twin, task)
     grasp = next(w for w in waypoints(hero_twin, task, None, False, base[:2]) if w[0] == "the object")[1]
     body = np.array(task["start"][:2])
@@ -76,7 +85,10 @@ def test_shifted_base_succeeds_where_the_rule_spot_misses(rotated):
     src = _fx(rotated, v["source"])
     o = next(x for x in rotated["objects"] if x["id"] == "mug_2")
     results = {}
-    for name, t in (("planner", copy.deepcopy(v)), ("rule", {k: x for k, x in copy.deepcopy(v).items() if k != "base_shift"})):
+    for name, t in (
+        ("planner", copy.deepcopy(v)),
+        ("rule", {k: x for k, x in copy.deepcopy(v).items() if k != "base_shift"}),
+    ):
         t["start"] = [*_offset_start(src, o["position"], POSE_OFFSETS[1]), top_z(src) + 0.06]
         results[name] = run_episode(SimEnv(rotated, finish_task(t), res=16, cameras=()), ScriptedExpert(), t)["success"]
     # the rule spot missed here before the any-wall and mobile-base work; it is not what this test pins any more
@@ -112,8 +124,15 @@ def test_the_failing_stroke_end_is_the_one_reported():
 def test_shift_is_in_the_fixture_frame_on_the_far_side_of_a_table():
     table = {"id": "table", "type": "table", "yaw": 0.0, "size": [1.6, 0.8, 0.75], "position": [2.0, 2.0, 0.375]}
     twin = {"fixtures": [table], "objects": [], "walls": []}
-    task = {"family": "move_on_table", "object_id": "book", "source": "table", "target": "table", "side": -1.0,
-            "start": [1.9, 1.75, 0.8], "target_xy": [2.25, 1.75]}
+    task = {
+        "family": "move_on_table",
+        "object_id": "book",
+        "source": "table",
+        "target": "table",
+        "side": -1.0,
+        "start": [1.9, 1.75, 0.8],
+        "target_xy": [2.25, 1.75],
+    }
     (x0, y0, _), _, _ = base_pose(twin, task)
     (x1, y1, _), _, _ = base_pose(twin, {**task, "base_shift": [0.1, 0.06]})
     assert y0 < 1.6 and np.allclose([x1 - x0, y1 - y0], [0.1, -0.06], atol=1e-9)  # along +x, out away from the edge

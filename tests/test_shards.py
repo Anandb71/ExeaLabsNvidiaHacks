@@ -17,6 +17,7 @@ CAMS = ("ego_view", "wrist")
 
 # ---- planning ----
 
+
 def test_parse_shard():
     assert parse_shard("0/4") == (0, 4) and parse_shard(" 3/4 ") == (3, 4)
     for bad in ("4/4", "1/0", "-1/2", "a/b", "2", "1/2/3", ""):
@@ -35,8 +36,20 @@ def test_shard_ranges_tile_the_task_list_exactly(total, n):
 
 # ---- journal ----
 
-FP = {"room": "r", "families": ["a"], "episodes": 4, "seed": 0, "people": 0, "policy": "scripted", "planner": "rule",
-      "split": "train", "instructions": False, "base": "fixed", "res": 32, "shard": [0, 2]}
+FP = {
+    "room": "r",
+    "families": ["a"],
+    "episodes": 4,
+    "seed": 0,
+    "people": 0,
+    "policy": "scripted",
+    "planner": "rule",
+    "split": "train",
+    "instructions": False,
+    "base": "fixed",
+    "res": 32,
+    "shard": [0, 2],
+}
 
 
 def test_journal_resume_cuts_a_torn_line_and_refuses_other_settings(tmp_path):
@@ -81,17 +94,27 @@ def test_journal_does_not_discard_a_corrupt_completed_line(tmp_path):
 
 # ---- merge, on synthetic episodes (no MuJoCo) ----
 
+
 def _episode(n, seed):
     rng = np.random.default_rng(seed)
-    return {"states": rng.normal(size=(n, 11)).astype(np.float32), "actions": rng.normal(size=(n, 11)).astype(np.float32),
-            "videos": {c: rng.integers(0, 255, (n, 16, 16, 3), dtype=np.uint8) for c in CAMS},
-            "detail": {"joint": "j", "qpos": 0.2}, "safety": {"min_human_distance_m": 1.0, "human_contact": 0},
-            "people_xy": [[] for _ in range(n)]}
+    return {
+        "states": rng.normal(size=(n, 11)).astype(np.float32),
+        "actions": rng.normal(size=(n, 11)).astype(np.float32),
+        "videos": {c: rng.integers(0, 255, (n, 16, 16, 3), dtype=np.uint8) for c in CAMS},
+        "detail": {"joint": "j", "qpos": 0.2},
+        "safety": {"min_human_distance_m": 1.0, "human_contact": 0},
+        "people_xy": [[] for _ in range(n)],
+    }
 
 
 def _task(k, fam="open_drawer"):
-    return {"task_id": f"sim_{fam}_{k:04d}", "family": fam, "lighting": "neutral", "people": 0,
-            "instruction": f"open drawer {k % 2}"}
+    return {
+        "task_id": f"sim_{fam}_{k:04d}",
+        "family": fam,
+        "lighting": "neutral",
+        "people": 0,
+        "instruction": f"open drawer {k % 2}",
+    }
 
 
 def _write_shard(out, idx, count, total, ks, keep=None):
@@ -101,13 +124,33 @@ def _write_shard(out, idx, count, total, ks, keep=None):
     w = SimDatasetWriter(root / "datasets" / "room_sim", "room", 20, 16, CAMS)
     for k in ks:
         w.add_episode(_episode(5 + k, k), _task(k))
-    meta = {"index": idx, "count": count, "task_range": [lo, hi], "total_tasks": total, "episodes": total, "seed": 0,
-            "families": ["open_drawer"], "people": 0, "policy": "scripted", "planner": "rule", "split": "train",
-            "instructions": False, "base": "fixed", "res": 16}
+    meta = {
+        "index": idx,
+        "count": count,
+        "task_range": [lo, hi],
+        "total_tasks": total,
+        "episodes": total,
+        "seed": 0,
+        "families": ["open_drawer"],
+        "people": 0,
+        "policy": "scripted",
+        "planner": "rule",
+        "split": "train",
+        "instructions": False,
+        "base": "fixed",
+        "res": 16,
+    }
     pre = [{"stage": "preflight", "family": "open_drawer", "reason": "x"}]
-    w.finish(len(ks) + 1, {"skipped_unreachable": 1, "skipped_error": 1, "skipped": 2,
-                           "skip_reasons": pre + [{"stage": "build", "task_id": "t", "reason": "boom"}]},
-             {"shard": meta})
+    w.finish(
+        len(ks) + 1,
+        {
+            "skipped_unreachable": 1,
+            "skipped_error": 1,
+            "skipped": 2,
+            "skip_reasons": pre + [{"stage": "build", "task_id": "t", "reason": "boom"}],
+        },
+        {"shard": meta},
+    )
     return root
 
 
@@ -118,11 +161,14 @@ def _fake_run(tmp_path, count=3, total=6, drop=()):
     return tmp_path
 
 
-@pytest.mark.parametrize("name,content,match", [
-    ("episodes.jsonl", '{broken}\n', "episodes.jsonl: line 1 is not JSON"),
-    ("episodes.jsonl", '[]\n', "episodes.jsonl: line 1 must be a JSON object"),
-    ("info.json", '{broken}', "info.json: invalid JSON"),
-])
+@pytest.mark.parametrize(
+    "name,content,match",
+    [
+        ("episodes.jsonl", "{broken}\n", "episodes.jsonl: line 1 is not JSON"),
+        ("episodes.jsonl", "[]\n", "episodes.jsonl: line 1 must be a JSON object"),
+        ("info.json", "{broken}", "info.json: invalid JSON"),
+    ],
+)
 def test_merge_reports_corrupt_shard_metadata(tmp_path, name, content, match):
     src = _fake_run(tmp_path / "source", count=1, total=1)
     (src / "shards" / "0of1" / "datasets" / "room_sim" / "meta" / name).write_text(content)
@@ -146,12 +192,15 @@ def test_merge_synthetic_shards_reindexes_everything_and_validates(tmp_path):
     assert tasks == ["open drawer 0", "open drawer 1"] and info["total_tasks"] == 2
     # pre-flight rejections are the same in every shard: counted once; build errors are per shard: summed
     assert info["arrival_skipped_unreachable"] == 1 and info["arrival_skipped_error"] == 3
-    assert info["arrival_attempts"] == (1 + 1) + (2 + 1) + (2 + 1)  # each shard's episodes plus the one it ran and dropped
+    assert info["arrival_attempts"] == (1 + 1) + (2 + 1) + (
+        2 + 1
+    )  # each shard's episodes plus the one it ran and dropped
     assert sum(r.get("stage") == "preflight" for r in info["arrival_skip_reasons"]) == 1
     stats = json.loads((ds / "meta" / "stats.json").read_text())
     assert stats["episode_index"]["max"] == [4.0] and stats["index"]["max"] == [info["total_frames"] - 1.0]
     # the merged parquet of an episode carries the merged indices but the shard's own values
     import pyarrow.parquet as pq
+
     t = pq.read_table(ds / "data" / "chunk-000" / "episode_000003.parquet")
     assert set(t.column("episode_index").to_pylist()) == {3}
     assert t.column("index").to_pylist()[0] == sum(5 + k for k in (0, 2, 3))
@@ -193,7 +242,9 @@ def test_merge_refuses_incomplete_or_mixed_sets(tmp_path):
     with pytest.raises(ShardError, match="not a shard dataset"):
         merge_shards([plain], tmp_path / "m")
     with pytest.raises(ShardError, match="would overwrite"):
-        merge_shards(sorted((_fake_run(tmp_path / "again") / "shards").iterdir()), tmp_path / "again" / "shards" / "0of3")
+        merge_shards(
+            sorted((_fake_run(tmp_path / "again") / "shards").iterdir()), tmp_path / "again" / "shards" / "0of3"
+        )
 
 
 def test_merge_refuses_episode_owned_by_another_shard(tmp_path):
@@ -208,7 +259,17 @@ def test_merge_refuses_episode_owned_by_another_shard(tmp_path):
 
 def test_missing_shard_video_does_not_erase_existing_merge(tmp_path):
     src = _fake_run(tmp_path / "src")
-    video = src / "shards" / "0of3" / "datasets" / "room_sim" / "videos" / "chunk-000" / "observation.images.ego_view" / "episode_000000.mp4"
+    video = (
+        src
+        / "shards"
+        / "0of3"
+        / "datasets"
+        / "room_sim"
+        / "videos"
+        / "chunk-000"
+        / "observation.images.ego_view"
+        / "episode_000000.mp4"
+    )
     video.unlink()
     out = tmp_path / "merged"
     old = out / "datasets" / "room_sim" / "keep.txt"
@@ -237,10 +298,11 @@ def test_sim_rejects_a_bad_shard_spec(tmp_path, capsys):
 
 mujoco = pytest.importorskip("mujoco")
 
+from conftest import SCANS  # noqa: E402
+
 from arrival.scan.bundle import load_room  # noqa: E402
 from arrival.sim import collect as collect_mod  # noqa: E402
 from arrival.twin.compile import compile_twin  # noqa: E402
-from conftest import SCANS  # noqa: E402
 
 RUN = dict(families=["counter_to_sink", "open_drawer"], episodes=4, people=0, res=32, seed=3, log=lambda *_: None)
 
@@ -276,8 +338,19 @@ def test_two_shards_of_two_merge_to_the_dataset_of_one_run_of_four(runs):
     assert validate(a) == [] and validate(b) == []
     ia, ib = single["info"], merged["info"]
     assert ia["total_episodes"] == ib["total_episodes"] and ia["total_episodes"] >= 3  # a real comparison
-    for k in ("total_frames", "total_tasks", "total_videos", "arrival_attempts", "arrival_successes", "arrival_families",
-              "arrival_skipped", "arrival_skipped_unreachable", "arrival_skipped_error", "features", "splits"):
+    for k in (
+        "total_frames",
+        "total_tasks",
+        "total_videos",
+        "arrival_attempts",
+        "arrival_successes",
+        "arrival_families",
+        "arrival_skipped",
+        "arrival_skipped_unreachable",
+        "arrival_skipped_error",
+        "features",
+        "splits",
+    ):
         assert ia[k] == ib[k], k
     ra, rb = _rows(a), _rows(b)
     assert [r["episode_index"] for r in rb] == list(range(len(rb)))
@@ -287,7 +360,11 @@ def test_two_shards_of_two_merge_to_the_dataset_of_one_run_of_four(runs):
         assert ea == eb  # states, actions, task, episode and global frame indices
     sa, sb = (json.loads((d / "meta" / "stats.json").read_text()) for d in (a, b))
     for k in sa:
-        assert np.allclose(sa[k]["mean"], sb[k]["mean"]) and np.allclose(sa[k]["std"], sb[k]["std"]) and sa[k]["count"] == sb[k]["count"]
+        assert (
+            np.allclose(sa[k]["mean"], sb[k]["mean"])
+            and np.allclose(sa[k]["std"], sb[k]["std"])
+            and sa[k]["count"] == sb[k]["count"]
+        )
     assert len(list(b.glob("videos/chunk-*/*/*.mp4"))) == 2 * len(rb)
 
 
@@ -321,8 +398,10 @@ def test_resumed_shard_equals_an_uninterrupted_one(runs, twin, tmp_path, monkeyp
     assert len(journal.read_text().splitlines()) == 2  # fingerprint + the one task that finished
     ds = tmp_path / "shards" / "0of2" / "datasets" / "hero_kitchen_sim"
     n_done = len(journal.read_text().splitlines()) - 1
-    stray = [ds / "data" / "chunk-000" / f"episode_{n_done:06d}.parquet",  # a kill between the files and the journal line
-             ds / "videos" / "chunk-000" / "observation.images.wrist" / f"episode_{n_done:06d}.mp4"]
+    stray = [
+        ds / "data" / "chunk-000" / f"episode_{n_done:06d}.parquet",  # a kill between the files and the journal line
+        ds / "videos" / "chunk-000" / "observation.images.wrist" / f"episode_{n_done:06d}.mp4",
+    ]
     for f in stray:
         f.parent.mkdir(parents=True, exist_ok=True)
         f.write_bytes(b"partial")
@@ -336,18 +415,23 @@ def test_resumed_shard_equals_an_uninterrupted_one(runs, twin, tmp_path, monkeyp
     assert _frames(res["dataset"]) == _frames(ref["dataset"])
     for k in ("total_episodes", "total_frames", "arrival_attempts", "arrival_successes", "arrival_skipped"):
         assert res["info"][k] == ref["info"][k], k
-    untimed = [{f: {k: v for k, v in c.items() if k != "seconds"} for f, c in r["report_data"]["families"].items()}
-               for r in (res, ref)]
+    untimed = [
+        {f: {k: v for k, v in c.items() if k != "seconds"} for f, c in r["report_data"]["families"].items()}
+        for r in (res, ref)
+    ]
     assert untimed[0] == untimed[1]
     done_secs = json.loads(journal.read_text().splitlines()[1])["seconds"]
-    assert sum(c["seconds"] for c in res["report_data"]["families"].values()) > done_secs  # the task run before the kill counts
+    assert (
+        sum(c["seconds"] for c in res["report_data"]["families"].values()) > done_secs
+    )  # the task run before the kill counts
     # an interrupted second task left no episode behind that the resumed run kept twice
     assert len(list(res["dataset"].glob("data/chunk-*/*.parquet"))) == res["info"]["total_episodes"]
 
 
 def test_report_times_each_family_so_cost_can_compare_with_teleop(runs):
-    from arrival.eval import cost
     from conftest import REPO
+
+    from arrival.eval import cost
 
     rep = runs["single"]["report_data"]
     fams = rep["families"]
@@ -356,13 +440,16 @@ def test_report_times_each_family_so_cost_can_compare_with_teleop(runs):
     assert sum(f["seconds"] for f in fams.values()) <= rep["seconds"] + 0.01
     merged = json.loads(runs["merged"]["report"].read_text())
     for fam, f in merged["families"].items():
-        parts = [p["report_data"]["families"][fam]["seconds"] for p in runs["parts"] if fam in p["report_data"]["families"]]
+        parts = [
+            p["report_data"]["families"][fam]["seconds"] for p in runs["parts"] if fam in p["report_data"]["families"]
+        ]
         assert f["seconds"] == pytest.approx(sum(parts), abs=0.02)
     baseline = REPO / "docs" / "results" / "p3-teleop-2026-10-21" / "teleop_baseline.json"
     c = cost.build(runs["root"] / "single", baseline_path=baseline)["comparison"]
     assert c["measured"] and c["task"] == "counter_to_sink" and c["generated"]["scope"] == "task"
     assert c["generated"]["seconds_per_success"] == pytest.approx(
-        fams["counter_to_sink"]["seconds"] / fams["counter_to_sink"]["successes"], abs=0.001)
+        fams["counter_to_sink"]["seconds"] / fams["counter_to_sink"]["successes"], abs=0.001
+    )
     assert c["seconds_ratio_teleop_over_generated"] is not None
 
 

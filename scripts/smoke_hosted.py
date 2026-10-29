@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 import time
 import urllib.error
 import urllib.request
@@ -50,8 +49,14 @@ class Smoke:
     @staticmethod
     def multipart(field: str, filename: str, data: bytes, ctype: str = "application/json") -> tuple[bytes, str]:
         boundary = "smoke-" + uuid.uuid4().hex
-        body = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"{field}\"; filename=\"{filename}\"\r\n"
-                f"Content-Type: {ctype}\r\n\r\n").encode() + data + f"\r\n--{boundary}--\r\n".encode()
+        body = (
+            (
+                f'--{boundary}\r\nContent-Disposition: form-data; name="{field}"; filename="{filename}"\r\n'
+                f"Content-Type: {ctype}\r\n\r\n"
+            ).encode()
+            + data
+            + f"\r\n--{boundary}--\r\n".encode()
+        )
         return body, f"multipart/form-data; boundary={boundary}"
 
     def run(self, scan: bytes, wait: float = 0.0, require_healthz: bool = False, poll: float = 2.0) -> bool:
@@ -60,19 +65,29 @@ class Smoke:
         if code == 0:
             return False  # unreachable: the rest would only repeat it
         code, _, _ = self.request("GET", "/healthz")
-        self.check("healthz", code == 200, f"GET /healthz -> {code}" + ("" if require_healthz else " (optional)"),
-                   required=require_healthz)
+        self.check(
+            "healthz",
+            code == 200,
+            f"GET /healthz -> {code}" + ("" if require_healthz else " (optional)"),
+            required=require_healthz,
+        )
 
         body, ctype = self.multipart("scan", f"smoke_{int(time.time())}.json", scan)
         code, _, raw = self.request("POST", "/jobs", body, {"Content-Type": ctype, "Accept": "application/json"})
         job = _json(raw)
-        good = self.check("good upload queued", code == 202 and isinstance(job.get("id"), str) and job.get("status_url"),
-                          f"POST /jobs -> {code} {_short(raw)}")
+        good = self.check(
+            "good upload queued",
+            code == 202 and isinstance(job.get("id"), str) and job.get("status_url"),
+            f"POST /jobs -> {code} {_short(raw)}",
+        )
         if good:
             code, _, raw = self.request("GET", job["status_url"], headers={"Accept": "application/json"})
             st = _json(raw)
-            self.check("job status readable", code == 200 and st.get("id") == job["id"] and st.get("status") in JOB_STATES,
-                       f"GET {job['status_url']} -> {code} status={st.get('status')}")
+            self.check(
+                "job status readable",
+                code == 200 and st.get("id") == job["id"] and st.get("status") in JOB_STATES,
+                f"GET {job['status_url']} -> {code} status={st.get('status')}",
+            )
 
         bad = [
             ("upload without a scan field refused", *self.multipart("file", "x.json", scan)),
@@ -82,8 +97,12 @@ class Smoke:
         for name, b, ct in bad:
             code, _, raw = self.request("POST", "/jobs", b, {"Content-Type": ct, "Accept": "application/json"})
             self.check(name, 400 <= code < 500, f"POST /jobs -> {code} {_short(raw)}")
-        for path in ("/jobs/job_nosuchjob", "/jobs/..%2F..%2Fetc%2Fpasswd", "/jobs/../../etc/passwd",
-                     "/download/..%2F..%2Fpyproject.toml"):
+        for path in (
+            "/jobs/job_nosuchjob",
+            "/jobs/..%2F..%2Fetc%2Fpasswd",
+            "/jobs/../../etc/passwd",
+            "/download/..%2F..%2Fpyproject.toml",
+        ):
             code, _, raw = self.request("GET", path)
             leaked = b"root:" in raw or b"[project]" in raw
             self.check(f"crafted path refused: {path}", code in (400, 403, 404) and not leaked, f"GET -> {code}")
@@ -95,11 +114,18 @@ class Smoke:
                 if st.get("status") in ("done", "failed"):
                     break
                 time.sleep(poll)
-            done = self.check("worker finished the job", st.get("status") == "done",
-                              f"status={st.get('status')} stage={st.get('stage')} error={st.get('error')}")
+            done = self.check(
+                "worker finished the job",
+                st.get("status") == "done",
+                f"status={st.get('status')} stage={st.get('stage')} error={st.get('error')}",
+            )
             if done:
                 code, hdrs, raw = self.request("GET", f"/jobs/{job['id']}/download")
-                self.check("dataset.zip downloads", code == 200 and raw[:2] == b"PK", f"GET download -> {code}, {len(raw)} bytes")
+                self.check(
+                    "dataset.zip downloads",
+                    code == 200 and raw[:2] == b"PK",
+                    f"GET download -> {code}, {len(raw)} bytes",
+                )
         return all(r["ok"] for r in self.results if r["required"])
 
 
@@ -119,7 +145,9 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("url", help="base URL of the server, e.g. http://127.0.0.1:8000")
     ap.add_argument("--scan", default=str(DEFAULT_SCAN), help="the good upload (default: the hero roomplan.json)")
-    ap.add_argument("--wait", type=float, default=0.0, help="seconds to wait for the worker to finish the job (0: don't)")
+    ap.add_argument(
+        "--wait", type=float, default=0.0, help="seconds to wait for the worker to finish the job (0: don't)"
+    )
     ap.add_argument("--require-healthz", action="store_true", help="fail when GET /healthz is not 200")
     ap.add_argument("--timeout", type=float, default=30.0, help="per-request timeout in seconds")
     ap.add_argument("--json", action="store_true", help="print the results as JSON")

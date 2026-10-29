@@ -51,12 +51,17 @@ def _fixture(twin: dict, fid: str) -> dict | None:
 
 
 def propose(twin: dict) -> dict:
+    """The placeholder pipeline's tasks for a twin: counter_to_sink and counter_to_counter for every object on the
+    source counter, crossed with start-pose offsets, lighting and wordings. No language model."""
     counters = [f for f in twin["fixtures"] if is_counter_host(f)]
-    counter_a = (_fixture(twin, "counter_a")
-                 or next((c for c in counters if any(on_counter(o, c) for o in twin["objects"])), None)
-                 or next(iter(counters), None))
+    counter_a = (
+        _fixture(twin, "counter_a")
+        or next((c for c in counters if any(on_counter(o, c) for o in twin["objects"])), None)
+        or next(iter(counters), None)
+    )
     counter_b = _fixture(twin, "counter_b") or next(
-        (f for f in twin["fixtures"] if is_counter_host(f) and f is not counter_a), None)
+        (f for f in twin["fixtures"] if is_counter_host(f) and f is not counter_a), None
+    )
     sink = next((f for f in twin["fixtures"] if f["type"] == "sink"), None)
     targets = {"counter_to_sink": sink, "counter_to_counter": counter_b}
     tasks = []
@@ -75,21 +80,23 @@ def propose(twin: dict) -> dict:
                         continue
                     for light in LIGHTING:
                         for wi, wording in enumerate(WORDINGS[family]):
-                            tasks.append({
-                                "task_id": f"{family}__{obj['id']}__p{pi}__{light}__w{wi + 1}",
-                                "family": family,
-                                "object_id": obj["id"],
-                                "object_label": name,
-                                "object_size": obj["size"],
-                                "source_fixture_id": counter_a["id"],
-                                "target_fixture_id": target["id"],
-                                "start_position": start,
-                                "pose_index": pi,
-                                "lighting": light,
-                                "wording_index": wi + 1,
-                                "instruction": wording.format(name=name),
-                                "mimicgen_template": MIMICGEN_TEMPLATE[family],
-                            })
+                            tasks.append(
+                                {
+                                    "task_id": f"{family}__{obj['id']}__p{pi}__{light}__w{wi + 1}",
+                                    "family": family,
+                                    "object_id": obj["id"],
+                                    "object_label": name,
+                                    "object_size": obj["size"],
+                                    "source_fixture_id": counter_a["id"],
+                                    "target_fixture_id": target["id"],
+                                    "start_position": start,
+                                    "pose_index": pi,
+                                    "lighting": light,
+                                    "wording_index": wi + 1,
+                                    "instruction": wording.format(name=name),
+                                    "mimicgen_template": MIMICGEN_TEMPLATE[family],
+                                }
+                            )
     return {"room_id": twin["room_id"], "tasks": tasks}
 
 

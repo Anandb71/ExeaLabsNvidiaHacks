@@ -3,7 +3,7 @@ import pytest
 from arrival.tasks.tavily_research import TavilyResearchAgent
 
 
-@pytest.mark.parametrize("cache_body", ['["query"]', '{"query": [1, 2]}', 'null'])
+@pytest.mark.parametrize("cache_body", ['["query"]', '{"query": [1, 2]}', "null"])
 def test_malformed_cache_entries_are_ignored(tmp_path, monkeypatch, cache_body):
     path = tmp_path / "cache.json"
     path.write_text(cache_body)

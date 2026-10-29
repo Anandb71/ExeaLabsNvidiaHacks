@@ -1,6 +1,6 @@
 """Offline GR00T/LeRobot loader conformance check (no gr00t import). Exits 0 if the dataset passes, 1 if not.
 
-    .venv/bin/python scripts/check_dataset_loader.py out/datasets/hero_kitchen_sim [--json]
+.venv/bin/python scripts/check_dataset_loader.py out/datasets/hero_kitchen_sim [--json]
 """
 
 from __future__ import annotations

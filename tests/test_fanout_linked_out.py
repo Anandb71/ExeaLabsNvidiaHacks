@@ -25,16 +25,22 @@ def test_objects_are_listed_under_a_linked_out(tmp_path):
     be = LocalBackend(out / "fanout_store", out / "fanout_scratch")
     be.put_object("r1/shards/0of1/meta/info.json", b"{}")
     be.put_object("r1/shards/0of1/data/episode_000000.parquet", b"x")
-    assert be.list_objects("r1/shards/0of1") == ["r1/shards/0of1/data/episode_000000.parquet",
-                                                 "r1/shards/0of1/meta/info.json"]
+    assert be.list_objects("r1/shards/0of1") == [
+        "r1/shards/0of1/data/episode_000000.parquet",
+        "r1/shards/0of1/meta/info.json",
+    ]
     assert (tmp_path / "disk" / "fanout_store" / "r1" / "shards" / "0of1" / "meta" / "info.json").is_file()
 
 
 def _shard(cfg, i, shard_out):
     """Stands in for `arrival sim --shard i/n` (no MuJoCo): writes the two files a done marker needs."""
     meta = shard_out / "shards" / f"{i}of{cfg.shards}" / "datasets" / f"{cfg.room}_sim" / "meta"
-    return [sys.executable, "-c", f"import pathlib; m = pathlib.Path({str(meta)!r}); m.mkdir(parents=True); "
-            f"(m / 'info.json').write_text('{{}}'); (m / 'episodes.jsonl').write_text('')"]
+    return [
+        sys.executable,
+        "-c",
+        f"import pathlib; m = pathlib.Path({str(meta)!r}); m.mkdir(parents=True); "
+        f"(m / 'info.json').write_text('{{}}'); (m / 'episodes.jsonl').write_text('')",
+    ]
 
 
 def test_fanout_collects_every_shard_under_a_linked_out(tmp_path, monkeypatch):
@@ -47,6 +53,9 @@ def test_fanout_collects_every_shard_under_a_linked_out(tmp_path, monkeypatch):
         res = fanout.run_fanout(be, cfg, out, poll_seconds=0.01, log=lambda msg: None)
         assert (res["ran"], res["skipped"]) == (([], [0, 1]) if rerun else ([0, 1], []))
         got = sorted(p.relative_to(out / "collected").as_posix() for p in (out / "collected").rglob("*") if p.is_file())
-        assert got == [f"shards/{i}of2/datasets/hero_kitchen_sim/meta/{name}"
-                       for i in (0, 1) for name in ("episodes.jsonl", "info.json")]
+        assert got == [
+            f"shards/{i}of2/datasets/hero_kitchen_sim/meta/{name}"
+            for i in (0, 1)
+            for name in ("episodes.jsonl", "info.json")
+        ]
     assert merged == [[out / "collected" / "shards"]] * 2

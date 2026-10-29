@@ -6,9 +6,10 @@ folder"). The shard now gets both paths as the caller meant them."""
 import shutil
 from pathlib import Path
 
+from conftest import SCANS
+
 from arrival.jobs import fanout
 from arrival.jobs.fanout import FanoutConfig, LocalBackend
-from conftest import SCANS
 
 
 class _Proc:

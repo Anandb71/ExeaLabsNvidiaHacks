@@ -21,7 +21,8 @@ def test_comment_after_a_value_is_dropped(clean_env):
         "GR00T_POLICY_URL=http://gpu-box:8000  # the A100 box\n"
         'TAVILY_API_KEY="tvly-abc123def456" # from the console\n'
         "NEBIUS_BUCKET=arrival-runs\t# made on Oct 20\n"
-        "NEBIUS_REGION='eu-north1'# no space before the hash\n")
+        "NEBIUS_REGION='eu-north1'# no space before the hash\n"
+    )
     assert config.get("GR00T_POLICY_URL") == "http://gpu-box:8000"
     assert config.get("TAVILY_API_KEY") == "tvly-abc123def456"
     assert config.get("NEBIUS_BUCKET") == "arrival-runs"
@@ -31,8 +32,9 @@ def test_comment_after_a_value_is_dropped(clean_env):
 def test_hash_inside_a_value_is_kept(clean_env):
     (clean_env / ".env").write_text(
         "COSMOS_URL=http://cosmos:9000/#frag\n"
-        "NEBIUS_JOB_IMAGE=\"registry/arrival # tag\"\n"
-        "NEBIUS_PROJECT_ID='abc' # it's \"quoted\"\n")
+        'NEBIUS_JOB_IMAGE="registry/arrival # tag"\n'
+        "NEBIUS_PROJECT_ID='abc' # it's \"quoted\"\n"
+    )
     assert config.get("COSMOS_URL") == "http://cosmos:9000/#frag"
     assert config.get("NEBIUS_JOB_IMAGE") == "registry/arrival # tag"
     assert config.get("NEBIUS_PROJECT_ID") == "abc"

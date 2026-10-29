@@ -1,7 +1,8 @@
 """Test that tree_rss handles truncated /proc/[pid]/stat gracefully."""
 
 import sys
-from unittest.mock import patch, mock_open
+from unittest.mock import patch
+
 from arrival.jobs.worker import tree_rss
 
 
@@ -29,7 +30,6 @@ def test_malformed_ps_output_returns_none():
         return  # the ps fallback only runs on non-linux, non-windows
 
     # Malformed ps output: only has 2 columns instead of 3
-    import subprocess
     malformed_output = "123 456\n"  # missing the rss column
 
     mock_result = type("CompletedProcess", (), {"stdout": malformed_output})()

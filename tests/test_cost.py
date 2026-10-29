@@ -8,8 +8,14 @@ import pytest
 from arrival.eval import cost
 
 PRICING = Path(__file__).resolve().parent.parent / "configs" / "pricing.example.yaml"
-BASELINE = {"task": "counter_to_sink", "room": "hero_kitchen", "n_success": 10, "operator_seconds_total": 1500,
-            "setup_assumptions": ["one operator", "VR rig owned"], "cost_basis_usd": 50}
+BASELINE = {
+    "task": "counter_to_sink",
+    "room": "hero_kitchen",
+    "n_success": 10,
+    "operator_seconds_total": 1500,
+    "setup_assumptions": ["one operator", "VR rig owned"],
+    "cost_basis_usd": 50,
+}
 
 
 def _w(path: Path, data) -> Path:
@@ -21,19 +27,43 @@ def _w(path: Path, data) -> Path:
 @pytest.fixture
 def out(tmp_path):
     o = tmp_path / "out"
-    _w(o / "reports" / "hero_kitchen_sim.json",
-       {"room_id": "hero_kitchen", "attempts": 12, "successes": 10, "seconds": 120.0, "human_contacts": 1,
-        "families": {"counter_to_sink": {"attempts": 8, "successes": 7, "human_contacts": 1},
-                     "open_drawer": {"attempts": 4, "successes": 3, "human_contacts": 0}}})
-    _w(o / "eval" / "hero_kitchen_scripted.json",
-       {"room_id": "hero_kitchen", "families": {"open_drawer": {"episodes": 4, "successes": 3, "mean_wall_seconds": 5.0,
-                                                                  "human_contacts": 0}},
-        "totals": {"episodes": 4, "successes": 3, "wall_seconds": 20.0, "human_contacts": 0}})
-    _w(o / "jobs" / "abc" / "status.json",
-       {"room_id": "hero_kitchen_abc", "status": "done", "started_at": 1000, "finished_at": 1060, "attempts": 6,
-        "successes": 6})
-    _w(o / "jobs" / "queued" / "status.json", {"status": "queued", "started_at": None, "finished_at": None,
-                                                  "attempts": None, "successes": None})
+    _w(
+        o / "reports" / "hero_kitchen_sim.json",
+        {
+            "room_id": "hero_kitchen",
+            "attempts": 12,
+            "successes": 10,
+            "seconds": 120.0,
+            "human_contacts": 1,
+            "families": {
+                "counter_to_sink": {"attempts": 8, "successes": 7, "human_contacts": 1},
+                "open_drawer": {"attempts": 4, "successes": 3, "human_contacts": 0},
+            },
+        },
+    )
+    _w(
+        o / "eval" / "hero_kitchen_scripted.json",
+        {
+            "room_id": "hero_kitchen",
+            "families": {"open_drawer": {"episodes": 4, "successes": 3, "mean_wall_seconds": 5.0, "human_contacts": 0}},
+            "totals": {"episodes": 4, "successes": 3, "wall_seconds": 20.0, "human_contacts": 0},
+        },
+    )
+    _w(
+        o / "jobs" / "abc" / "status.json",
+        {
+            "room_id": "hero_kitchen_abc",
+            "status": "done",
+            "started_at": 1000,
+            "finished_at": 1060,
+            "attempts": 6,
+            "successes": 6,
+        },
+    )
+    _w(
+        o / "jobs" / "queued" / "status.json",
+        {"status": "queued", "started_at": None, "finished_at": None, "attempts": None, "successes": None},
+    )
     return o
 
 
@@ -108,8 +138,12 @@ def test_baseline_and_usage_give_comparison_with_both_sample_sizes(out, tmp_path
     assert c["generated"]["usd_per_success"] is None and c["generated"]["usd_measured"] is False
     text = cost.markdown(rep)
     assert "| generated (task) | 7 |" in text and "| teleop | 10 | 150.0 | 5.0 |" in text
-    assert cost.main(["--out", str(out), "--usage", str(usage), "--pricing", str(PRICING), "--baseline", str(base),
-                      "--json"]) == 0
+    assert (
+        cost.main(
+            ["--out", str(out), "--usage", str(usage), "--pricing", str(PRICING), "--baseline", str(base), "--json"]
+        )
+        == 0
+    )
     assert json.loads(capsys.readouterr().out)["comparison"]["teleop"]["n_success"] == 10
 
 
@@ -123,8 +157,7 @@ def test_room_level_comparison_has_ratio(out, tmp_path):
 
 def test_scoped_usage_prices_only_matching_task(out, tmp_path):
     base = _w(tmp_path / "b.json", BASELINE)
-    usage = _w(tmp_path / "usage.json", {"scope": {"room": "hero_kitchen", "task": "counter_to_sink"},
-                                        "gpu_hour": 2})
+    usage = _w(tmp_path / "usage.json", {"scope": {"room": "hero_kitchen", "task": "counter_to_sink"}, "gpu_hour": 2})
     rep = cost.build(out, usage, PRICING, base)
     c = rep["comparison"]
     assert c["generated"]["n_success"] == 7
@@ -132,17 +165,22 @@ def test_scoped_usage_prices_only_matching_task(out, tmp_path):
     assert c["usd_ratio_teleop_over_generated"] == 7.0
     md = cost.markdown(rep)
     assert f"USD, teleop over generated: {c['usd_ratio_teleop_over_generated']}x (estimate)." in md
-    usage = _w(tmp_path / "usage.json", {"scope": {"room": "garage", "task": "counter_to_sink"},
-                                        "gpu_hour": 2})
+    usage = _w(tmp_path / "usage.json", {"scope": {"room": "garage", "task": "counter_to_sink"}, "gpu_hour": 2})
     assert cost.build(out, usage, PRICING, base)["comparison"]["generated"]["usd_per_success"] is None
 
 
 def test_collect_rows_finds_single_report_json(tmp_path):
     run_dir = tmp_path / "single_run"
-    _w(run_dir / "report.json", {
-        "room_id": "hero_kitchen", "attempts": 10, "successes": 10, "seconds": 50.0,
-        "families": {"counter_to_sink": {"attempts": 10, "successes": 10, "seconds": 50.0}}
-    })
+    _w(
+        run_dir / "report.json",
+        {
+            "room_id": "hero_kitchen",
+            "attempts": 10,
+            "successes": 10,
+            "seconds": 50.0,
+            "families": {"counter_to_sink": {"attempts": 10, "successes": 10, "seconds": 50.0}},
+        },
+    )
     rep = cost.build(run_dir)
     assert len(rep["rows"]) == 2
     assert rep["rows"][0]["room"] == "hero_kitchen"
@@ -150,7 +188,7 @@ def test_collect_rows_finds_single_report_json(tmp_path):
 
 
 def test_default_usage_in_out_dir_is_picked_up(out, tmp_path):
-    base = _w(out / "teleop_baseline.json", BASELINE)
+    _w(out / "teleop_baseline.json", BASELINE)
     _w(out / "usage.json", {"scope": {"room": "hero_kitchen", "task": "counter_to_sink"}, "gpu_hour": 2})
     rep = cost.build(out, pricing_path=PRICING)
     assert rep["comparison"]["generated"]["usd_per_success"] == round(5 / 7, 4)
@@ -161,19 +199,29 @@ def test_usd_ratio_uses_unrounded_raw_cost_to_prevent_distortion(tmp_path):
     # Tests that small per-demo costs use unrounded raw cost for the ratio.
     # If rounded cost (0.0001) were used: 0.0342 / 0.0001 = 342.0x.
     # With raw cost (0.015 / 104 = 0.00014423...): 0.0342 / (0.015 / 104) = 237.12x.
-    base = _w(tmp_path / "b.json", {
-        "room": "hero_kitchen", "task": "counter_to_sink", "n_success": 104,
-        "operator_seconds_total": 6393, "cost_basis_usd": 3.5568, "setup_assumptions": "mock setup",
-    })
+    base = _w(
+        tmp_path / "b.json",
+        {
+            "room": "hero_kitchen",
+            "task": "counter_to_sink",
+            "n_success": 104,
+            "operator_seconds_total": 6393,
+            "cost_basis_usd": 3.5568,
+            "setup_assumptions": "mock setup",
+        },
+    )
     run_dir = tmp_path / "distort_run"
-    _w(run_dir / "report.json", {
-        "room_id": "hero_kitchen", "attempts": 104, "successes": 104, "seconds": 1500.0,
-        "families": {"counter_to_sink": {"attempts": 104, "successes": 104, "seconds": 1500.0}}
-    })
-    usage = _w(tmp_path / "usage.json", {
-        "scope": {"room": "hero_kitchen", "task": "counter_to_sink"},
-        "cpu_hour": 0.3
-    })
+    _w(
+        run_dir / "report.json",
+        {
+            "room_id": "hero_kitchen",
+            "attempts": 104,
+            "successes": 104,
+            "seconds": 1500.0,
+            "families": {"counter_to_sink": {"attempts": 104, "successes": 104, "seconds": 1500.0}},
+        },
+    )
+    usage = _w(tmp_path / "usage.json", {"scope": {"room": "hero_kitchen", "task": "counter_to_sink"}, "cpu_hour": 0.3})
     rep = cost.build(run_dir, usage, PRICING, base)
     c = rep["comparison"]
     assert c["generated"]["usd_per_success"] == 0.0001
@@ -199,10 +247,17 @@ def test_baseline_for_unreported_task_does_not_use_room_totals(out, tmp_path):
     assert "pick_and_place" in c["reason"]
 
 
-@pytest.mark.parametrize("patch,msg", [
-    ({"n_success": 0}, "n_success"), ({"n_success": 2.5}, "n_success"), ({"operator_seconds_total": -1}, "operator_seconds_total"),
-    ({"cost_basis_usd": "50"}, "cost_basis_usd"), ({"setup_assumptions": []}, "setup_assumptions"), ({"room": ""}, "room"),
-])
+@pytest.mark.parametrize(
+    "patch,msg",
+    [
+        ({"n_success": 0}, "n_success"),
+        ({"n_success": 2.5}, "n_success"),
+        ({"operator_seconds_total": -1}, "operator_seconds_total"),
+        ({"cost_basis_usd": "50"}, "cost_basis_usd"),
+        ({"setup_assumptions": []}, "setup_assumptions"),
+        ({"room": ""}, "room"),
+    ],
+)
 def test_malformed_baseline_raises_clear_error(tmp_path, patch, msg):
     p = _w(tmp_path / "b.json", {**BASELINE, **patch})
     with pytest.raises(cost.CostError, match=msg):
@@ -245,12 +300,15 @@ def test_empty_out_dir(tmp_path):
     assert "no reports" in text and "comparison not measured" in text
 
 
-@pytest.mark.parametrize("usage,metric", [
-    ({"wall_seconds": -1}, "wall_seconds"),
-    ({"frames": 2.5}, "frames"),
-    ({"upload_bytes": True}, "upload_bytes"),
-    ({"episodes_attempted": 1, "episodes_succeeded": 2}, "episodes_succeeded"),
-])
+@pytest.mark.parametrize(
+    "usage,metric",
+    [
+        ({"wall_seconds": -1}, "wall_seconds"),
+        ({"frames": 2.5}, "frames"),
+        ({"upload_bytes": True}, "upload_bytes"),
+        ({"episodes_attempted": 1, "episodes_succeeded": 2}, "episodes_succeeded"),
+    ],
+)
 def test_invalid_job_metering_cannot_change_totals(tmp_path, usage, metric):
     (tmp_path / "usage").mkdir()
     (tmp_path / "usage" / "jobs.jsonl").write_text(json.dumps({"id": "job1", **usage}) + "\n")
@@ -265,8 +323,7 @@ def test_unreadable_report_is_a_cost_error_not_a_traceback(tmp_path):
         cost.collect_rows(tmp_path)
 
 
-@pytest.mark.parametrize("body", ['{"id":"first"}\n{bad}\n{"id":"last"}\n',
-                                  '{"id":"first"}\n{bad}\n'])
+@pytest.mark.parametrize("body", ['{"id":"first"}\n{bad}\n{"id":"last"}\n', '{"id":"first"}\n{bad}\n'])
 def test_corrupt_committed_usage_line_is_not_silently_dropped(tmp_path, body):
     ledger = tmp_path / "usage" / "jobs.jsonl"
     ledger.parent.mkdir()
@@ -277,9 +334,11 @@ def test_corrupt_committed_usage_line_is_not_silently_dropped(tmp_path, body):
 
 @pytest.mark.parametrize("attempts,successes", [(2, 3), (-1, 0), (True, 1), (3, False)])
 def test_inconsistent_report_counts_cannot_produce_throughput(tmp_path, attempts, successes):
-    _w(tmp_path / "reports" / "bad.json", {"room_id": "room", "attempts": attempts,
-                                          "successes": successes, "seconds": 10})
-    row, = cost.collect_rows(tmp_path)
+    _w(
+        tmp_path / "reports" / "bad.json",
+        {"room_id": "room", "attempts": attempts, "successes": successes, "seconds": 10},
+    )
+    (row,) = cost.collect_rows(tmp_path)
     assert row["attempts"] is row["successes"] is None
     assert row["drop_rate"] is row["demos_per_hour"] is None
 

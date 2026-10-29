@@ -13,9 +13,9 @@ from arrival.config import load_dotenv  # noqa: F401  (kept importable from here
 DEFAULT_BASE_URL = "https://api.tokenfactory.nebius.com/v1"  # confirm against https://docs.tokenfactory.nebius.com/
 
 ROLES = {
-    "omni": "NEMOTRON_OMNI_MODEL",          # read the scan
-    "ultra": "NEMOTRON_ULTRA_MODEL",        # assemble twin, fill gaps
-    "super": "NEMOTRON_SUPER_MODEL",        # propose tasks
+    "omni": "NEMOTRON_OMNI_MODEL",  # read the scan
+    "ultra": "NEMOTRON_ULTRA_MODEL",  # assemble twin, fill gaps
+    "super": "NEMOTRON_SUPER_MODEL",  # propose tasks
     "lightning": "NEMOTRON_LIGHTNING_MODEL",  # wordings, labels
 }
 
@@ -32,8 +32,12 @@ def config() -> dict:
     }
 
 
-def complete(messages: list[dict], role: str = "super", model: str | None = None,
-             timeout: float = 60.0, **params) -> str:
+def complete(
+    messages: list[dict], role: str = "super", model: str | None = None, timeout: float = 60.0, **params
+) -> str:
+    """One chat completion from Nebius Token Factory: the model for `role` (or `model`), `messages` and any extra
+    request parameters. Returns the reply's text. Raises TokenFactoryNotConfigured without a key or model id, and
+    ValueError when the reply has no text (no choices, null content or an error object)."""
     cfg = config()
     if not cfg["api_key"]:
         raise TokenFactoryNotConfigured("TOKEN_FACTORY_API_KEY is not set. See docs/08-access.md.")
@@ -42,7 +46,9 @@ def complete(messages: list[dict], role: str = "super", model: str | None = None
         raise TokenFactoryNotConfigured(f"No model id for role {role!r}; set {ROLES.get(role, 'a model env var')}.")
     body = json.dumps({"model": model, "messages": messages, **params}).encode()
     req = urllib.request.Request(
-        cfg["base_url"] + "/chat/completions", data=body, method="POST",
+        cfg["base_url"] + "/chat/completions",
+        data=body,
+        method="POST",
         headers={"Authorization": f"Bearer {cfg['api_key']}", "Content-Type": "application/json"},
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -54,6 +60,8 @@ def complete(messages: list[dict], role: str = "super", model: str | None = None
     message = first.get("message")
     content = message.get("content") if isinstance(message, dict) else None
     if not isinstance(content, str):
-        raise ValueError(f"Token Factory reply from {model} has no message text "
-                         f"(finish_reason={first.get('finish_reason')!r}): {json.dumps(reply)[:200]}")
+        raise ValueError(
+            f"Token Factory reply from {model} has no message text "
+            f"(finish_reason={first.get('finish_reason')!r}): {json.dumps(reply)[:200]}"
+        )
     return content

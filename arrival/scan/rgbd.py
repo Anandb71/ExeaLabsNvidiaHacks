@@ -35,6 +35,9 @@ class ManifestError(ValueError):
 
 @dataclass(frozen=True)
 class Frame:
+    """One posed RGB-D frame of a scan: its image files, intrinsics, camera pose in the room frame and its train or
+    held-out split."""
+
     id: str
     timestamp: float
     rgb: Path
@@ -47,6 +50,9 @@ class Frame:
 
 @dataclass(frozen=True)
 class Manifest:
+    """A loaded frames_manifest.json: the room, image sizes, depth unit, the ARKit-world-to-room alignment and the
+    frames."""
+
     room_id: str
     root: Path
     rgb_size: tuple[int, int]  # (width, height)
@@ -84,9 +90,111 @@ def _size(value, what: str) -> tuple[int, int]:
     return int(value[0]), int(value[1])
 
 
+def _frame(i: int, e, root: Path, unit: str, seen: set[str], last_t: float) -> Frame:
+    """Frame i of the manifest, checked: a unique id, a timestamp after `last_t`, intrinsics, pose, split and
+    files inside the bundle whose depth suffix matches the depth unit. Adds the id to `seen`."""
+    if not isinstance(e, dict):
+        _fail("frames", f"frame {i} must be an object")
+    fid = e.get("id")
+    if not isinstance(fid, str) or not fid:
+        _fail("frame_id", f"frame {i} has no id")
+    if fid in seen:
+        _fail("duplicate_frame_id", f"frame id {fid!r} appears twice")
+    seen.add(fid)
+    t = e.get("timestamp")
+    try:
+        valid_timestamp = isinstance(t, (int, float)) and not isinstance(t, bool) and math.isfinite(t)
+    except OverflowError:
+        valid_timestamp = False
+    if not valid_timestamp:
+        _fail("timestamp", f"frame {fid} timestamp is not a finite number")
+    if t <= last_t:
+        _fail("non_monotonic_timestamps", f"frame {fid} timestamp {t} is not after {last_t}")
+    last_t = float(t)
+    k = e.get("intrinsics")
+    if not isinstance(k, dict):
+        _fail("intrinsics", f"frame {fid} needs numeric fx fy cx cy")
+    try:
+        values = [k[n] for n in ("fx", "fy", "cx", "cy")]
+    except (KeyError, TypeError, ValueError):
+        _fail("intrinsics", f"frame {fid} needs numeric fx fy cx cy")
+    if any(type(value) not in (int, float) for value in values):
+        _fail("intrinsics", f"frame {fid} needs numeric fx fy cx cy")
+    try:
+        fx, fy, cx, cy = map(float, values)
+    except OverflowError:
+        _fail("intrinsics", f"frame {fid} intrinsics cannot be represented as finite numbers")
+    if not all(math.isfinite(x) for x in (fx, fy, cx, cy)) or fx <= 0 or fy <= 0:
+        _fail("intrinsics", f"frame {fid} intrinsics must be finite with fx, fy > 0")
+    T = _matrix(e.get("camera_to_room"), f"frame {fid} camera_to_room")
+    split = e.get("split")
+    if split not in SPLITS:
+        _fail("split", f"frame {fid} split must be one of {SPLITS}, got {split!r}")
+    paths = {}
+    for key in ("rgb", "depth", "confidence"):
+        rel = e.get(key)
+        if rel is None and key == "confidence":
+            paths[key] = None
+            continue
+        if (
+            not isinstance(rel, str)
+            or not rel
+            or "\x00" in rel  # a NUL makes resolve() raise a bare ValueError
+            or Path(rel).is_absolute()
+            or ".." in Path(rel).parts
+        ):
+            _fail("bad_path", f"frame {fid} {key} must be a relative path inside the bundle")
+        if not (root / rel).resolve().is_relative_to(root.resolve()):
+            _fail("bad_path", f"frame {fid} {key} resolves outside the bundle")
+        if not (root / rel).is_file():
+            _fail("missing_file", f"frame {fid} {key} file {rel} does not exist")
+        paths[key] = root / rel
+    if paths["depth"].suffix.lower() != DEPTH_UNITS[unit]:
+        _fail(
+            "depth_unit",
+            f"frame {fid} depth {paths['depth'].name} does not match depth_unit {unit!r} (expects {DEPTH_UNITS[unit]})",
+        )
+    return Frame(
+        fid,
+        last_t,
+        paths["rgb"],
+        paths["depth"],
+        paths["confidence"],
+        np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1.0]]),
+        T,
+        split,
+    )
+
+
+def _check_split_lists(split_ids, frames: list[Frame]) -> None:
+    """The optional explicit split lists must agree with the per-frame split field."""
+    if not isinstance(split_ids, dict):
+        _fail("split", "splits must be an object with train and heldout id lists")
+    for name in SPLITS:
+        ids = split_ids.get(name)
+        if not isinstance(ids, list) or not all(isinstance(fid, str) for fid in ids):
+            _fail("split", f"splits.{name} must be a list of frame ids")
+        if len(ids) != len(set(ids)):
+            _fail("split", f"splits.{name} contains duplicate frame ids")
+    both = set(split_ids["train"]) & set(split_ids["heldout"])
+    if both:
+        _fail("frame_in_both_splits", f"frames in both train and heldout: {sorted(both)}")
+    for name in SPLITS:
+        expected = {f.id for f in frames if f.split == name}
+        listed = set(split_ids[name])
+        if listed != expected:
+            _fail(
+                "split",
+                f"splits.{name} disagrees with frame entries: missing {sorted(expected - listed)}, "
+                f"unknown or mislabelled {sorted(listed - expected)}",
+            )
+
+
 def load_manifest(directory) -> Manifest:
+    """Load and strictly check <directory>/frames_manifest.json: schema version, room id, axis convention, depth
+    unit, image sizes, the room alignment, every frame's files, intrinsics, pose and split, and the optional split
+    lists. Raises ManifestError with a machine-readable code on the first problem."""
     root = Path(directory)
-    resolved_root = root.resolve()
     path = root / MANIFEST_NAME
     if not path.is_file():
         _fail("missing_manifest", f"{path} not found")
@@ -120,82 +228,11 @@ def load_manifest(directory) -> Manifest:
     seen: set[str] = set()
     last_t = -math.inf
     for i, e in enumerate(entries):
-        if not isinstance(e, dict):
-            _fail("frames", f"frame {i} must be an object")
-        fid = e.get("id")
-        if not isinstance(fid, str) or not fid:
-            _fail("frame_id", f"frame {i} has no id")
-        if fid in seen:
-            _fail("duplicate_frame_id", f"frame id {fid!r} appears twice")
-        seen.add(fid)
-        t = e.get("timestamp")
-        try:
-            valid_timestamp = isinstance(t, (int, float)) and not isinstance(t, bool) and math.isfinite(t)
-        except OverflowError:
-            valid_timestamp = False
-        if not valid_timestamp:
-            _fail("timestamp", f"frame {fid} timestamp is not a finite number")
-        if t <= last_t:
-            _fail("non_monotonic_timestamps", f"frame {fid} timestamp {t} is not after {last_t}")
-        last_t = float(t)
-        k = e.get("intrinsics")
-        if not isinstance(k, dict):
-            _fail("intrinsics", f"frame {fid} needs numeric fx fy cx cy")
-        try:
-            values = [k[n] for n in ("fx", "fy", "cx", "cy")]
-        except (KeyError, TypeError, ValueError):
-            _fail("intrinsics", f"frame {fid} needs numeric fx fy cx cy")
-        if any(type(value) not in (int, float) for value in values):
-            _fail("intrinsics", f"frame {fid} needs numeric fx fy cx cy")
-        try:
-            fx, fy, cx, cy = map(float, values)
-        except OverflowError:
-            _fail("intrinsics", f"frame {fid} intrinsics cannot be represented as finite numbers")
-        if not all(math.isfinite(x) for x in (fx, fy, cx, cy)) or fx <= 0 or fy <= 0:
-            _fail("intrinsics", f"frame {fid} intrinsics must be finite with fx, fy > 0")
-        T = _matrix(e.get("camera_to_room"), f"frame {fid} camera_to_room")
-        split = e.get("split")
-        if split not in SPLITS:
-            _fail("split", f"frame {fid} split must be one of {SPLITS}, got {split!r}")
-        paths = {}
-        for key in ("rgb", "depth", "confidence"):
-            rel = e.get(key)
-            if rel is None and key == "confidence":
-                paths[key] = None
-                continue
-            if (not isinstance(rel, str) or not rel or "\x00" in rel  # a NUL makes resolve() raise a bare ValueError
-                    or Path(rel).is_absolute() or ".." in Path(rel).parts):
-                _fail("bad_path", f"frame {fid} {key} must be a relative path inside the bundle")
-            if not (root / rel).resolve().is_relative_to(resolved_root):
-                _fail("bad_path", f"frame {fid} {key} resolves outside the bundle")
-            if not (root / rel).is_file():
-                _fail("missing_file", f"frame {fid} {key} file {rel} does not exist")
-            paths[key] = root / rel
-        if paths["depth"].suffix.lower() != DEPTH_UNITS[unit]:
-            _fail("depth_unit", f"frame {fid} depth {paths['depth'].name} does not match depth_unit {unit!r} "
-                  f"(expects {DEPTH_UNITS[unit]})")
-        frames.append(Frame(fid, last_t, paths["rgb"], paths["depth"], paths["confidence"],
-                            np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1.0]]), T, split))
-
+        frames.append(_frame(i, e, root, unit, seen, last_t))
+        last_t = frames[-1].timestamp
     split_ids = raw.get("splits")
-    if split_ids is not None and not isinstance(split_ids, dict):
-        _fail("split", "splits must be an object with train and heldout id lists")
-    if split_ids is not None:  # optional explicit lists must agree with the per-frame field
-        for name in SPLITS:
-            ids = split_ids.get(name)
-            if not isinstance(ids, list) or not all(isinstance(fid, str) for fid in ids):
-                _fail("split", f"splits.{name} must be a list of frame ids")
-            if len(ids) != len(set(ids)):
-                _fail("split", f"splits.{name} contains duplicate frame ids")
-        both = set(split_ids["train"]) & set(split_ids["heldout"])
-        if both:
-            _fail("frame_in_both_splits", f"frames in both train and heldout: {sorted(both)}")
-        for name in SPLITS:
-            expected = {f.id for f in frames if f.split == name}
-            listed = set(split_ids[name])
-            if listed != expected:
-                _fail("split", f"splits.{name} disagrees with frame entries: missing {sorted(expected - listed)}, "
-                      f"unknown or mislabelled {sorted(listed - expected)}")
+    if split_ids is not None:
+        _check_split_lists(split_ids, frames)
     return Manifest(room_id, root, rgb_size, depth_size, unit, world, frames)
 
 
@@ -296,13 +333,26 @@ def write_synthetic_bundle(directory, depth_unit: str = "m", size=(64, 48)) -> P
         else:
             Image.fromarray(np.round(depth * 1000).astype(np.uint16)).save(root / "depth" / f"{name}{ext}")
         Image.new("RGB", (w, h), (120 + 60 * i, 130, 140)).save(root / "rgb" / f"{name}.png")
-        frames.append({"id": name, "timestamp": 1.0 + 0.5 * i, "rgb": f"rgb/{name}.png",
-                       "depth": f"depth/{name}{ext}",
-                       "intrinsics": {"fx": fx, "fy": fy, "cx": w / 2, "cy": h / 2},
-                       "camera_to_room": T.ravel().tolist(), "split": "train" if i == 0 else "heldout"})
-    manifest = {"schema_version": SCHEMA_VERSION, "room_id": "synthetic_room",
-                "axes": {"camera": CAMERA_AXES, "room": ROOM_AXES},
-                "arkit_world_to_room": np.eye(4).ravel().tolist(),
-                "rgb_size": [w, h], "depth_size": [w, h], "depth_unit": depth_unit, "frames": frames}
+        frames.append(
+            {
+                "id": name,
+                "timestamp": 1.0 + 0.5 * i,
+                "rgb": f"rgb/{name}.png",
+                "depth": f"depth/{name}{ext}",
+                "intrinsics": {"fx": fx, "fy": fy, "cx": w / 2, "cy": h / 2},
+                "camera_to_room": T.ravel().tolist(),
+                "split": "train" if i == 0 else "heldout",
+            }
+        )
+    manifest = {
+        "schema_version": SCHEMA_VERSION,
+        "room_id": "synthetic_room",
+        "axes": {"camera": CAMERA_AXES, "room": ROOM_AXES},
+        "arkit_world_to_room": np.eye(4).ravel().tolist(),
+        "rgb_size": [w, h],
+        "depth_size": [w, h],
+        "depth_unit": depth_unit,
+        "frames": frames,
+    }
     (root / MANIFEST_NAME).write_text(json.dumps(manifest, indent=1), encoding="utf-8")
     return root

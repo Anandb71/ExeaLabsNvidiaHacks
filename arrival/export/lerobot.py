@@ -59,23 +59,30 @@ SCRIPTED_EMBODIMENT = {
     "control": "absolute_joint_position",
     "joints_are_placeholder": True,
     "note": "single_arm values are zeros until a physics generator fills them. "
-            "Do not fine-tune on this dataset while joints_are_placeholder is true.",
+    "Do not fine-tune on this dataset while joints_are_placeholder is true.",
 }
 
-SCHEMA = pa.schema([
-    ("observation.state", pa.list_(pa.float32())),
-    ("action", pa.list_(pa.float32())),
-    ("timestamp", pa.float32()),
-    ("annotation.human.task_description", pa.int64()),
-    ("task_index", pa.int64()),
-    ("episode_index", pa.int64()),
-    ("index", pa.int64()),
-    ("next.reward", pa.float32()),
-    ("next.done", pa.bool_()),
-])
+SCHEMA = pa.schema(
+    [
+        ("observation.state", pa.list_(pa.float32())),
+        ("action", pa.list_(pa.float32())),
+        ("timestamp", pa.float32()),
+        ("annotation.human.task_description", pa.int64()),
+        ("task_index", pa.int64()),
+        ("episode_index", pa.int64()),
+        ("index", pa.int64()),
+        ("next.reward", pa.float32()),
+        ("next.done", pa.bool_()),
+    ]
+)
 SCALAR_FEATURES = {
-    "timestamp": "float32", "annotation.human.task_description": "int64", "task_index": "int64",
-    "episode_index": "int64", "index": "int64", "next.reward": "float32", "next.done": "bool",
+    "timestamp": "float32",
+    "annotation.human.task_description": "int64",
+    "task_index": "int64",
+    "episode_index": "int64",
+    "index": "int64",
+    "next.reward": "float32",
+    "next.done": "bool",
 }
 
 
@@ -93,6 +100,8 @@ def chunk_of(episode_index: int, chunks_size: int = CHUNKS_SIZE) -> int:
 
 
 def wants_video(policy: str, episode_index: int) -> bool:
+    """Whether an episode gets an mp4 under a video policy: all of them, every SPARSE_EVERY-th for sparse, none for
+    none."""
     if policy == "all":
         return True
     if policy == "sparse":
@@ -103,13 +112,23 @@ def wants_video(policy: str, episode_index: int) -> bool:
 def check_video_size(h: int, w: int) -> None:
     """imageio's macro_block_size=16 silently resizes any other size, so info.features would lie about the mp4."""
     if h % 16 or w % 16:
-        raise ValueError(f"video frames are {h}x{w}; height and width must be multiples of 16 or the mp4 "
-                         f"is resized and no longer matches info.features")
+        raise ValueError(
+            f"video frames are {h}x{w}; height and width must be multiples of 16 or the mp4 "
+            f"is resized and no longer matches info.features"
+        )
 
 
 def video_info(h: int, w: int, c: int, fps: int) -> dict:
-    return {"video.height": h, "video.width": w, "video.codec": "h264", "video.pix_fmt": "yuv420p",
-            "video.fps": fps, "video.channels": c, "video.is_depth_map": False, "has_audio": False}
+    return {
+        "video.height": h,
+        "video.width": w,
+        "video.codec": "h264",
+        "video.pix_fmt": "yuv420p",
+        "video.fps": fps,
+        "video.channels": c,
+        "video.is_depth_map": False,
+        "has_audio": False,
+    }
 
 
 def write_video(path: Path, frames: np.ndarray, fps: int, macro_block_size: int = 16) -> None:
@@ -118,16 +137,34 @@ def write_video(path: Path, frames: np.ndarray, fps: int, macro_block_size: int 
     import imageio.v2 as imageio
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    with imageio.get_writer(str(path), fps=fps, format="FFMPEG", codec="libx264", pixelformat="yuv420p",
-                            macro_block_size=macro_block_size, ffmpeg_log_level="error") as w:
+    with imageio.get_writer(
+        str(path),
+        fps=fps,
+        format="FFMPEG",
+        codec="libx264",
+        pixelformat="yuv420p",
+        macro_block_size=macro_block_size,
+        ffmpeg_log_level="error",
+    ) as w:
         for f in frames:
             w.append_data(f)
 
 
-def _stats(x: np.ndarray) -> dict:
+def read_jsonl(path: Path) -> list[dict]:
+    """The rows of a JSON Lines meta file (episodes.jsonl, tasks.jsonl, episodes_stats.jsonl); blank lines skipped."""
+    return [json.loads(line) for line in Path(path).read_text().splitlines() if line.strip()]
+
+
+def feature_stats(x: np.ndarray) -> dict:
+    """Per-column min, max, mean, std and row count of one feature, as LeRobot's episodes_stats.jsonl stores them."""
     x = x.astype(np.float64).reshape(len(x), -1)
-    return {"min": x.min(0).tolist(), "max": x.max(0).tolist(), "mean": x.mean(0).tolist(),
-            "std": x.std(0).tolist(), "count": [len(x)]}
+    return {
+        "min": x.min(0).tolist(),
+        "max": x.max(0).tolist(),
+        "mean": x.mean(0).tolist(),
+        "std": x.std(0).tolist(),
+        "count": [len(x)],
+    }
 
 
 def list_column(col) -> np.ndarray:
@@ -167,16 +204,36 @@ def _merge_stats(items: list[dict]) -> dict:
     tot = n.sum()
     gmean = (mean * n[:, None]).sum(0) / tot
     gvar = ((var + (mean - gmean) ** 2) * n[:, None]).sum(0) / tot
-    return {"min": np.min([s["min"] for s in items], 0).tolist(), "max": np.max([s["max"] for s in items], 0).tolist(),
-            "mean": gmean.tolist(), "std": np.sqrt(gvar).tolist(), "count": [int(tot)]}
+    return {
+        "min": np.min([s["min"] for s in items], 0).tolist(),
+        "max": np.max([s["max"] for s in items], 0).tolist(),
+        "mean": gmean.tolist(),
+        "std": np.sqrt(gvar).tolist(),
+        "count": [int(tot)],
+    }
 
 
 class LeRobotWriter:
-    def __init__(self, root: str | Path, room_id: str, video_policy: str, fps: int = 20,
-                 room_center_x: float = 2.0, state_dim: int = 8, action_dim: int = 8,
-                 modality: dict | None = None, video_keys: list[str] | None = None,
-                 embodiment: dict | None = None, extra_info: dict | None = None,
-                 robot_type: str = "robocasa_panda", chunks_size: int = CHUNKS_SIZE):
+    """Writes a GR00T LeRobot v2.1 dataset one episode at a time (parquet, mp4 per camera as the video policy says, meta
+    rows), then the meta files at `finish`. Used by the scripted placeholder; sim episodes go through
+    arrival.sim.export.SimDatasetWriter, which shares this module's helpers."""
+
+    def __init__(
+        self,
+        root: str | Path,
+        room_id: str,
+        video_policy: str,
+        fps: int = 20,
+        room_center_x: float = 2.0,
+        state_dim: int = 8,
+        action_dim: int = 8,
+        modality: dict | None = None,
+        video_keys: list[str] | None = None,
+        embodiment: dict | None = None,
+        extra_info: dict | None = None,
+        robot_type: str = "robocasa_panda",
+        chunks_size: int = CHUNKS_SIZE,
+    ):
         if video_policy not in ("all", "sparse", "none"):
             raise ValueError(f"unknown video policy {video_policy!r}")
         if type(fps) is not int or fps < 1:
@@ -202,8 +259,12 @@ class LeRobotWriter:
         base = modality if modality is not None else MODALITY
         self.modality = {k: v for k, v in base.items() if k != "video"}
         self.embodiment = dict(embodiment if embodiment is not None else SCRIPTED_EMBODIMENT)
-        self.extra_info = {"arrival_generator": "scripted_retarget", "arrival_physically_valid": False,
-                           "arrival_appearance": sim_texture.APPEARANCE, **(extra_info or {})}
+        self.extra_info = {
+            "arrival_generator": "scripted_retarget",
+            "arrival_physically_valid": False,
+            "arrival_appearance": sim_texture.APPEARANCE,
+            **(extra_info or {}),
+        }
         self.robot_type = robot_type
         self.chunks_size = chunks_size
         if self.root.exists():
@@ -230,9 +291,19 @@ class LeRobotWriter:
     def wants_video(self, episode_index: int) -> bool:
         return wants_video(self.video_policy, episode_index)
 
-    def add_episode(self, states: np.ndarray, actions: np.ndarray, timestamps, instruction: str,
-                    success: bool, videos: dict[str, np.ndarray] | None = None, extra: dict | None = None,
-                    sidecar: dict | None = None) -> int:
+    def add_episode(
+        self,
+        states: np.ndarray,
+        actions: np.ndarray,
+        timestamps,
+        instruction: str,
+        success: bool,
+        videos: dict[str, np.ndarray] | None = None,
+        extra: dict | None = None,
+        sidecar: dict | None = None,
+    ) -> int:
+        """Validate one episode (shapes, finite values, instruction, the videos the policy needs) before writing
+        anything, then write its parquet and mp4s and record its meta rows. Returns the episode index."""
         ep = len(self.episodes)
         if not isinstance(instruction, str) or not instruction.strip():
             raise ValueError(f"episode {ep}: instruction must be a nonempty string")
@@ -240,8 +311,10 @@ class LeRobotWriter:
         actions = np.asarray(actions, dtype=np.float32)
         n = len(states)
         if states.shape != (n, self.state_dim) or actions.shape != (n, self.action_dim) or n == 0:
-            raise ValueError(f"episode {ep}: states {states.shape} / actions {actions.shape} "
-                             f"!= (T,{self.state_dim}) / (T,{self.action_dim})")
+            raise ValueError(
+                f"episode {ep}: states {states.shape} / actions {actions.shape} "
+                f"!= (T,{self.state_dim}) / (T,{self.action_dim})"
+            )
         ts = np.asarray(timestamps, dtype=np.float32)
         if ts.shape != (n,):
             raise ValueError(f"episode {ep}: timestamps shape {ts.shape} != ({n},)")
@@ -278,17 +351,24 @@ class LeRobotWriter:
         done = np.zeros(n, dtype=bool)
         done[-1] = True
         cols = {
-            "observation.state": states, "action": actions, "timestamp": ts,
+            "observation.state": states,
+            "action": actions,
+            "timestamp": ts,
             "annotation.human.task_description": np.full(n, ti, dtype=np.int64),
-            "task_index": np.full(n, ti, dtype=np.int64), "episode_index": np.full(n, ep, dtype=np.int64),
+            "task_index": np.full(n, ti, dtype=np.int64),
+            "episode_index": np.full(n, ep, dtype=np.int64),
             "index": np.arange(self.total_frames, self.total_frames + n, dtype=np.int64),
-            "next.reward": reward, "next.done": done,
+            "next.reward": reward,
+            "next.done": done,
         }
-        table = pa.Table.from_arrays([
-            pa.array(list(states), type=pa.list_(pa.float32())),
-            pa.array(list(actions), type=pa.list_(pa.float32())),
-            *[pa.array(cols[c]) for c in SCHEMA.names[2:]],
-        ], schema=SCHEMA)
+        table = pa.Table.from_arrays(
+            [
+                pa.array(list(states), type=pa.list_(pa.float32())),
+                pa.array(list(actions), type=pa.list_(pa.float32())),
+                *[pa.array(cols[c]) for c in SCHEMA.names[2:]],
+            ],
+            schema=SCHEMA,
+        )
         chunk = chunk_of(ep, self.chunks_size)
         path = self.root / DATA_PATH.format(episode_chunk=chunk, episode_index=ep)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -297,15 +377,22 @@ class LeRobotWriter:
         for name, frames in clips.items():
             if self.video_policy == "all":
                 self.video_shapes.setdefault(name, list(frames.shape[1:]))
-                write_video(self.root / VIDEO_PATH.format(episode_chunk=chunk, video_key=video_key(name),
-                                                          episode_index=ep), frames, self.fps)
+                write_video(
+                    self.root / VIDEO_PATH.format(episode_chunk=chunk, video_key=video_key(name), episode_index=ep),
+                    frames,
+                    self.fps,
+                )
                 self.videos += 1
             elif self.wants_video(ep):
                 write_video(self.previews_dir / name / f"episode_{ep:06d}.mp4", frames, self.fps)
                 self.previews += 1
 
-        self.ep_stats.append({"episode_index": ep, "stats": {
-            k: _stats(v.astype(np.float64) if v.dtype == bool else v) for k, v in cols.items()}})
+        self.ep_stats.append(
+            {
+                "episode_index": ep,
+                "stats": {k: feature_stats(v.astype(np.float64) if v.dtype == bool else v) for k, v in cols.items()},
+            }
+        )
         self._sidecar.write(json.dumps({"episode_index": ep, **(sidecar or {})}) + "\n")
         row = {"episode_index": ep, "tasks": [instruction], "length": n, **(extra or {})}
         self.episodes.append(row)
@@ -322,12 +409,20 @@ class LeRobotWriter:
         videos = None
         if self.wants_video(ep):
             videos = {"ego_view": sim_texture.render_episode(frames, task["lighting"], self.room_center_x)}
-        return self.add_episode(state, state, [f["t"] for f in frames], task["instruction"], attempt["success"],
-                                videos=videos,
-                                extra={"arrival_family": task["family"], "arrival_lighting": task["lighting"]},
-                                sidecar={"task_id": task["task_id"], "frames": frames})
+        return self.add_episode(
+            state,
+            state,
+            [f["t"] for f in frames],
+            task["instruction"],
+            attempt["success"],
+            videos=videos,
+            extra={"arrival_family": task["family"], "arrival_lighting": task["lighting"]},
+            sidecar={"task_id": task["task_id"], "frames": frames},
+        )
 
     def features(self) -> dict:
+        """The info.json `features` block: state and action, a video feature per camera when every episode has video,
+        and the scalar columns."""
         feats = {
             "observation.state": {"dtype": "float32", "shape": [self.state_dim]},
             "action": {"dtype": "float32", "shape": [self.action_dim]},
@@ -336,7 +431,9 @@ class LeRobotWriter:
             for name in self.video_keys:
                 h, w, c = self.video_shapes.get(name, [sim_texture.SIZE, sim_texture.SIZE, 3])
                 feats[video_key(name)] = {
-                    "dtype": "video", "shape": [h, w, c], "names": ["height", "width", "channel"],
+                    "dtype": "video",
+                    "shape": [h, w, c],
+                    "names": ["height", "width", "channel"],
                     "info": video_info(h, w, c, self.fps),
                 }
         for k, dt in SCALAR_FEATURES.items():
@@ -347,13 +444,15 @@ class LeRobotWriter:
         """Release the sidecar handle; idempotent, so an aborted run can call it without finish()."""
         self._sidecar.close()
 
-    def __enter__(self) -> "LeRobotWriter":
+    def __enter__(self) -> LeRobotWriter:
         return self
 
     def __exit__(self, *exc) -> None:
         self.close()
 
     def finish(self, attempts: int) -> dict:
+        """Close the writers and write every meta file (tasks, episodes, per-episode and dataset stats, modality,
+        embodiment, info). Returns the info.json dict."""
         self.close()
         meta = self.root / "meta"
         with open(meta / "tasks.jsonl", "w") as f:
@@ -371,8 +470,7 @@ class LeRobotWriter:
         if self.video_policy == "all":
             modality["video"] = {name: {"original_key": video_key(name)} for name in self.video_keys}
         (meta / "modality.json").write_text(json.dumps(modality, indent=2))
-        (meta / "embodiment.json").write_text(json.dumps({**self.embodiment, "cartesian_sidecar": SIDECAR},
-                                                         indent=2))
+        (meta / "embodiment.json").write_text(json.dumps({**self.embodiment, "cartesian_sidecar": SIDECAR}, indent=2))
         n = len(self.episodes)
         info = {
             "codebase_version": "v2.1",

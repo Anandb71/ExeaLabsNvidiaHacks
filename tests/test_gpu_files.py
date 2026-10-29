@@ -1,10 +1,10 @@
 import re
 import shutil
+import subprocess
 import sys
+from pathlib import Path
 
 import pytest
-import subprocess
-from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts" / "run_finetune.sh"

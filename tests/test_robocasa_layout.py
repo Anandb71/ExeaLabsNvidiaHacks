@@ -102,8 +102,10 @@ def test_sink_is_the_counters_interior_object_at_the_twin_spot(hero):
     # Counter._place_interior_obj, in the group frame, then turned by the group
     pad = 0.05 + SINK_DOOR_TH
     w, d = counter["size"][:2]
-    local = (counter["pos"][0] + (counter["obj_x_percent"] - 0.5) * w,
-             counter["pos"][1] + pad / 2 + (counter["obj_y_percent"] - 0.5) * (d - pad))
+    local = (
+        counter["pos"][0] + (counter["obj_x_percent"] - 0.5) * w,
+        counter["pos"][1] + pad / 2 + (counter["obj_y_percent"] - 0.5) * (d - pad),
+    )
     sink = next(r for r in hero["main_group"]["bottom_row"] if r["name"] == "sink_1")
     assert _rot(local, doc["main_group"]["group_z_rot"]) == pytest.approx(tuple(sink["pos"][:2]), abs=1e-5)
 
@@ -126,17 +128,27 @@ def test_kitchen_groups_by_facing(kitchen):
 
 
 def test_unsupported_things_stay_explicit_boxes():
-    src = {"room": {"walls": [{"name": "w_diag", "type": "wall", "size": [2.0, 0.1, 2.4], "pos": [1.0, 1.0, 1.2],
-                               "z_rot": 0.785398}]},
-           "main_group": {"group_origin": [0, 0], "group_pos": [0.0, 0.0], "group_z_rot": 0.0, "bottom_row": [
-               {"name": "bed_1", "type": "box", "size": [1.6, 2.0, 0.5], "pos": [2.0, 2.0, 0.25]},
-               {"name": "odd_1", "type": "spaceship", "size": [1.0, 1.0, 1.0], "pos": [3.0, 3.0, 0.5]},
-               {"name": "isl", "type": "counter", "size": [1.0, 0.6, 0.9], "pos": [1.5, 1.5, 0.45], "island": True},
-               {"name": "sink_x", "type": "sink", "size": [0.5, 0.4, 0.2], "pos": [9.0, 9.0, 0.8]}]}}
+    src = {
+        "room": {
+            "walls": [
+                {"name": "w_diag", "type": "wall", "size": [2.0, 0.1, 2.4], "pos": [1.0, 1.0, 1.2], "z_rot": 0.785398}
+            ]
+        },
+        "main_group": {
+            "group_origin": [0, 0],
+            "group_pos": [0.0, 0.0],
+            "group_z_rot": 0.0,
+            "bottom_row": [
+                {"name": "bed_1", "type": "box", "size": [1.6, 2.0, 0.5], "pos": [2.0, 2.0, 0.25]},
+                {"name": "odd_1", "type": "spaceship", "size": [1.0, 1.0, 1.0], "pos": [3.0, 3.0, 0.5]},
+                {"name": "isl", "type": "counter", "size": [1.0, 0.6, 0.9], "pos": [1.5, 1.5, 0.45], "island": True},
+                {"name": "sink_x", "type": "sink", "size": [0.5, 0.4, 0.2], "pos": [9.0, 9.0, 0.8]},
+            ],
+        },
+    }
     doc, notes = robocasa_layout(src)
     wall = doc["room"]["walls"][0]
-    assert wall == {"name": "w_diag", "type": "box", "size": [2.0, 0.1, 2.4], "pos": [1.0, 1.0, 1.2],
-                    "z_rot": 0.785398}
+    assert wall == {"name": "w_diag", "type": "box", "size": [2.0, 0.1, 2.4], "pos": [1.0, 1.0, 1.2], "z_rot": 0.785398}
     rows = _rows(doc)
     assert rows["bed_1"][1]["type"] == "box" and rows["odd_1"][1]["type"] == "box"
     assert "island" not in rows["isl"][1]

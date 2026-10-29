@@ -39,6 +39,7 @@ class ProtocolError(ValueError):
 
 
 def encode_image(img: np.ndarray) -> str:
+    """An HxWx3 uint8 camera frame as a base64 PNG string. Raises ProtocolError for any other array."""
     from PIL import Image
 
     if not isinstance(img, np.ndarray) or img.ndim != 3 or img.shape[2] != 3 or img.dtype != np.uint8:
@@ -49,6 +50,7 @@ def encode_image(img: np.ndarray) -> str:
 
 
 def decode_image(s: str) -> np.ndarray:
+    """The RGB array of a base64 PNG string. Raises ProtocolError when it does not decode."""
     from PIL import Image
 
     if not isinstance(s, str):
@@ -69,9 +71,11 @@ def encode_request(obs: dict, instruction: str, schema: str = "arm") -> dict:
     state = _numeric_array(obs["state"], "state")
     dim = _schema(schema)
     if state.ndim != 1 or state.shape[0] < dim or state.shape[0] not in SCHEMA_DIM.values():
-        raise ProtocolError(f"state must be 8 or 11 floats and at least the {dim} the {schema!r} schema needs "
-                            f"(7 joints + gripper{' + base x, y, yaw' if schema == 'mobile' else ''}), "
-                            f"got shape {list(state.shape)}")
+        raise ProtocolError(
+            f"state must be 8 or 11 floats and at least the {dim} the {schema!r} schema needs "
+            f"(7 joints + gripper{' + base x, y, yaw' if schema == 'mobile' else ''}), "
+            f"got shape {list(state.shape)}"
+        )
     state = state[:dim]
     if not np.isfinite(state).all():
         raise ProtocolError("state has non-finite values")
@@ -82,9 +86,9 @@ def encode_request(obs: dict, instruction: str, schema: str = "arm") -> dict:
             raise ProtocolError(f"{k} frame must be HxWx3, got shape {list(np.shape(obs[k]))}")
     body = {f"video.{k}": encode_image(obs[k]) for k in VIDEO_KEYS}
     body["state.single_arm"] = state[:ARM_DOF].tolist()
-    body["state.gripper"] = state[ARM_DOF:ARM_DOF + 1].tolist()
+    body["state.gripper"] = state[ARM_DOF : ARM_DOF + 1].tolist()
     if schema == "mobile":
-        body["state.base"] = state[ARM_DOF + 1:].tolist()
+        body["state.base"] = state[ARM_DOF + 1 :].tolist()
     body[TASK_KEY] = instruction
     return body
 
@@ -128,12 +132,14 @@ def encode_response(chunk: np.ndarray) -> dict:
     """chunk [T,8] (7 arm targets + gripper) or [T,11] (plus base x, y, yaw) -> response body."""
     chunk = _numeric_array(chunk, "chunk")
     if chunk.ndim != 2 or chunk.shape[1] not in SCHEMA_DIM.values() or chunk.shape[0] < 1:
-        raise ProtocolError(f"chunk must be [T,8] (arm schema) or [T,11] (mobile schema), got shape {list(chunk.shape)}")
+        raise ProtocolError(
+            f"chunk must be [T,8] (arm schema) or [T,11] (mobile schema), got shape {list(chunk.shape)}"
+        )
     if not np.isfinite(chunk).all():
         raise ProtocolError("chunk has non-finite values")
-    out = {"action.single_arm": chunk[:, :ARM_DOF].tolist(), "action.gripper": chunk[:, ARM_DOF:ARM_DOF + 1].tolist()}
+    out = {"action.single_arm": chunk[:, :ARM_DOF].tolist(), "action.gripper": chunk[:, ARM_DOF : ARM_DOF + 1].tolist()}
     if chunk.shape[1] == SCHEMA_DIM["mobile"]:
-        out["action.base"] = chunk[:, ARM_DOF + 1:].tolist()
+        out["action.base"] = chunk[:, ARM_DOF + 1 :].tolist()
     return out
 
 
@@ -145,8 +151,10 @@ def decode_response(out: dict, schema: str | None = None) -> np.ndarray:
     parts = []
     keys = ACTION_KEYS + (("action.base",) if "action.base" in out else ())
     if schema is not None and len(keys) + 0 != (3 if schema == "mobile" else 2):
-        raise ProtocolError(f"the {schema!r} schema expects {_schema(schema)} floats per step but the server returned "
-                            f"{'11 (with action.base)' if len(keys) == 3 else '8 (no action.base)'}")
+        raise ProtocolError(
+            f"the {schema!r} schema expects {_schema(schema)} floats per step but the server returned "
+            f"{'11 (with action.base)' if len(keys) == 3 else '8 (no action.base)'}"
+        )
     for key, n in zip(keys, (ARM_DOF, 1, BASE_DOF)):
         if key not in out:
             raise ProtocolError(f"response is missing {key}")

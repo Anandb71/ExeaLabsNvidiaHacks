@@ -11,35 +11,36 @@ from pathlib import Path
 
 from arrival.config import get as get_setting
 from arrival.config import redact
+from arrival.scan.bundle import resolve_scans
 
 EXIT_OK, EXIT_INVALID, EXIT_USAGE = 0, 1, 2
 # arrival.sim.tasks.SIM_FAMILIES, spelled out because importing it loads MuJoCo
-FAMILY_NAMES = ("counter_to_sink, counter_to_counter, open_drawer, open_door, close_drawer, close_door, put_in_drawer, "
-                "wipe_counter, open_fridge, move_on_table, open_oven, open_dishwasher, turn_on_faucet, load_dishwasher, "
-                "unload_dishwasher")
+FAMILY_NAMES = (
+    "counter_to_sink, counter_to_counter, open_drawer, open_door, close_drawer, close_door, put_in_drawer, "
+    "wipe_counter, open_fridge, move_on_table, open_oven, open_dishwasher, turn_on_faucet, load_dishwasher, "
+    "unload_dishwasher"
+)
 
 
-def resolve_scans(scans_dir: str | Path = "scans") -> Path:
-    """A relative --scans that does not exist in the cwd falls back to <repo root>/<scans_dir>."""
-    p = Path(scans_dir)
-    if p.is_absolute() or p.exists():
-        return p
-    repo = Path(__file__).resolve().parents[1] / p
-    return repo if repo.exists() else p
-
-
-def run_demo(room: str = "hero_kitchen", episodes: int = 4, videos: str = "all",
-             out_dir: str | Path = "out", scans_dir: str | Path = "scans",
-             from_roomplan: bool = False, seed: int = 0, log=print) -> dict:
+def run_demo(
+    room: str = "hero_kitchen",
+    episodes: int = 4,
+    videos: str = "all",
+    out_dir: str | Path = "out",
+    scans_dir: str | Path = "scans",
+    from_roomplan: bool = False,
+    seed: int = 0,
+    log=print,
+) -> dict:
     """scan -> twin -> tasks -> scripted retarget -> oracle -> sim_texture -> LeRobot v2 -> report."""
-    from arrival.eval.report import build_report, write_report
+    from arrival.eval.cost import build_report, write_report
     from arrival.export.lerobot import LeRobotWriter
-    from arrival.export.provenance import run_record
     from arrival.generate.scripted import generate
+    from arrival.provenance import run_record
     from arrival.render.sim_texture import room_center_x
     from arrival.scan import bundle as scan_bundle
     from arrival.tasks.propose import propose, write_tasks
-    from arrival.twin.compile import compile_twin, write_twin
+    from arrival.twin.compile import compile_twin, roomplan_twin, write_twin
 
     out_dir, scans_dir = Path(out_dir), resolve_scans(scans_dir)
     if not (scans_dir / room).is_dir():
@@ -61,9 +62,17 @@ def run_demo(room: str = "hero_kitchen", episodes: int = 4, videos: str = "all",
 
     t0 = time.perf_counter()
     dataset_dir = out_dir / "datasets" / room
-    writer = LeRobotWriter(dataset_dir, room, videos, room_center_x=room_center_x(twin), extra_info={
-        "arrival_provenance": run_record(twin, seed=seed, generator="scripted_retarget", episodes=episodes,
-                                         videos=videos)})
+    writer = LeRobotWriter(
+        dataset_dir,
+        room,
+        videos,
+        room_center_x=room_center_x(twin),
+        extra_info={
+            "arrival_provenance": run_record(
+                twin, seed=seed, generator="scripted_retarget", episodes=episodes, videos=videos
+            )
+        },
+    )
     attempts = 0
     for att in generate(tasks["tasks"], twin, episodes, seed=seed):
         attempts += 1
@@ -75,11 +84,12 @@ def run_demo(room: str = "hero_kitchen", episodes: int = 4, videos: str = "all",
     seconds = time.perf_counter() - t0
     report = build_report(room, attempts, info["total_episodes"], seconds, sorted(writer.families))
     report_path = write_report(report, out_dir / "reports")
-    return {"dataset": dataset_dir, "report": report_path, "info": info, "report_data": report,
-            "twin_dir": twin_dir}
+    return {"dataset": dataset_dir, "report": report_path, "info": info, "report_data": report, "twin_dir": twin_dir}
 
 
 def cmd_demo(a) -> int:
+    """`arrival demo`: write the scripted placeholder dataset for one room and print where it went. Exit code 0, or 2
+    for bad arguments."""
     if a.episodes < 1:
         print("--episodes must be >= 1", file=sys.stderr)
         return EXIT_USAGE
@@ -88,13 +98,17 @@ def cmd_demo(a) -> int:
     r = res["report_data"]
     print(f"dataset: {res['dataset']}")
     print(f"report:  {res['report']}")
-    print(f"{r['successes']} episodes / {r['attempts']} attempts ({r['dropped']} dropped) in "
-          f"{r['seconds']:.1f}s, {res['info']['total_videos']} videos, families={r['tasks']}")
+    print(
+        f"{r['successes']} episodes / {r['attempts']} attempts ({r['dropped']} dropped) in "
+        f"{r['seconds']:.1f}s, {res['info']['total_videos']} videos, families={r['tasks']}"
+    )
     print("NOTE: scripted placeholder motion; arrival_physically_valid=false. Do not fine-tune on it.")
     return EXIT_OK
 
 
 def cmd_validate(a) -> int:
+    """`arrival validate`: structural check of a LeRobot v2 dataset; with --episodes, --frames, --drop or --json also
+    the per-episode quality pass. Exit code 0 valid, 1 invalid or flagged, 2 usage error."""
     from arrival.export.validate import validate
 
     per_episode = a.episodes or a.frames or bool(a.drop) or bool(a.json)  # --json alone used to write nothing
@@ -106,10 +120,12 @@ def cmd_validate(a) -> int:
             return EXIT_INVALID
     else:
         info = json.loads((Path(a.dataset_dir) / "meta" / "info.json").read_text())
-        print(f"OK: {a.dataset_dir}: {info['total_episodes']} episodes, {info['total_frames']} frames, "
-              f"{info['total_tasks']} tasks, {info['total_chunks']} chunk(s), {info['total_videos']} videos, "
-              f"video_policy={info['arrival_video_policy']}, "
-              f"physically_valid={info['arrival_physically_valid']}")
+        print(
+            f"OK: {a.dataset_dir}: {info['total_episodes']} episodes, {info['total_frames']} frames, "
+            f"{info['total_tasks']} tasks, {info['total_chunks']} chunk(s), {info['total_videos']} videos, "
+            f"video_policy={info['arrival_video_policy']}, "
+            f"physically_valid={info['arrival_physically_valid']}"
+        )
         if not per_episode:
             return EXIT_OK
     from arrival.export.quality import QualityError, check_episodes, drop_flagged, format_report
@@ -137,19 +153,31 @@ def cmd_validate(a) -> int:
 
 
 def cmd_serve(a) -> int:
+    """`arrival serve`: run the local web page until interrupted. Exit code 2 for bad limits or a port that cannot be
+    bound."""
     if not 0 <= a.port <= 65535:
         print("--port must be 0-65535 (0 = any free port)", file=sys.stderr)
         return EXIT_USAGE
     from arrival.web.app import serve
 
     if not 0 < a.max_upload_mb < float("inf") or a.rate_limit < 0 or a.max_queued < 0:  # NaN fails the first test
-        print("--max-upload-mb must be a finite number > 0; --rate-limit and --max-queued must be >= 0 (0 = off)",
-              file=sys.stderr)
+        print(
+            "--max-upload-mb must be a finite number > 0; --rate-limit and --max-queued must be >= 0 (0 = off)",
+            file=sys.stderr,
+        )
         return EXIT_USAGE
     try:
-        serve(port=a.port, out_dir=Path(a.out), scans_dir=resolve_scans(a.scans), host=a.host,
-              max_upload_mb=a.max_upload_mb, rate_limit=a.rate_limit, max_queued=a.max_queued,
-              public=a.public, behind_proxy=a.behind_proxy)
+        serve(
+            port=a.port,
+            out_dir=Path(a.out),
+            scans_dir=resolve_scans(a.scans),
+            host=a.host,
+            max_upload_mb=a.max_upload_mb,
+            rate_limit=a.rate_limit,
+            max_queued=a.max_queued,
+            public=a.public,
+            behind_proxy=a.behind_proxy,
+        )
     except OSError as e:  # the bind: port in use, or a host that does not resolve
         print(f"serve: cannot listen on {a.host}:{a.port}: {e}", file=sys.stderr)
         return EXIT_USAGE
@@ -165,20 +193,13 @@ def cmd_doctor(a) -> int:
     return EXIT_INVALID if doctor.exit_code(checks) else EXIT_OK
 
 
-def roomplan_twin(rp_path: Path, room: str, seed: int = 0) -> dict:
-    """The twin of a RoomPlan export (arrival.twin.compile.roomplan_twin, shared with teleop and retarget)."""
-    from arrival.twin.compile import roomplan_twin as build
-
-    return build(rp_path, room, seed)
-
-
 def _load_twin(room: str, out: str | Path, scans: str | Path) -> dict:
     """The compiled twin under <out>/twins, unless scans/<room>/scan.json (or roomplan.json) was saved after it
     was written; then the scan is compiled again. A room with only a roomplan.json, as a phone capture lands, is
     built as `demo --from-roomplan` builds it (objects placed with seed 0). Raises FileNotFoundError when there
     is no twin and no scan."""
     from arrival.scan import bundle as scan_bundle
-    from arrival.twin.compile import compile_twin
+    from arrival.twin.compile import compile_twin, roomplan_twin
 
     room_dir = resolve_scans(scans) / room
     scan_path = room_dir / "scan.json"
@@ -255,18 +276,27 @@ def cmd_sim(a) -> int:
         return EXIT_USAGE
     if getattr(a, "split", "train") == "eval" and getattr(a, "instructions", "template") != "nemotron":
         # only the generated wordings have an eval split; the template run was the train split labelled eval
-        print("--split eval needs --instructions nemotron: the template wordings have no eval split for sim "
-              "(eval --holdout holds theirs out)", file=sys.stderr)
+        print(
+            "--split eval needs --instructions nemotron: the template wordings have no eval split for sim "
+            "(eval --holdout holds theirs out)",
+            file=sys.stderr,
+        )
         return EXIT_USAGE
     if getattr(a, "instruction_style", "mixed") != "mixed" and getattr(a, "instructions", "template") != "nemotron":
-        print("--instruction-style needs --instructions nemotron: template wordings do not support style variation", file=sys.stderr)
+        print(
+            "--instruction-style needs --instructions nemotron: template wordings do not support style variation",
+            file=sys.stderr,
+        )
         return EXIT_USAGE
     if getattr(a, "tavily", False) and getattr(a, "planner", "rule") != "vlm":
         # only VLMPlanner reads the research; with the rule planner the lookups ran and changed nothing
-        print("--tavily needs --planner vlm: the research only goes into the Nemotron planner's prompt", file=sys.stderr)
+        print(
+            "--tavily needs --planner vlm: the research only goes into the Nemotron planner's prompt", file=sys.stderr
+        )
         return EXIT_USAGE
     if getattr(a, "tavily", False):
         from arrival.tasks.tavily_research import TavilyResearchAgent
+
         agent = TavilyResearchAgent()
         twin = agent.enrich_twin(twin)
         for ftype, info in twin["tavily_research"].items():  # say what the planner will be told, and where it came from
@@ -275,14 +305,27 @@ def cmd_sim(a) -> int:
     from arrival.sim.policy import VLANotConfigured
 
     try:
-        res = collect(twin, fams, a.episodes, a.out, people=a.people, policy_name=a.policy, res=a.res,
-                      seed=a.seed, save_preview=a.save_preview,
-                      planner_name=a.planner, split=a.split,
-                      use_generated_instructions=(a.instructions == "nemotron"), base=getattr(a, "base", "fixed"),
-                      shard=shard, resume=getattr(a, "resume", False), arm=getattr(a, "arm", "procedural"),
-                      exec_noise=getattr(a, "dart", 0.0),
-                      exocentric=getattr(a, "exocentric", False),
-                      instruction_style=getattr(a, "instruction_style", "mixed"))
+        res = collect(
+            twin,
+            fams,
+            a.episodes,
+            a.out,
+            people=a.people,
+            policy_name=a.policy,
+            res=a.res,
+            seed=a.seed,
+            save_preview=a.save_preview,
+            planner_name=a.planner,
+            split=a.split,
+            use_generated_instructions=(a.instructions == "nemotron"),
+            base=getattr(a, "base", "fixed"),
+            shard=shard,
+            resume=getattr(a, "resume", False),
+            arm=getattr(a, "arm", "procedural"),
+            exec_noise=getattr(a, "dart", 0.0),
+            exocentric=getattr(a, "exocentric", False),
+            instruction_style=getattr(a, "instruction_style", "mixed"),
+        )
     except ShardError as e:
         print(e, file=sys.stderr)
         return EXIT_USAGE
@@ -299,14 +342,21 @@ def cmd_sim(a) -> int:
     print(f"report:  {res['report']}")
     if shard:
         s = r["shard"]
-        print(f"shard {s['index']}/{s['count']}: tasks {s['task_range'][0]}..{s['task_range'][1] - 1} of {s['total_tasks']}; "
-              f"join the shards with: python -m arrival merge-shards {Path(a.out) / 'shards'} --out {a.out}")
-    print(f"{r['successes']} episodes / {r['attempts']} attempts ({r['dropped']} dropped, physics-checked, "
-          f"{r['human_contacts']} human contacts) in {r['seconds']:.1f}s; per family: "
-          + ", ".join(f"{k} {v['successes']}/{v['attempts']}" for k, v in r["families"].items()))
+        print(
+            f"shard {s['index']}/{s['count']}: tasks {s['task_range'][0]}..{s['task_range'][1] - 1} of {s['total_tasks']}; "
+            f"join the shards with: python -m arrival merge-shards {Path(a.out) / 'shards'} --out {a.out}"
+        )
+    print(
+        f"{r['successes']} episodes / {r['attempts']} attempts ({r['dropped']} dropped, physics-checked, "
+        f"{r['human_contacts']} human contacts) in {r['seconds']:.1f}s; per family: "
+        + ", ".join(f"{k} {v['successes']}/{v['attempts']}" for k, v in r["families"].items())
+    )
     if r["skipped"]:
-        print(f"skipped {r['skipped']} ({r['skipped_unreachable']} unreachable in the pre-flight, "
-              f"{r['skipped_error']} errored; none written):", file=sys.stderr)
+        print(
+            f"skipped {r['skipped']} ({r['skipped_unreachable']} unreachable in the pre-flight, "
+            f"{r['skipped_error']} errored; none written):",
+            file=sys.stderr,
+        )
         for x in r["skip_reasons"][:5]:
             print(f"  {x.get('task_id') or x['family']}: {x['reason']}", file=sys.stderr)
     if r["attempts"] == 0 and r["skipped_error"]:
@@ -369,19 +419,24 @@ def cmd_retarget(a) -> int:
                 print("give --source or --teleop, not both", file=sys.stderr)
                 return EXIT_USAGE
             from arrival.generate import teleop_seeds
+
             try:
                 sources, rows = teleop_seeds.teleop_sources(twin, a.teleop)
             except (OSError, ValueError, KeyError) as e:
                 print(f"invalid --teleop {a.teleop}: {e}", file=sys.stderr)
                 return EXIT_USAGE
             if not sources:
-                print(f"no demo under {a.teleop} replays successfully in {twin['room_id']}: "
-                      f"{[r['outcome'] for r in rows]}", file=sys.stderr)
+                print(
+                    f"no demo under {a.teleop} replays successfully in {twin['room_id']}: "
+                    f"{[r['outcome'] for r in rows]}",
+                    file=sys.stderr,
+                )
                 return EXIT_INVALID
         try:
             more = {"sources": sources} if sources is not None else {}
-            res = se3_retarget.generate(twin, out_dir, source=source, attempts=a.attempts,
-                                        seed=a.seed, res=a.res, **more)
+            res = se3_retarget.generate(
+                twin, out_dir, source=source, attempts=a.attempts, seed=a.seed, res=a.res, **more
+            )
         except Exception as e:
             print(f"retarget failed: {e}", file=sys.stderr)
             return EXIT_INVALID
@@ -394,11 +449,21 @@ def cmd_retarget(a) -> int:
 
         fam = getattr(a, "family", "counter_to_sink")
         if fam not in seed_retarget.FAMILIES:
-            print(f"unknown family {fam!r} for seed_replay (choose from {', '.join(seed_retarget.FAMILIES)})", file=sys.stderr)
+            print(
+                f"unknown family {fam!r} for seed_replay (choose from {', '.join(seed_retarget.FAMILIES)})",
+                file=sys.stderr,
+            )
             return EXIT_USAGE
         try:
-            res = seed_retarget.retarget(twin, out_dir, attempts=a.attempts, seed=a.seed,
-                                         res=a.res, family=fam, baseline=getattr(a, "baseline", False))
+            res = seed_retarget.retarget(
+                twin,
+                out_dir,
+                attempts=a.attempts,
+                seed=a.seed,
+                res=a.res,
+                family=fam,
+                baseline=getattr(a, "baseline", False),
+            )
         except Exception as e:
             print(f"retarget failed: {e}", file=sys.stderr)
             return EXIT_INVALID
@@ -427,8 +492,20 @@ def cmd_fanout(a) -> int:
             print(f"fanout: unknown families {bad} (choose from {', '.join(SIM_FAMILIES)})", file=sys.stderr)
             return EXIT_USAGE
     try:
-        cfg = FanoutConfig(a.run_id, a.shards, a.room, a.families, a.episodes, a.people, a.res, a.seed, a.scans,
-                           getattr(a, "dart", 0.0), getattr(a, "base", "fixed"), getattr(a, "exocentric", False))
+        cfg = FanoutConfig(
+            a.run_id,
+            a.shards,
+            a.room,
+            a.families,
+            a.episodes,
+            a.people,
+            a.res,
+            a.seed,
+            a.scans,
+            getattr(a, "dart", 0.0),
+            getattr(a, "base", "fixed"),
+            getattr(a, "exocentric", False),
+        )
     except ShardError as e:
         print(f"fanout: {e}", file=sys.stderr)
         return EXIT_USAGE
@@ -481,8 +558,7 @@ def cmd_subset(a) -> int:
     else:
         fams = None
     try:
-        res = subset_dataset(a.src, a.out, families=fams,
-                             min_drawer_opening=a.min_drawer_opening)
+        res = subset_dataset(a.src, a.out, families=fams, min_drawer_opening=a.min_drawer_opening)
     except (SubsetError, ShardError) as e:
         print(f"subset: {e}", file=sys.stderr)
         return EXIT_USAGE
@@ -517,8 +593,10 @@ def cmd_merge_shards(a) -> int:
         print(f"report:  {res['report']}")
     if errors:
         return EXIT_INVALID
-    print(f"OK: merged {info['arrival_merged_shards']} shards: {info['total_episodes']} episodes, "
-          f"{info['total_frames']} frames, {info['total_tasks']} tasks, physically_valid={info['arrival_physically_valid']}")
+    print(
+        f"OK: merged {info['arrival_merged_shards']} shards: {info['total_episodes']} episodes, "
+        f"{info['total_frames']} frames, {info['total_tasks']} tasks, physically_valid={info['arrival_physically_valid']}"
+    )
     return EXIT_OK
 
 
@@ -572,15 +650,27 @@ def cmd_eval(a) -> int:
     from arrival.eval.manifest import load_manifest
     from arrival.sim.policy import VLANotConfigured
 
-    defaults = dict(room="hero_kitchen", families="counter_to_sink,open_drawer,move_on_table", episodes=4, seed=0,
-                    people=2, holdout=False, res=128, scans="scans", base="fixed", arm="procedural")
+    defaults = dict(
+        room="hero_kitchen",
+        families="counter_to_sink,open_drawer,move_on_table",
+        episodes=4,
+        seed=0,
+        people=2,
+        holdout=False,
+        res=128,
+        scans="scans",
+        base="fixed",
+        arm="procedural",
+    )
     try:
         if getattr(a, "manifest", None):
             conflicts = ["--" + key for key in defaults if getattr(a, key, None) is not None]
             if conflicts:
                 raise ValueError("--manifest cannot be combined with " + ", ".join(conflicts))
             frozen = load_manifest(a.manifest)
-            rep = evaluate(manifest=frozen, policy_name=a.policy, checkpoint_id=getattr(a, "checkpoint_id", None), out_dir=a.out)
+            rep = evaluate(
+                manifest=frozen, policy_name=a.policy, checkpoint_id=getattr(a, "checkpoint_id", None), out_dir=a.out
+            )
         else:
             for key, value in defaults.items():
                 if getattr(a, key, None) is None:
@@ -589,10 +679,20 @@ def cmd_eval(a) -> int:
             if isinstance(args, str):
                 raise ValueError(args)
             fams, twin = args
-            rep = evaluate(twin, fams, a.episodes, policy_name=a.policy, seed=a.seed, people=a.people,
-                           holdout=a.holdout, res=a.res, out_dir=a.out, base=getattr(a, "base", "fixed"),
-                           arm=getattr(a, "arm", "procedural"),
-                           checkpoint_id=getattr(a, "checkpoint_id", None))
+            rep = evaluate(
+                twin,
+                fams,
+                a.episodes,
+                policy_name=a.policy,
+                seed=a.seed,
+                people=a.people,
+                holdout=a.holdout,
+                res=a.res,
+                out_dir=a.out,
+                base=getattr(a, "base", "fixed"),
+                arm=getattr(a, "arm", "procedural"),
+                checkpoint_id=getattr(a, "checkpoint_id", None),
+            )
     except VLANotConfigured as e:
         print(f"policy vla: {e}", file=sys.stderr)
         return EXIT_USAGE
@@ -600,8 +700,11 @@ def cmd_eval(a) -> int:
         print(f"eval: {e}", file=sys.stderr)
         return EXIT_USAGE
     except OSError as e:
-        prefix = (f"policy vla: no answer from {get_setting('GR00T_POLICY_URL')}"
-                  if a.policy == "vla" and not isinstance(e, FileNotFoundError) else "eval")
+        prefix = (
+            f"policy vla: no answer from {get_setting('GR00T_POLICY_URL')}"
+            if a.policy == "vla" and not isinstance(e, FileNotFoundError)
+            else "eval"
+        )
         print(redact(f"{prefix}: {e}"), file=sys.stderr)
         return EXIT_USAGE
     print(table(rep))
@@ -629,16 +732,23 @@ def cmd_realism(a) -> int:
     except ImportError:
         print("mujoco is not installed: pip install -e '.[sim]'", file=sys.stderr)
         return EXIT_USAGE
-    from arrival.eval import realism_cli
+    from arrival.eval import realism
 
     try:
-        rep = realism_cli.run_realism(a.scan, a.out, resolve_scans(a.scans), twin_path=a.twin, max_side=a.max_side,
-                                      max_frames=a.max_frames, png_frames=a.png_frames,
-                                      min_confidence=a.min_confidence)
-    except realism_cli.RealismError as e:
+        rep = realism.run_realism(
+            a.scan,
+            a.out,
+            resolve_scans(a.scans),
+            twin_path=a.twin,
+            max_side=a.max_side,
+            max_frames=a.max_frames,
+            png_frames=a.png_frames,
+            min_confidence=a.min_confidence,
+        )
+    except realism.RealismError as e:
         print(f"realism: {e}", file=sys.stderr)
         return EXIT_INVALID
-    print(realism_cli.summary(rep))
+    print(realism.summary(rep))
     print(f"json: {rep['path']}")
     if rep["png"]:
         print(f"png:  {rep['png']}")
@@ -657,8 +767,10 @@ def cmd_work(a) -> int:
         return EXIT_USAGE
     bad = [f for f in fams if f not in SIM_FAMILIES]
     if bad or a.episodes < 1:
-        print(f"unknown families {bad} (choose from {', '.join(SIM_FAMILIES)})" if bad else "--episodes must be >= 1",
-              file=sys.stderr)
+        print(
+            f"unknown families {bad} (choose from {', '.join(SIM_FAMILIES)})" if bad else "--episodes must be >= 1",
+            file=sys.stderr,
+        )
         return EXIT_USAGE
     if a.people < 0:
         print("--people must be >= 0", file=sys.stderr)
@@ -677,14 +789,27 @@ def cmd_work(a) -> int:
             print(f"{flag} must be a finite number >= 0", file=sys.stderr)
             return EXIT_USAGE
     try:  # ARRIVAL_* variables first, then the flags
-        limits = Limits.from_env().replace(max_episodes=a.max_episodes, max_people=a.max_people,
-                                           max_job_seconds=a.max_job_seconds, retention_hours=a.retention_hours,
-                                           job_retries=a.retries)
+        limits = Limits.from_env().replace(
+            max_episodes=a.max_episodes,
+            max_people=a.max_people,
+            max_job_seconds=a.max_job_seconds,
+            retention_hours=a.retention_hours,
+            job_retries=a.retries,
+        )
         if not 0 <= a.poll < float("inf"):  # time.sleep refuses these the first time the queue is empty
             print("--poll must be a finite number >= 0", file=sys.stderr)
             return EXIT_USAGE
-        n = work(Path(a.out), once=a.once, poll=a.poll, limits=limits, episodes=a.episodes, families=fams,
-                 people=a.people, res=a.res, seed=a.seed)
+        n = work(
+            Path(a.out),
+            once=a.once,
+            poll=a.poll,
+            limits=limits,
+            episodes=a.episodes,
+            families=fams,
+            people=a.people,
+            res=a.res,
+            seed=a.seed,
+        )
     except LimitError as e:
         print(f"limit: {e}", file=sys.stderr)
         return EXIT_USAGE
@@ -701,7 +826,10 @@ def cmd_gc(a) -> int:
         return EXIT_USAGE
     res = gc(Path(a.out), a.max_age_hours, dry_run=a.dry_run)
     verb = "would remove" if a.dry_run else "removed"
-    print(f"{verb} {len(res['removed'])} job(s), {res['bytes']} bytes" + (": " + ", ".join(res["removed"]) if res["removed"] else ""))
+    print(
+        f"{verb} {len(res['removed'])} job(s), {res['bytes']} bytes"
+        + (": " + ", ".join(res["removed"]) if res["removed"] else "")
+    )
     return EXIT_OK
 
 
@@ -721,8 +849,10 @@ def cmd_summary(a) -> int:
         return EXIT_USAGE
     bad = [f for f in fams if f not in SIM_FAMILIES]
     if bad or a.episodes < 1:
-        print(f"unknown families {bad} (choose from {', '.join(SIM_FAMILIES)})" if bad else "--episodes must be >= 1",
-              file=sys.stderr)
+        print(
+            f"unknown families {bad} (choose from {', '.join(SIM_FAMILIES)})" if bad else "--episodes must be >= 1",
+            file=sys.stderr,
+        )
         return EXIT_USAGE
     if a.people < 0:
         print("--people must be >= 0", file=sys.stderr)
@@ -736,8 +866,16 @@ def cmd_summary(a) -> int:
     rooms = [r.strip() for r in a.rooms.split(",") if r.strip()] if a.rooms else None
     kw = {"rooms": rooms} if rooms else {}
     try:
-        summary = summarize(out_dir=a.out, scans_dir=resolve_scans(a.scans), episodes=a.episodes, res=a.res,
-                            people=a.people, families=tuple(fams), seed=a.seed, **kw)
+        summary = summarize(
+            out_dir=a.out,
+            scans_dir=resolve_scans(a.scans),
+            episodes=a.episodes,
+            res=a.res,
+            people=a.people,
+            families=tuple(fams),
+            seed=a.seed,
+            **kw,
+        )
     except ValueError as e:
         print(str(e), file=sys.stderr)
         return EXIT_USAGE
@@ -756,8 +894,10 @@ def cmd_export_site(a) -> int:
     except (ExportError, OSError) as e:
         print(f"export-site: {e}", file=sys.stderr)
         return EXIT_INVALID
-    print(f"static site: {res['dest']} ({res['pages']} pages, {res['previews']} previews, "
-          f"{len(res['zips'])} zips, rooms: {', '.join(res['rooms']) or 'none'})")
+    print(
+        f"static site: {res['dest']} ({res['pages']} pages, {res['previews']} previews, "
+        f"{len(res['zips'])} zips, rooms: {', '.join(res['rooms']) or 'none'})"
+    )
     print(f"open {Path(res['dest']) / 'index.html'} in a browser, or serve the folder with any static host")
     return EXIT_OK
 
@@ -780,109 +920,200 @@ def cmd_cost(a) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """The `arrival` argument parser: one subcommand per pipeline entry point, each bound to its cmd_* handler."""
     p = argparse.ArgumentParser(prog="arrival", description="Arrival: room scan -> GR00T LeRobot v2 dataset")
     sub = p.add_subparsers(dest="cmd")
     d = sub.add_parser("demo", help="compile the room and write the dataset")
     d.add_argument("--episodes", type=int, default=4)
-    d.add_argument("--videos", choices=["all", "sparse", "none"], default="all",
-                   help="all (default): one mp4 per episode, declared to GR00T; sparse/none: no video "
-                        "feature, sparse writes human previews to <out>/datasets/<room>_previews/")
+    d.add_argument(
+        "--videos",
+        choices=["all", "sparse", "none"],
+        default="all",
+        help="all (default): one mp4 per episode, declared to GR00T; sparse/none: no video "
+        "feature, sparse writes human previews to <out>/datasets/<room>_previews/",
+    )
     d.add_argument("--room", default="hero_kitchen")
-    d.add_argument("--from-roomplan", action="store_true", help="normalize scans/<room>/roomplan.json instead of scan.json")
+    d.add_argument(
+        "--from-roomplan", action="store_true", help="normalize scans/<room>/roomplan.json instead of scan.json"
+    )
     d.add_argument("--out", default="out")
     d.add_argument("--scans", default="scans")
     d.set_defaults(fn=cmd_demo)
     v = sub.add_parser("validate", help="structurally check a LeRobot v2 dataset")
     v.add_argument("dataset_dir")
-    v.add_argument("--episodes", action="store_true",
-                   help="also check each episode (NaN, stuck arm, zero motion, joint at limit, length outliers); "
-                        "exit 1 if any is flagged")
+    v.add_argument(
+        "--episodes",
+        action="store_true",
+        help="also check each episode (NaN, stuck arm, zero motion, joint at limit, length outliers); "
+        "exit 1 if any is flagged",
+    )
     v.add_argument("--frames", action="store_true", help="with --episodes: also decode videos and flag blank cameras")
-    v.add_argument("--drop", metavar="CLEAN_DIR", default=None,
-                   help="write a cleaned copy without the flagged episodes to CLEAN_DIR (implies --episodes)")
-    v.add_argument("--json", metavar="FILE", default=None,
-                   help="write the per-episode report as JSON (implies --episodes)")
+    v.add_argument(
+        "--drop",
+        metavar="CLEAN_DIR",
+        default=None,
+        help="write a cleaned copy without the flagged episodes to CLEAN_DIR (implies --episodes)",
+    )
+    v.add_argument(
+        "--json", metavar="FILE", default=None, help="write the per-episode report as JSON (implies --episodes)"
+    )
     v.set_defaults(fn=cmd_validate)
     s = sub.add_parser("serve", help="local page on 127.0.0.1")
     s.add_argument("--port", type=int, default=8000)
-    s.add_argument("--host", default="127.0.0.1",
-                   help="0.0.0.0 to accept uploads from the iOS capture app on the same Wi-Fi")
+    s.add_argument(
+        "--host", default="127.0.0.1", help="0.0.0.0 to accept uploads from the iOS capture app on the same Wi-Fi"
+    )
     s.add_argument("--out", default="out")
     s.add_argument("--scans", default="scans")
-    s.add_argument("--max-upload-mb", type=float, default=200,
-                   help="reject a larger upload body with 413 (default 200)")
-    s.add_argument("--rate-limit", type=int, default=10,
-                   help="uploads per minute per client before 429; 0 turns it off (default 10)")
-    s.add_argument("--max-queued", type=int, default=50,
-                   help="refuse uploads with 503 while this many jobs are queued or running; 0 = no cap (default 50)")
-    s.add_argument("--public", action="store_true",
-                   help="public hosting: the page lists only the visitor's own jobs and the API hides server paths")
-    s.add_argument("--behind-proxy", action="store_true",
-                   help="trust X-Forwarded-Proto (HSTS, Secure cookie) and X-Forwarded-For (rate limit) from a reverse proxy")
+    s.add_argument(
+        "--max-upload-mb", type=float, default=200, help="reject a larger upload body with 413 (default 200)"
+    )
+    s.add_argument(
+        "--rate-limit",
+        type=int,
+        default=10,
+        help="uploads per minute per client before 429; 0 turns it off (default 10)",
+    )
+    s.add_argument(
+        "--max-queued",
+        type=int,
+        default=50,
+        help="refuse uploads with 503 while this many jobs are queued or running; 0 = no cap (default 50)",
+    )
+    s.add_argument(
+        "--public",
+        action="store_true",
+        help="public hosting: the page lists only the visitor's own jobs and the API hides server paths",
+    )
+    s.add_argument(
+        "--behind-proxy",
+        action="store_true",
+        help="trust X-Forwarded-Proto (HSTS, Secure cookie) and X-Forwarded-For (rate limit) from a reverse proxy",
+    )
     s.set_defaults(fn=cmd_serve)
     m = sub.add_parser("sim", help="MuJoCo sim of the room: arm + drawers/doors + people -> LeRobot v2 demos")
     m.add_argument("--room", default="hero_kitchen")
     m.add_argument("--episodes", type=int, default=8)
-    m.add_argument("--families", default="counter_to_sink,open_drawer,move_on_table",
-                   help=f"all | comma list of {FAMILY_NAMES} (a family with no variation in this room is skipped)")
+    m.add_argument(
+        "--families",
+        default="counter_to_sink,open_drawer,move_on_table",
+        help=f"all | comma list of {FAMILY_NAMES} (a family with no variation in this room is skipped)",
+    )
     m.add_argument("--people", type=int, default=2)
     m.add_argument("--policy", choices=["scripted", "vla"], default="scripted")
-    m.add_argument("--planner", choices=["rule", "vlm"], default="rule",
-                   help="Task planner: rule (deterministic) or vlm (Nemotron via Nebius Token Factory)")
-    m.add_argument("--instructions", choices=["template", "nemotron"], default="template",
-                   help="Instruction source: template (fixed wordings) or nemotron (varied wordings with train/eval split)")
-    m.add_argument("--instruction-style",
-                   choices=["mixed", "concise", "polite", "descriptive", "urgent", "goal_oriented"],
-                   default="mixed",
-                   help="with --instructions nemotron: prompt style variation for generated instructions")
-    m.add_argument("--split", choices=["train", "eval"], default="train",
-                   help="with --instructions nemotron: draw the train or the held-out eval wordings "
-                        "(the template wordings have no split here; eval --holdout holds theirs out)")
-    m.add_argument("--base", choices=["fixed", "mobile"], default="fixed",
-                   help="mobile: the pedestal drives (MAN-3); counter_to_counter becomes reachable")
-    m.add_argument("--arm", choices=["procedural", "menagerie"], default="procedural",
-                   help="menagerie = the real Franka asset from MuJoCo Menagerie (python scripts/fetch_menagerie.py; meshes are not committed)")
+    m.add_argument(
+        "--planner",
+        choices=["rule", "vlm"],
+        default="rule",
+        help="Task planner: rule (deterministic) or vlm (Nemotron via Nebius Token Factory)",
+    )
+    m.add_argument(
+        "--instructions",
+        choices=["template", "nemotron"],
+        default="template",
+        help="Instruction source: template (fixed wordings) or nemotron (varied wordings with train/eval split)",
+    )
+    m.add_argument(
+        "--instruction-style",
+        choices=["mixed", "concise", "polite", "descriptive", "urgent", "goal_oriented"],
+        default="mixed",
+        help="with --instructions nemotron: prompt style variation for generated instructions",
+    )
+    m.add_argument(
+        "--split",
+        choices=["train", "eval"],
+        default="train",
+        help="with --instructions nemotron: draw the train or the held-out eval wordings "
+        "(the template wordings have no split here; eval --holdout holds theirs out)",
+    )
+    m.add_argument(
+        "--base",
+        choices=["fixed", "mobile"],
+        default="fixed",
+        help="mobile: the pedestal drives (MAN-3); counter_to_counter becomes reachable",
+    )
+    m.add_argument(
+        "--arm",
+        choices=["procedural", "menagerie"],
+        default="procedural",
+        help="menagerie = the real Franka asset from MuJoCo Menagerie (python scripts/fetch_menagerie.py; meshes are not committed)",
+    )
     m.add_argument("--res", type=int, default=128)
     m.add_argument("--out", default="out")
     m.add_argument("--scans", default="scans")
     m.add_argument("--seed", type=int, default=0)
     m.add_argument("--save-preview", action="store_true")
-    m.add_argument("--exocentric", action="store_true",
-                   help="also export the synchronized external overview camera; --save-preview adds a paired ego/exo video")
-    m.add_argument("--shard", default=None, metavar="I/N",
-                   help="run block I of N of the --episodes tasks (I counts from 0), into <out>/shards/<I>of<N>/; "
-                        "join with merge-shards")
-    m.add_argument("--resume", action="store_true",
-                   help="continue a killed run from its progress journal instead of starting over (same settings)")
-    m.add_argument("--dart", type=float, default=0.0, metavar="RAD",
-                   help="DART: drive the arm with smooth noise, typical std RAD (each episode uses 0.4x to 1.6x), on the joint targets while the dataset "
-                        "keeps the clean targets, so a policy sees off-plan states labelled with the way back; "
-                        "0 (default) is off, 0.02 to 0.05 is a useful range. Recorded in the dataset provenance")
-    m.add_argument("--tavily", action="store_true", help="Enrich digital twin and VLM planning with Tavily appliance research (needs --planner vlm)")
+    m.add_argument(
+        "--exocentric",
+        action="store_true",
+        help="also export the synchronized external overview camera; --save-preview adds a paired ego/exo video",
+    )
+    m.add_argument(
+        "--shard",
+        default=None,
+        metavar="I/N",
+        help="run block I of N of the --episodes tasks (I counts from 0), into <out>/shards/<I>of<N>/; "
+        "join with merge-shards",
+    )
+    m.add_argument(
+        "--resume",
+        action="store_true",
+        help="continue a killed run from its progress journal instead of starting over (same settings)",
+    )
+    m.add_argument(
+        "--dart",
+        type=float,
+        default=0.0,
+        metavar="RAD",
+        help="DART: drive the arm with smooth noise, typical std RAD (each episode uses 0.4x to 1.6x), on the joint targets while the dataset "
+        "keeps the clean targets, so a policy sees off-plan states labelled with the way back; "
+        "0 (default) is off, 0.02 to 0.05 is a useful range. Recorded in the dataset provenance",
+    )
+    m.add_argument(
+        "--tavily",
+        action="store_true",
+        help="Enrich digital twin and VLM planning with Tavily appliance research (needs --planner vlm)",
+    )
     m.set_defaults(fn=cmd_sim)
     rt = sub.add_parser("retarget", help="retarget demonstrations with SE(3) trajectory mapping or seed replay")
     rt.add_argument("--room", default="hero_kitchen", help="scanned room name")
     rt.add_argument("--scans", default="scans", help="folder containing scans/<room>/scan.json")
     rt.add_argument("--out", default="out", help="output directory")
-    rt.add_argument("--method", default="se3", choices=("se3", "seed_replay"),
-                    help="retargeting generator: native SE(3) physical retargeting (default) or seed replay")
+    rt.add_argument(
+        "--method",
+        default="se3",
+        choices=("se3", "seed_replay"),
+        help="retargeting generator: native SE(3) physical retargeting (default) or seed replay",
+    )
     rt.add_argument("--attempts", type=int, default=6, help="number of retargeting attempts (>= 1)")
     rt.add_argument("--seed", type=int, default=0, help="random seed (>= 0)")
     rt.add_argument("--res", type=int, default=64, help="camera resolution, positive multiple of 16")
-    rt.add_argument("--family", default="counter_to_sink",
-                    help="task family for seed_replay (counter_to_sink, counter_to_counter)")
-    rt.add_argument("--source", type=Path, default=None,
-                    help="reuse a previously recorded meta/se3_source.json (se3 method only)")
-    rt.add_argument("--teleop", type=Path, default=None, metavar="DIR",
-                    help="seed se3 retargeting with the successful demos of a recorded teleop run (arrival.sim.teleop "
-                         "--record output, e.g. the extracted P3 archive); each must replay in the room first")
-    rt.add_argument("--baseline", action="store_true",
-                    help="also benchmark the scripted expert (seed_replay method only)")
+    rt.add_argument(
+        "--family", default="counter_to_sink", help="task family for seed_replay (counter_to_sink, counter_to_counter)"
+    )
+    rt.add_argument(
+        "--source", type=Path, default=None, help="reuse a previously recorded meta/se3_source.json (se3 method only)"
+    )
+    rt.add_argument(
+        "--teleop",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help="seed se3 retargeting with the successful demos of a recorded teleop run (arrival.sim.teleop "
+        "--record output, e.g. the extracted P3 archive); each must replay in the room first",
+    )
+    rt.add_argument(
+        "--baseline", action="store_true", help="also benchmark the scripted expert (seed_replay method only)"
+    )
     rt.set_defaults(fn=cmd_retarget)
     f = sub.add_parser("fanout", help="run sim shards on a job backend, resumable, then merge (local by default)")
-    f.add_argument("--backend", choices=["local", "nebius"], default="local",
-                   help="local subprocesses and a directory, or Nebius Serverless AI Jobs and Object Storage "
-                        "(NEBIUS_* settings; tested against fakes only)")
+    f.add_argument(
+        "--backend",
+        choices=["local", "nebius"],
+        default="local",
+        help="local subprocesses and a directory, or Nebius Serverless AI Jobs and Object Storage "
+        "(NEBIUS_* settings; tested against fakes only)",
+    )
     f.add_argument("--run-id", default="run")
     f.add_argument("--shards", type=int, default=2)
     f.add_argument("--room", default="hero_kitchen")
@@ -898,16 +1129,24 @@ def build_parser() -> argparse.ArgumentParser:
     f.add_argument("--out", default="out")
     f.set_defaults(fn=cmd_fanout)
     g = sub.add_parser("merge-shards", help="join sim --shard datasets into one validated LeRobot v2 dataset")
-    g.add_argument("shards", nargs="+", help="shard folders (<out>/shards/<i>of<n>), their dataset folders, "
-                                             "or the one folder that holds them")
+    g.add_argument(
+        "shards",
+        nargs="+",
+        help="shard folders (<out>/shards/<i>of<n>), their dataset folders, or the one folder that holds them",
+    )
     g.add_argument("--out", default="out", help="the merged dataset goes to <out>/datasets/<room>_sim")
     g.set_defaults(fn=cmd_merge_shards)
     u = sub.add_parser("subset", help="keep the episodes of a sim dataset that pass a rule (family, drawer opening)")
     u.add_argument("src", help="a sim dataset folder (or the folder that holds datasets/<room>_sim)")
     u.add_argument("--out", default="out", help="the subset goes to <out>/datasets/<room>_sim")
     u.add_argument("--families", default="", help="comma list of families to keep (default: all)")
-    u.add_argument("--min-drawer-opening", type=float, default=None, metavar="M",
-                   help="drop open_drawer episodes whose final drawer opening is under M metres (a clean pull ends at 0.3063, so 0.28 keeps every clean demo)")
+    u.add_argument(
+        "--min-drawer-opening",
+        type=float,
+        default=None,
+        metavar="M",
+        help="drop open_drawer episodes whose final drawer opening is under M metres (a clean pull ends at 0.3063, so 0.28 keeps every clean demo)",
+    )
     u.set_defaults(fn=cmd_subset)
     r = sub.add_parser("research", help="Tavily AI research on kitchen appliances and safety guidelines")
     r.add_argument("--room", default="hero_kitchen")
@@ -918,15 +1157,21 @@ def build_parser() -> argparse.ArgumentParser:
     e = sub.add_parser("eval", help="score a policy on fresh or frozen trials; preserve every run")
     e.add_argument("--room")
     e.add_argument("--policy", choices=["scripted", "vla"], default="scripted")
-    e.add_argument("--families", help=f"all | comma list of {FAMILY_NAMES} (default: counter_to_sink,open_drawer,move_on_table; "
-                        "a family with no variation in this room is skipped)")
+    e.add_argument(
+        "--families",
+        help=f"all | comma list of {FAMILY_NAMES} (default: counter_to_sink,open_drawer,move_on_table; "
+        "a family with no variation in this room is skipped)",
+    )
     e.add_argument("--episodes", type=int, help="episodes per family (default: 4)")
     e.add_argument("--seed", type=int)
     e.add_argument("--people", type=int)
     e.add_argument("--holdout", action="store_true", default=None, help="held-out wording and start offset")
     e.add_argument("--base", choices=["fixed", "mobile"], help="mobile: the pedestal drives (MAN-3); default fixed")
-    e.add_argument("--arm", choices=["procedural", "menagerie"],
-                   help="menagerie = the real Franka asset from MuJoCo Menagerie (python scripts/fetch_menagerie.py; meshes are not committed)")
+    e.add_argument(
+        "--arm",
+        choices=["procedural", "menagerie"],
+        help="menagerie = the real Franka asset from MuJoCo Menagerie (python scripts/fetch_menagerie.py; meshes are not committed)",
+    )
     e.add_argument("--res", type=int)
     e.add_argument("--out", default="out")
     e.add_argument("--scans")
@@ -937,16 +1182,28 @@ def build_parser() -> argparse.ArgumentParser:
     ec.add_argument("run_a", help="out/eval/<run_id> (or its episodes.jsonl)")
     ec.add_argument("run_b")
     ec.set_defaults(fn=cmd_eval_compare)
-    rl = sub.add_parser("realism", help="score the twin's render against a scan's held-out RGB-D frames "
-                                        "(JSON + side-by-side PNG, misaligned-pose control)")
-    rl.add_argument("scan", help="scan folder (or a room id under --scans) holding frames_manifest.json and "
-                                 "roomplan.json or scan.json")
-    rl.add_argument("--twin", default=None, help="score against this twin.json instead of compiling the scan's geometry")
+    rl = sub.add_parser(
+        "realism",
+        help="score the twin's render against a scan's held-out RGB-D frames "
+        "(JSON + side-by-side PNG, misaligned-pose control)",
+    )
+    rl.add_argument(
+        "scan",
+        help="scan folder (or a room id under --scans) holding frames_manifest.json and roomplan.json or scan.json",
+    )
+    rl.add_argument(
+        "--twin", default=None, help="score against this twin.json instead of compiling the scan's geometry"
+    )
     rl.add_argument("--max-side", type=int, default=192, help="downscale frames so the longer side is at most this")
     rl.add_argument("--max-frames", type=int, default=8, help="score at most this many held-out frames, evenly spaced")
     rl.add_argument("--png-frames", type=int, default=3, help="frames shown in the side-by-side PNG")
-    rl.add_argument("--min-confidence", type=int, default=2, choices=[0, 1, 2],
-                    help="ARKit depth confidence a pixel needs to count (2 = high; 0 keeps every non-zero depth)")
+    rl.add_argument(
+        "--min-confidence",
+        type=int,
+        default=2,
+        choices=[0, 1, 2],
+        help="ARKit depth confidence a pixel needs to count (2 = high; 0 keeps every non-zero depth)",
+    )
     rl.add_argument("--out", default="out")
     rl.add_argument("--scans", default="scans")
     rl.set_defaults(fn=cmd_realism)
@@ -954,22 +1211,36 @@ def build_parser() -> argparse.ArgumentParser:
     w.add_argument("--once", action="store_true", help="process one job (or none) and exit")
     w.add_argument("--poll", type=float, default=2.0, help="seconds between queue checks")
     w.add_argument("--episodes", type=int, default=8)
-    w.add_argument("--families", default="counter_to_sink,open_drawer,move_on_table",
-                   help=f"all | comma list of {FAMILY_NAMES} (a family with no variation in this room is skipped)")
+    w.add_argument(
+        "--families",
+        default="counter_to_sink,open_drawer,move_on_table",
+        help=f"all | comma list of {FAMILY_NAMES} (a family with no variation in this room is skipped)",
+    )
     w.add_argument("--people", type=int, default=1)
     w.add_argument("--res", type=int, default=128)
     w.add_argument("--seed", type=int, default=0)
     w.add_argument("--out", default="out")
-    w.add_argument("--max-episodes", type=int, help="refuse --episodes above this (env ARRIVAL_MAX_EPISODES, default 100)")
+    w.add_argument(
+        "--max-episodes", type=int, help="refuse --episodes above this (env ARRIVAL_MAX_EPISODES, default 100)"
+    )
     w.add_argument("--max-people", type=int, help="refuse --people above this (env ARRIVAL_MAX_PEOPLE, default 4)")
-    w.add_argument("--max-job-seconds", type=float,
-                   help="kill a job after this many wall-clock seconds (env ARRIVAL_MAX_JOB_SECONDS, default 1800; "
-                        "0 = run in-process with no timeout)")
-    w.add_argument("--retention-hours", type=float,
-                   help="also delete finished jobs older than this while working (env ARRIVAL_RETENTION_HOURS; default keep)")
-    w.add_argument("--retries", type=int,
-                   help="queue a failed job again up to this many times (env ARRIVAL_JOB_RETRIES, default 2; 0 = never); "
-                        "a bad upload, an unusable room or a timeout is not retried")
+    w.add_argument(
+        "--max-job-seconds",
+        type=float,
+        help="kill a job after this many wall-clock seconds (env ARRIVAL_MAX_JOB_SECONDS, default 1800; "
+        "0 = run in-process with no timeout)",
+    )
+    w.add_argument(
+        "--retention-hours",
+        type=float,
+        help="also delete finished jobs older than this while working (env ARRIVAL_RETENTION_HOURS; default keep)",
+    )
+    w.add_argument(
+        "--retries",
+        type=int,
+        help="queue a failed job again up to this many times (env ARRIVAL_JOB_RETRIES, default 2; 0 = never); "
+        "a bad upload, an unusable room or a timeout is not retried",
+    )
     w.set_defaults(fn=cmd_work)
     g = sub.add_parser("gc", help="delete finished jobs older than --max-age-hours (upload, twin, dataset, zip)")
     g.add_argument("--max-age-hours", type=float, required=True)
@@ -981,12 +1252,14 @@ def build_parser() -> argparse.ArgumentParser:
     dr.add_argument("--json", action="store_true", help="print the checks as JSON")
     dr.set_defaults(fn=cmd_doctor)
     u = sub.add_parser("summary", help="tiny run on several rooms: compile / sim / validate table (markdown + json)")
-    u.add_argument("--rooms", default=None,
-                   help="comma list of scan names under --scans or paths to RoomPlan/scan .json files "
-                        "(default: hero_kitchen plus the two authored RoomPlan fixtures)")
+    u.add_argument(
+        "--rooms",
+        default=None,
+        help="comma list of scan names under --scans or paths to RoomPlan/scan .json files "
+        "(default: hero_kitchen plus the two authored RoomPlan fixtures)",
+    )
     u.add_argument("--episodes", type=int, default=2, help="episode attempts per room")
-    u.add_argument("--families", default="counter_to_sink,open_drawer",
-                   help=f"all | comma list of {FAMILY_NAMES}")
+    u.add_argument("--families", default="counter_to_sink,open_drawer", help=f"all | comma list of {FAMILY_NAMES}")
     u.add_argument("--people", type=int, default=1)
     u.add_argument("--res", type=int, default=64)
     u.add_argument("--seed", type=int, default=0)
@@ -1003,7 +1276,9 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--out", default="out", help="folder with reports/, eval/, jobs/ and usage/")
     c.add_argument("--usage", default=None, help="usage.json: {product: units consumed}")
     c.add_argument("--pricing", default=None, help="pricing YAML (default: configs/pricing.example.yaml)")
-    c.add_argument("--baseline", default=None, help="teleop_baseline.json (default: docs/results/p3-teleop-2026-10-21/)")
+    c.add_argument(
+        "--baseline", default=None, help="teleop_baseline.json (default: docs/results/p3-teleop-2026-10-21/)"
+    )
     c.add_argument("--json", action="store_true", help="print the report as JSON instead of markdown")
     c.set_defaults(fn=cmd_cost)
     return p

@@ -34,7 +34,6 @@ def test_missing_room_message_lists_the_rooms_under_scans():
         summary.resolve_room("u_kitchen_42", SCANS)
 
 
-
 @pytest.mark.parametrize("names", [("a-b", "a_b"), ("Kitchen", "kitchen")])
 def test_summary_refuses_colliding_room_ids_before_running(tmp_path, monkeypatch, names):
     paths = [tmp_path / f"{name}.json" for name in names]
@@ -91,7 +90,9 @@ def test_bad_json_fails_at_normalize(tmp_path):
     bad = tmp_path / "bad.json"
     bad.write_text("[1, 2]")
     row = summary.run_room(str(bad), tmp_path / "out", SCANS)
-    assert row["stages"]["normalize"]["status"] == "failed" and "not a JSON object" in row["stages"]["normalize"]["detail"]
+    assert (
+        row["stages"]["normalize"]["status"] == "failed" and "not a JSON object" in row["stages"]["normalize"]["detail"]
+    )
 
 
 def test_no_reachable_task_is_skipped_not_failed(tmp_path, monkeypatch):
@@ -120,8 +121,14 @@ def test_zero_successes_is_a_failed_sim_with_counts(tmp_path, monkeypatch):
     import arrival.sim.collect as collect
 
     rep = {"attempts": 2, "successes": 0, "human_contacts": 0}
-    monkeypatch.setattr(collect, "collect", lambda *a, log=print, **k: (
-        log("[sim] t0: MISS {'joint': 'd'} ik_err=0.0"), {"report_data": rep, "dataset": tmp_path})[1])
+    monkeypatch.setattr(
+        collect,
+        "collect",
+        lambda *a, log=print, **k: (
+            log("[sim] t0: MISS {'joint': 'd'} ik_err=0.0"),
+            {"report_data": rep, "dataset": tmp_path},
+        )[1],
+    )
     row = summary.run_room("hero_kitchen", tmp_path, SCANS, families=FAMS)
     sim = row["stages"]["sim"]
     assert sim["status"] == "failed" and (sim["attempts"], sim["successes"]) == (2, 0)
@@ -216,12 +223,21 @@ def test_roomplan_rows_flag_invented_objects(tmp_path, monkeypatch):
 
 
 def test_markdown_table_has_a_row_per_room_and_honest_cells():
-    row = {"room": "r1", "geometry_source": "roomplan", "tape": None, "realism": None,
-           "stages": {s: {"status": "ok", "detail": ""} for s in summary.STAGES}}
+    row = {
+        "room": "r1",
+        "geometry_source": "roomplan",
+        "tape": None,
+        "realism": None,
+        "stages": {s: {"status": "ok", "detail": ""} for s in summary.STAGES},
+    }
     row["stages"]["sim"].update(attempts=2, successes=1)
-    row2 = {"room": "r2", "geometry_source": "authored", "tape": {"max_abs_error_m": 0.0, "tape_measured": False,
-                                                                 "ok": True, "tolerance_m": 0.05},
-            "realism": None, "stages": {s: {"status": "not_run", "detail": "compile failed"} for s in summary.STAGES}}
+    row2 = {
+        "room": "r2",
+        "geometry_source": "authored",
+        "tape": {"max_abs_error_m": 0.0, "tape_measured": False, "ok": True, "tolerance_m": 0.05},
+        "realism": None,
+        "stages": {s: {"status": "not_run", "detail": "compile failed"} for s in summary.STAGES},
+    }
     row2["stages"]["compile"] = {"status": "failed", "detail": "ValueError: x"}
     md = summary.to_markdown({"settings": {"episodes_per_room": 2, "res": 64, "people": 1}, "rooms": [row, row2]})
     lines = [ln for ln in md.splitlines() if ln.startswith(("| r1", "| r2"))]
@@ -233,24 +249,42 @@ def test_markdown_table_has_a_row_per_room_and_honest_cells():
 
 def test_cli_summary_writes_json_and_markdown(tmp_path, capsys):
     pytest.importorskip("mujoco")
-    rc = cli.main(["summary", "--rooms", "hero_kitchen", "--episodes", "1", "--people", "0", "--families", "open_drawer",
-                   "--out", str(tmp_path), "--scans", str(SCANS)])
+    rc = cli.main(
+        [
+            "summary",
+            "--rooms",
+            "hero_kitchen",
+            "--episodes",
+            "1",
+            "--people",
+            "0",
+            "--families",
+            "open_drawer",
+            "--out",
+            str(tmp_path),
+            "--scans",
+            str(SCANS),
+        ]
+    )
     assert rc == cli.EXIT_OK
     data = json.loads((tmp_path / "summary.json").read_text())
     assert [r["room"] for r in data["rooms"]] == ["hero_kitchen"] and data["settings"]["res"] == 64
     assert (tmp_path / "summary.md").read_text().startswith("# Room summary")
     assert cli.main(["summary", "--families", "bogus", "--out", str(tmp_path)]) == cli.EXIT_USAGE
 
-@pytest.mark.parametrize("flag,val,expected_err", [
-    ("--people", "-1", "--people must be >= 0"),
-    ("--seed", "-1", "--seed must be >= 0"),
-    ("--res", "50", "--res must be a positive multiple of 16"),
-    ("--res", "0", "--res must be a positive multiple of 16"),
-    ("--episodes", "0", "--episodes must be >= 1"),
-])
+
+@pytest.mark.parametrize(
+    "flag,val,expected_err",
+    [
+        ("--people", "-1", "--people must be >= 0"),
+        ("--seed", "-1", "--seed must be >= 0"),
+        ("--res", "50", "--res must be a positive multiple of 16"),
+        ("--res", "0", "--res must be a positive multiple of 16"),
+        ("--episodes", "0", "--episodes must be >= 1"),
+    ],
+)
 def test_cli_summary_numerical_bounds(tmp_path, capsys, flag, val, expected_err):
     pytest.importorskip("mujoco")
     rc = cli.main(["summary", flag, val, "--out", str(tmp_path)])
     assert rc == cli.EXIT_USAGE
     assert expected_err in capsys.readouterr().err
-

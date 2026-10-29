@@ -39,6 +39,8 @@ line-length = 120
 extend-exclude = [".claude", "ios", "out"]
 
 [tool.ruff.lint]
-# CI gate: only what is certainly a bug (syntax errors, undefined names, invalid comparisons).
-# Unused imports and style are not enforced yet.
-select = ["E9", "F63", "F7", "F82"]
+# CI gate: what is certainly a bug (syntax errors, undefined names, invalid comparisons), plus one style:
+# imports sorted and at the top of the module, no unused imports or variables, current Python syntax.
+# `ruff format` sets the layout; CI checks both.
+select = ["E9", "F63", "F7", "F82", "I", "F401", "F841", "E402", "UP"]
+ignore = ["UP031"]  # %-formatting is left where it is; rewriting it is not a style fix

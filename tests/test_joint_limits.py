@@ -9,7 +9,6 @@ import pytest
 mujoco = pytest.importorskip("mujoco")
 
 from arrival.export.quality import LIMIT_STEPS  # noqa: E402
-from arrival.sim import policy  # noqa: E402
 from arrival.sim.collect import SimEnv  # noqa: E402
 from arrival.sim.policy import ScriptedExpert  # noqa: E402
 from arrival.sim.tasks import finish_task, make_tasks  # noqa: E402

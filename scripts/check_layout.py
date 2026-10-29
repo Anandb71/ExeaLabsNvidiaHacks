@@ -24,7 +24,6 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from arrival.catalog.fixtures import fixture_type  # noqa: E402
 
 TOL = 0.05
 DECLARED_OMISSIONS = ("doors", "windows", "openings", "objects")
@@ -47,8 +46,11 @@ def check_layout(twin: dict, layout: dict) -> dict:
         err(f"twin units are {twin.get('units')!r}, layout assumes meters")
     room = layout.get("room") or {}
     group = layout.get("main_group") or {}
-    if (list(group.get("group_pos", [])) != [0.0, 0.0] or group.get("group_z_rot") != 0.0
-            or list(group.get("group_origin", [])) != [0, 0]):
+    if (
+        list(group.get("group_pos", [])) != [0.0, 0.0]
+        or group.get("group_z_rot") != 0.0
+        or list(group.get("group_origin", [])) != [0, 0]
+    ):
         err("main_group is not the identity transform, so pos is not the world frame")
 
     # fixtures
@@ -120,8 +122,10 @@ def check_layout(twin: dict, layout: dict) -> dict:
         if abs(sz - w["height"]) > 1e-3 or abs(pz - w["height"] / 2) > 1e-3:
             err(f"{wid}: height {sz} / centre z {pz} do not match twin height {w['height']}")
     if signed_area < 0 and twalls:
-        warnings.append("walls run clockwise; docs say counterclockwise. The YAML does not depend on winding "
-                        "(wall boxes are centred on the segment), but anything using 'interior is left' would flip")
+        warnings.append(
+            "walls run clockwise; docs say counterclockwise. The YAML does not depend on winding "
+            "(wall boxes are centred on the segment), but anything using 'interior is left' would flip"
+        )
 
     # floor
     floor = (room.get("floor") or [None])[0]
@@ -130,17 +134,24 @@ def check_layout(twin: dict, layout: dict) -> dict:
     if floor is not None:
         fx_, fy_ = floor["pos"][:2]
         hx, hy = floor["size"][0] / 2, floor["size"][1] / 2
-        if pts and any(not (fx_ - hx - TOL <= x <= fx_ + hx + TOL and fy_ - hy - TOL <= y <= fy_ + hy + TOL)
-                       for x, y in pts):
+        if pts and any(
+            not (fx_ - hx - TOL <= x <= fx_ + hx + TOL and fy_ - hy - TOL <= y <= fy_ + hy + TOL) for x, y in pts
+        ):
             err("a wall end lies outside the YAML floor")
         for fid, f in twin_fx.items():
             x, y = f["position"][:2]
             if not (fx_ - hx <= x <= fx_ + hx and fy_ - hy <= y <= fy_ + hy):
                 warnings.append(f"{fid} centre {[x, y]} is outside the floor rectangle")
     omitted = {k: len(twin.get(k, [])) for k in DECLARED_OMISSIONS if twin.get(k)}
-    return {"ok": not errors, "errors": errors, "warnings": warnings, "declared_omissions": omitted,
-            "fixtures": len(twin_fx), "walls": len(twalls),
-            "scope": "checked against the twin only; not loaded in RoboCasa"}
+    return {
+        "ok": not errors,
+        "errors": errors,
+        "warnings": warnings,
+        "declared_omissions": omitted,
+        "fixtures": len(twin_fx),
+        "walls": len(twalls),
+        "scope": "checked against the twin only; not loaded in RoboCasa",
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -159,12 +170,14 @@ def main(argv: list[str] | None = None) -> int:
         if a.roomplan:
             from arrival.scan import roomplan
             from arrival.twin.compile import compile_twin, layout_dict
+
             rp = src = Path(a.roomplan)
             twin = compile_twin(roomplan.load(rp, rp.stem))
             layout = yaml.safe_load(yaml.safe_dump(layout_dict(twin), sort_keys=False))
         elif a.room:
-            from arrival.cli import resolve_scans
+            from arrival.scan.bundle import resolve_scans
             from arrival.twin.compile import layout_dict, room_twin
+
             scans = resolve_scans(a.scans)
             src = scans / a.room / "scan.json"
             if not src.is_file() and (scans / a.room / "roomplan.json").is_file():
@@ -179,8 +192,8 @@ def main(argv: list[str] | None = None) -> int:
             layout = yaml.safe_load(src.read_text())
     except FileNotFoundError as e:
         if getattr(a, "room", None):
-            from arrival.cli import resolve_scans
-            from arrival.scan.bundle import rooms_hint
+            from arrival.scan.bundle import resolve_scans, rooms_hint
+
             scans = resolve_scans(a.scans)
             p.error(f"no scan for room {a.room!r} under {scans} ({rooms_hint(a.room, scans)}): {e}")
         p.error(str(e))

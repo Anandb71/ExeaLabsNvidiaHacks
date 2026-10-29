@@ -22,8 +22,9 @@ def dataset(tmp_path_factory):
     root = tmp_path_factory.mktemp("var") / "src"
     with LeRobotWriter(root, "t", "all") as w:
         for ep in range(2):
-            frames = [{"object_position": [2 + 0.01 * i, 0, 0.9], "eef": [2 - 0.01 * i, 0, 1.0 + 0.002 * i]}
-                      for i in range(N)]
+            frames = [
+                {"object_position": [2 + 0.01 * i, 0, 0.9], "eef": [2 - 0.01 * i, 0, 1.0 + 0.002 * i]} for i in range(N)
+            ]
             vid = sim_texture.render_episode(frames, "neutral")
             z = np.zeros((N, 8), np.float32)
             w.add_episode(z, z, np.arange(N) / 20, f"task {ep}", True, videos={"ego_view": vid})
@@ -86,6 +87,7 @@ def test_destination_inside_source_is_refused_before_copy(tmp_path):
     assert (src / "keep").read_text() == "original"
     assert not (src / "nested").exists()
 
+
 def test_custom_client_cannot_mislabel_backend(tmp_path):
     src = tmp_path / "source"
     src.mkdir()
@@ -103,10 +105,17 @@ def test_bad_fraction_rejected_before_copy(tmp_path, fraction):
     assert not dst.exists()
 
 
-@pytest.mark.parametrize("option,value", [
-    ("edge_min", float("nan")), ("edge_min", 1.1), ("edge_min", True),
-    ("mask_max", float("nan")), ("mask_max", -0.1), ("mask_max", float("inf")),
-])
+@pytest.mark.parametrize(
+    "option,value",
+    [
+        ("edge_min", float("nan")),
+        ("edge_min", 1.1),
+        ("edge_min", True),
+        ("mask_max", float("nan")),
+        ("mask_max", -0.1),
+        ("mask_max", float("inf")),
+    ],
+)
 def test_invalid_geometry_thresholds_rejected_before_copy(tmp_path, option, value):
     dst = tmp_path / "copy"
     with pytest.raises(ValueError, match=option):
@@ -144,6 +153,7 @@ def test_bad_cosmos_url_rejected_before_copy(dataset, tmp_path, monkeypatch):
         variation.vary_dataset(dataset, dst, backend="cosmos")
     assert not dst.exists()
 
+
 def test_local_stub_differs_keeps_geometry_and_source_untouched(dataset, tmp_path):
     before = digest(dataset)
     dst = tmp_path / "copy"
@@ -177,8 +187,9 @@ def test_cosmos_mock_server_pairs_ids_and_label(dataset, tmp_path):
     assert s["arrival_appearance_variation"] == "cosmos" and s["ok"] == 16 and s["failed"] == 0
     assert s["added_latency_s"] >= s["backend_latency_s"] > 0 and s["cost_usd"] is None
     rs = rows(tmp_path / "c")
-    assert all(r["variant_id"] == r["original_id"] + "_v" and r["model"] == "mock-cosmos" and r["latency_ms"] > 0
-               for r in rs)
+    assert all(
+        r["variant_id"] == r["original_id"] + "_v" and r["model"] == "mock-cosmos" and r["latency_ms"] > 0 for r in rs
+    )
 
 
 def test_unchanged_cosmos_frames_are_not_claimed_as_variation(dataset, tmp_path):
@@ -205,12 +216,18 @@ def test_cosmos_client_rejects_grayscale_response():
         srv.server_close()
 
 
-@pytest.mark.parametrize("settings,reason", [
-    ({"timeout": 0}, "timeout"), ({"timeout": float("nan")}, "timeout"),
-    ({"retries": -1}, "retries"), ({"retries": True}, "retries"),
-    ({"backoff": float("inf")}, "backoff"), ({"backoff": -0.1}, "backoff"),
-    ({"prompt": "  "}, "prompt"),
-])
+@pytest.mark.parametrize(
+    "settings,reason",
+    [
+        ({"timeout": 0}, "timeout"),
+        ({"timeout": float("nan")}, "timeout"),
+        ({"retries": -1}, "retries"),
+        ({"retries": True}, "retries"),
+        ({"backoff": float("inf")}, "backoff"),
+        ({"backoff": -0.1}, "backoff"),
+        ({"prompt": "  "}, "prompt"),
+    ],
+)
 def test_cosmos_client_rejects_invalid_transport_controls(settings, reason):
     with pytest.raises(ValueError, match=reason):
         variation.CosmosClient("https://example.invalid", **settings)
@@ -274,6 +291,7 @@ def test_non_image_backend_output_is_rejected():
     assert not chk["ok"] and "uint8" in chk["reason"]
     assert chk["edge_corr"] is None
 
+
 @pytest.mark.parametrize("mask", [np.ones((2, 3), bool), np.ones((4, 4), np.uint8), [[True] * 4] * 4])
 def test_malformed_mask_rejects_frame_without_crashing(mask):
     orig = np.arange(4 * 4 * 3, dtype=np.uint8).reshape(4, 4, 3)
@@ -290,8 +308,9 @@ def test_dataset_with_bad_mask_keeps_original_videos(dataset, tmp_path):
     assert validate(dst) == []
 
 
-@pytest.mark.parametrize("result", [(None, {}), (np.zeros((2, 2, 3), np.uint8), None),
-                                     (np.zeros((2, 2, 3), np.uint8), {"bad": object()})])
+@pytest.mark.parametrize(
+    "result", [(None, {}), (np.zeros((2, 2, 3), np.uint8), None), (np.zeros((2, 2, 3), np.uint8), {"bad": object()})]
+)
 def test_malformed_backend_result_fails_frames_without_aborting_copy(dataset, tmp_path, result):
     class Client:
         name, model, version = "local_stub", "test", "1"
@@ -307,11 +326,14 @@ def test_malformed_backend_result_fails_frames_without_aborting_copy(dataset, tm
     assert validate(dst) == []
 
 
-@pytest.mark.parametrize("case,message", [
-    ("missing", "no dataset at"),
-    ("fraction", "fraction must be finite and between 0 and 1"),
-    ("exists", "the copy directory must be new"),
-])
+@pytest.mark.parametrize(
+    "case,message",
+    [
+        ("missing", "no dataset at"),
+        ("fraction", "fraction must be finite and between 0 and 1"),
+        ("exists", "the copy directory must be new"),
+    ],
+)
 def test_cli_bad_input_is_a_usage_error(dataset, tmp_path, capsys, case, message):
     src, dst, extra = dataset, tmp_path / "copy", []
     if case == "missing":

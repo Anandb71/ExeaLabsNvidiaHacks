@@ -1,4 +1,5 @@
 import json
+
 import pytest
 
 from arrival.tasks.instructions import INSTRUCTION_STYLES, STYLE_PROMPTS, _cache_key, generate_instructions
@@ -67,7 +68,15 @@ def test_token_factory_prompt_injects_style_guidance(monkeypatch, tmp_path):
 
 def test_make_tasks_propagates_instruction_style(hero_twin, offline):
     from arrival.sim.tasks import make_tasks
-    tasks = make_tasks(hero_twin, ["counter_to_sink"], 2, use_generated_instructions=True, instruction_style="polite", log=lambda *_: None)
+
+    tasks = make_tasks(
+        hero_twin,
+        ["counter_to_sink"],
+        2,
+        use_generated_instructions=True,
+        instruction_style="polite",
+        log=lambda *_: None,
+    )
     assert len(tasks) == 2
     for t in tasks:
         assert t.get("instruction_style") == "polite"
@@ -76,6 +85,7 @@ def test_make_tasks_propagates_instruction_style(hero_twin, offline):
 
 def test_cli_instruction_style_requires_nemotron(capsys):
     from arrival.cli import main
+
     code = main(["sim", "--instruction-style", "concise"])
     assert code != 0
     err = capsys.readouterr().err

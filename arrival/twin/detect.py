@@ -32,7 +32,7 @@ from pathlib import Path
 
 import numpy as np
 
-from arrival.catalog.objects import OBJECT_SPECS, RIM_HELD, catalog_id
+from arrival.catalog.categories import OBJECT_SPECS, RIM_HELD, catalog_id
 from arrival.scan import rgbd
 
 PROMPT_VERSION = 1
@@ -48,13 +48,23 @@ FAUCET_M = 0.10  # behind a sink (its local -y) the faucet stands; the scene put
 CLEAR_TOL_M = 0.01  # an object may overhang a top edge or touch a wall by this much
 MIN_POINTS = 3
 DEFAULT_CACHE = None  # the upload worker keeps no reply cache; tests point this at a fixture
-ALIASES = {"coffee mug": "mug", "glass": "cup", "dish": "plate", "frying pan": "pan", "skillet": "pan",
-           "water bottle": "bottle", "remote control": "remote", "tv remote": "remote"}
+ALIASES = {
+    "coffee mug": "mug",
+    "glass": "cup",
+    "dish": "plate",
+    "frying pan": "pan",
+    "skillet": "pan",
+    "water bottle": "bottle",
+    "remote control": "remote",
+    "tv remote": "remote",
+}
 SYSTEM_PROMPT = (
-    "You find small objects in one RGB photo of a room. Report only these labels: " + ", ".join(OBJECT_SPECS)
-    + ". Anything else you see on a counter or table is \"other:<name>\". Return only JSON: {\"objects\": "
-    "[{\"label\": str, \"box\": [x0, y0, x1, y1] in pixels of this image, \"confidence\": 0 to 1}]}, "
-    "and {\"objects\": []} when there is none.")
+    "You find small objects in one RGB photo of a room. Report only these labels: "
+    + ", ".join(OBJECT_SPECS)
+    + '. Anything else you see on a counter or table is "other:<name>". Return only JSON: {"objects": '
+    '[{"label": str, "box": [x0, y0, x1, y1] in pixels of this image, "confidence": 0 to 1}]}, '
+    'and {"objects": []} when there is none.'
+)
 
 
 class DetectionClient:
@@ -76,6 +86,8 @@ class DetectionClient:
         return h.hexdigest()[:24]
 
     def read(self, frame: rgbd.Frame) -> tuple[list | None, str]:
+        """The detections in one frame and where they came from: the cached reply when there is one, else a live call to
+        the omni model (cached on success). Unconfigured, offline or failed calls return None and the reason."""
         key = self.key(frame.rgb)
         hit = self.entries.get(key)
         if isinstance(hit, dict):
@@ -92,11 +104,20 @@ class DetectionClient:
                 w, h = im.size
             data = base64.b64encode(Path(frame.rgb).read_bytes()).decode()
             mime = "image/png" if frame.rgb.suffix.lower() == ".png" else "image/jpeg"
-            txt = complete([{"role": "system", "content": SYSTEM_PROMPT},
-                            {"role": "user", "content": [
-                                {"type": "text", "text": f"The image is {w}x{h} pixels."},
-                                {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{data}"}}]}],
-                           role="omni", temperature=0)
+            txt = complete(
+                [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": f"The image is {w}x{h} pixels."},
+                            {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{data}"}},
+                        ],
+                    },
+                ],
+                role="omni",
+                temperature=0,
+            )
             objects = parse_reply(txt)
         except TokenFactoryNotConfigured as e:
             self._offline = "not_configured"
@@ -108,8 +129,13 @@ class DetectionClient:
             self.log(f"[detect] frame {frame.id}: model call failed ({type(e).__name__}); frame not read")
             return None, "call_failed"
         self.model = tf_config()["models"].get("omni")
-        self.entries[key] = {"frame": frame.id, "source": "token_factory", "model": self.model,
-                             "prompt_version": PROMPT_VERSION, "reply": {"objects": objects}}
+        self.entries[key] = {
+            "frame": frame.id,
+            "source": "token_factory",
+            "model": self.model,
+            "prompt_version": PROMPT_VERSION,
+            "reply": {"objects": objects},
+        }
         if self.cache_path:
             self.cache_path.parent.mkdir(parents=True, exist_ok=True)
             self.cache_path.write_text(json.dumps({"entries": self.entries}, indent=2) + "\n", encoding="utf-8")
@@ -120,11 +146,14 @@ def parse_reply(reply) -> list:
     """The `objects` list of a reply (JSON text or an already parsed dict). Entries keep only label, box and
     confidence; a reply that is not that shape raises ValueError."""
     if isinstance(reply, str):
-        reply, _ = json.JSONDecoder().raw_decode(reply[reply.index("{"):])
+        reply, _ = json.JSONDecoder().raw_decode(reply[reply.index("{") :])
     if not isinstance(reply, dict) or not isinstance(reply.get("objects"), list):
         raise ValueError("reply has no objects list")
-    return [{"label": o.get("label"), "box": o.get("box"), "confidence": o.get("confidence")}
-            for o in reply["objects"] if isinstance(o, dict)]
+    return [
+        {"label": o.get("label"), "box": o.get("box"), "confidence": o.get("confidence")}
+        for o in reply["objects"]
+        if isinstance(o, dict)
+    ]
 
 
 def catalog_label(label) -> str | None:
@@ -246,8 +275,16 @@ def _clusters(xy: np.ndarray, cell: float = CELL_M) -> list[np.ndarray]:
     return out
 
 
-def locate(box, label: str, depth: np.ndarray, K: np.ndarray, T: np.ndarray, scale: tuple[float, float],
-           twin: dict, confidence: np.ndarray | None = None) -> tuple[list[float] | None, str | None]:
+def locate(
+    box,
+    label: str,
+    depth: np.ndarray,
+    K: np.ndarray,
+    T: np.ndarray,
+    scale: tuple[float, float],
+    twin: dict,
+    confidence: np.ndarray | None = None,
+) -> tuple[list[float] | None, str | None]:
     """Room-frame centre [x, y, z] of a catalog object from its RGB pixel box, or (None, reason).
     `scale` maps RGB pixels to depth pixels; K is for the depth image."""
     try:
@@ -280,8 +317,12 @@ def locate(box, label: str, depth: np.ndarray, K: np.ndarray, T: np.ndarray, sca
         top, over = _top(f), _over(pts, f)
         if why == "no_support" and (over & (pts[:, 2] > top - 0.005)).any():
             why = "nothing_above_top"
-        band = pts[over & (pts[:, 2] > top + ABOVE_TOP_M) & (pts[:, 2] < top + 1.25 * size[2] + SLACK_M)
-                   & ~_backdrop(pts, f, twin)]
+        band = pts[
+            over
+            & (pts[:, 2] > top + ABOVE_TOP_M)
+            & (pts[:, 2] < top + 1.25 * size[2] + SLACK_M)
+            & ~_backdrop(pts, f, twin)
+        ]
         for g in _clusters(band[:, :2]):
             obj = band[g]
             if len(obj) < MIN_POINTS:
@@ -325,15 +366,24 @@ def _train_frames(m: rgbd.Manifest) -> list[rgbd.Frame]:
     return [train[i] for i in sorted(set(idx.tolist()))]
 
 
-def detect_objects(frames_dir, twin: dict, bundle: dict | None = None, client: DetectionClient | None = None,
-                   log=print) -> dict:
+def detect_objects(
+    frames_dir, twin: dict, bundle: dict | None = None, client: DetectionClient | None = None, log=print
+) -> dict:
     """Read the train frames of a CAP-2a bundle and return the twin objects found, merged across frames.
     Poses map into the twin as the realism stage maps them: through the normalized bundle's `arkit_world_to_room`
     when it has one, else unchanged, and a named scan must name the frames' room. Never raises for a bad bundle:
     the result's `state` is `detected`, `none_found` or `not_run` and `reason` says why when nothing was read."""
     client = client or DetectionClient(DEFAULT_CACHE, log=log)
-    result = {"state": "not_run", "reason": None, "frames_read": 0, "frames_unread": 0, "reply_sources": {},
-              "model": None, "objects": [], "rejected": []}
+    result = {
+        "state": "not_run",
+        "reason": None,
+        "frames_read": 0,
+        "frames_unread": 0,
+        "reply_sources": {},
+        "model": None,
+        "objects": [],
+        "rejected": [],
+    }
     try:
         m = rgbd.load_manifest(frames_dir)
     except rgbd.ManifestError as e:
@@ -388,8 +438,9 @@ def detect_objects(frames_dir, twin: dict, bundle: dict | None = None, client: D
         for h in sorted(here, key=lambda h: -float(h["confidence"])):
             reach = max(OBJECT_SPECS[h["label"]][1][:2])
             if any(k["label"] == h["label"] and math.dist(k["position"][:2], h["position"][:2]) < reach for k in kept):
-                result["rejected"].append({k: h[k] for k in ("frame", "label", "box", "confidence")}
-                                          | {"reason": "same_object"})
+                result["rejected"].append(
+                    {k: h[k] for k in ("frame", "label", "box", "confidence")} | {"reason": "same_object"}
+                )
             else:
                 kept.append(h)
         hits += kept
@@ -409,9 +460,11 @@ def merge(hits: list[dict], twin: dict, rejected: list | None = None) -> list[di
     `rejected` with that reason (`no_support`, `off_top`, `against_wall`, `on_fixture`)."""
     clusters: list[list[dict]] = []
     for h in sorted(hits, key=lambda h: (-float(h["confidence"]), h["frame"])):
-        near = [(math.dist(h["position"][:2], np.mean([x["position"][:2] for x in c], axis=0)), k)
-                for k, c in enumerate(clusters)
-                if c[0]["label"] == h["label"] and all(x["frame"] != h["frame"] for x in c)]
+        near = [
+            (math.dist(h["position"][:2], np.mean([x["position"][:2] for x in c], axis=0)), k)
+            for k, c in enumerate(clusters)
+            if c[0]["label"] == h["label"] and all(x["frame"] != h["frame"] for x in c)
+        ]
         near = [(d, k) for d, k in near if d < DEDUP_M]
         if near:
             clusters[min(near)[1]].append(h)
@@ -427,19 +480,31 @@ def merge(hits: list[dict], twin: dict, rejected: list | None = None) -> list[di
         why = "no_support" if support is None else clearance(xy, label, support, twin)
         if why:
             if rejected is not None:
-                rejected += [{"frame": x["frame"], "label": label, "box": x["box"], "confidence": x["confidence"],
-                              "reason": why} for x in c]
+                rejected += [
+                    {"frame": x["frame"], "label": label, "box": x["box"], "confidence": x["confidence"], "reason": why}
+                    for x in c
+                ]
             continue
         z = _top(support) + size[2] / 2
         n = 1
         while f"{label}_{n}" in taken:
             n += 1
         taken.add(f"{label}_{n}")
-        out.append({"id": f"{label}_{n}", "catalog_id": catalog_id(label), "label": label, "size": size,
-                    "position": [round(float(xy[0]), 6), round(float(xy[1]), 6), round(z, 6)], "yaw": 0.0,
-                    "placed_by": "detect_objects", "provenance": "detected",
-                    "detection": {"confidence": max(float(x["confidence"]) for x in c),
-                                  "frames": sorted({x["frame"] for x in c}),
-                                  "evidence": [{"frame": x["frame"], "box": x["box"], "confidence": x["confidence"]}
-                                               for x in c]}})
+        out.append(
+            {
+                "id": f"{label}_{n}",
+                "catalog_id": catalog_id(label),
+                "label": label,
+                "size": size,
+                "position": [round(float(xy[0]), 6), round(float(xy[1]), 6), round(z, 6)],
+                "yaw": 0.0,
+                "placed_by": "detect_objects",
+                "provenance": "detected",
+                "detection": {
+                    "confidence": max(float(x["confidence"]) for x in c),
+                    "frames": sorted({x["frame"] for x in c}),
+                    "evidence": [{"frame": x["frame"], "box": x["box"], "confidence": x["confidence"]} for x in c],
+                },
+            }
+        )
     return out

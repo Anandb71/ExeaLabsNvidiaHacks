@@ -19,8 +19,7 @@ def test_depth_composite_keeps_static_when_motion_is_behind_or_within_margin():
 def test_invalid_dynamic_depth_does_not_cover_room():
     room = np.full((1, 4, 3), 20, np.uint8)
     moving = np.full((1, 4, 3), 200, np.uint8)
-    out = render(room, np.ones((1, 4), np.float32), moving,
-                 np.array([[0, -1, np.nan, np.inf]], np.float32))
+    out = render(room, np.ones((1, 4), np.float32), moving, np.array([[0, -1, np.nan, np.inf]], np.float32))
     assert np.array_equal(out, room)
 
 

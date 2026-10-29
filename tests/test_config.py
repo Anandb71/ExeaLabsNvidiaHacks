@@ -4,10 +4,9 @@ import logging
 import re
 
 import pytest
+from conftest import REPO
 
 from arrival import config
-
-from conftest import REPO
 
 FAKE_KEY = "nvapi-FAKEFAKEFAKEFAKE1234"
 
@@ -26,7 +25,8 @@ def clean_env(monkeypatch, tmp_path):
 
 def test_env_wins_over_dotenv_and_dotenv_fills_unset(clean_env, monkeypatch):
     (clean_env / ".env").write_text(
-        "# comment\nexport TAVILY_API_KEY='from-file'\nGR00T_POLICY_URL=\"http://box:8000\"\nNOT_A_LINE\n")
+        "# comment\nexport TAVILY_API_KEY='from-file'\nGR00T_POLICY_URL=\"http://box:8000\"\nNOT_A_LINE\n"
+    )
     monkeypatch.setenv("TAVILY_API_KEY", "from-env")
     assert config.get("TAVILY_API_KEY") == "from-env"
     assert config.get("GR00T_POLICY_URL") == "http://box:8000"
@@ -67,13 +67,16 @@ def test_status_reports_set_without_values(clean_env, monkeypatch):
     assert FAKE_KEY not in repr(rows)
 
 
-@pytest.mark.parametrize("text", [
-    f"Authorization: Bearer {FAKE_KEY}",
-    "key tvly-abcdefghijklmnop leaked",
-    '{"api_key": "abcd1234efgh"}',
-    "GET http://user:hunter2pass@gpu-box:8000/act",
-    "POST https://cosmos.example/v1?token=abc123def456&x=1",
-])
+@pytest.mark.parametrize(
+    "text",
+    [
+        f"Authorization: Bearer {FAKE_KEY}",
+        "key tvly-abcdefghijklmnop leaked",
+        '{"api_key": "abcd1234efgh"}',
+        "GET http://user:hunter2pass@gpu-box:8000/act",
+        "POST https://cosmos.example/v1?token=abc123def456&x=1",
+    ],
+)
 def test_redact_scrubs_token_shapes(clean_env, text):
     out = config.redact(text)
     assert config.REDACTED in out
@@ -109,8 +112,10 @@ def test_log_filter_redacts_formatted_records(clean_env):
 
 
 def test_clients_read_dotenv_through_config(clean_env):
-    (clean_env / ".env").write_text("GR00T_POLICY_URL=http://box:8000\nCOSMOS_URL=http://cosmos:9000\n"
-                                    "TOKEN_FACTORY_API_KEY=tf-key\nTAVILY_API_KEY=tv-key\n")
+    (clean_env / ".env").write_text(
+        "GR00T_POLICY_URL=http://box:8000\nCOSMOS_URL=http://cosmos:9000\n"
+        "TOKEN_FACTORY_API_KEY=tf-key\nTAVILY_API_KEY=tv-key\n"
+    )
     from arrival.models import tavily, token_factory
     from arrival.render.variation import CosmosClient
     from arrival.sim.policy import VLAClient
@@ -125,8 +130,11 @@ def test_only_config_reads_the_environment():
     """The single-loader rule: every known setting is read through arrival.config, nowhere else."""
     names = "|".join(config.SETTINGS)
     pattern = re.compile(rf"os\.(environ|getenv)\b[^\n]*({names})")
-    offenders = [str(p.relative_to(REPO)) for p in (REPO / "arrival").rglob("*.py")
-                 if p.name != "config.py" and pattern.search(p.read_text(encoding="utf-8"))]
+    offenders = [
+        str(p.relative_to(REPO))
+        for p in (REPO / "arrival").rglob("*.py")
+        if p.name != "config.py" and pattern.search(p.read_text(encoding="utf-8"))
+    ]
     assert offenders == []
 
 
@@ -145,12 +153,15 @@ def test_env_example_lists_every_job_limit():
         assert re.search(rf"^#? ?{var}=", text, re.M), var
 
 
-@pytest.mark.parametrize(("outer", "value"), [
-    ('"', "ends-with-apostrophe'"),
-    ("'", 'ends-with-double-quote"'),
-    ('"', "'nested-single-quotes'"),
-    ("'", '"nested-double-quotes"'),
-])
+@pytest.mark.parametrize(
+    ("outer", "value"),
+    [
+        ('"', "ends-with-apostrophe'"),
+        ("'", 'ends-with-double-quote"'),
+        ('"', "'nested-single-quotes'"),
+        ("'", '"nested-double-quotes"'),
+    ],
+)
 def test_dotenv_removes_only_one_matching_quote_pair(clean_env, outer, value):
     (clean_env / ".env").write_text(f"COSMOS_URL={outer}{value}{outer}\n")
     assert config.get("COSMOS_URL") == value

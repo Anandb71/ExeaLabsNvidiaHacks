@@ -22,7 +22,8 @@ from arrival.scan.bundle import load_room  # noqa: E402
 from arrival.sim.collect import SimEnv, collect, run_episode  # noqa: E402
 from arrival.sim.people import Walkers, frame  # noqa: E402
 from arrival.sim.policy import ScriptedExpert  # noqa: E402
-from arrival.sim.preflight import base_pose, check_task  # noqa: E402
+from arrival.sim.reach import check_task  # noqa: E402
+from arrival.sim.stand import base_pose  # noqa: E402
 from arrival.sim.tasks import SIM_FAMILIES, finish_task, make_tasks  # noqa: E402
 from arrival.twin.compile import compile_twin, to_local  # noqa: E402
 
@@ -57,6 +58,7 @@ def ushape():
 
 
 # ---- pre-flight ----
+
 
 def test_preflight_keeps_every_hero_variation(hero_twin):
     pre = {}
@@ -95,8 +97,15 @@ def test_stand_spot_must_clear_the_walls(hero_twin):
     assert check_task(hero_twin, task) is None
     base, _, anchor = base_pose(hero_twin, task)
     tight = copy.deepcopy(hero_twin)  # a wall 8 cm behind the base column
-    tight["walls"].append({"id": "wall_extra", "start": [base[0] - 0.5, base[1] + 0.08],
-                           "end": [base[0] + 0.5, base[1] + 0.08], "height": 2.4, "thickness": 0.02})
+    tight["walls"].append(
+        {
+            "id": "wall_extra",
+            "start": [base[0] - 0.5, base[1] + 0.08],
+            "end": [base[0] + 0.5, base[1] + 0.08],
+            "height": 2.4,
+            "thickness": 0.02,
+        }
+    )
     why = check_task(tight, task)
     assert why and "wall_extra" in why and "needs 0.15 m" in why
 
@@ -114,13 +123,16 @@ def test_pick_and_place_points_must_be_within_reach(hero_twin):
 def test_preflight_rejection_is_counted_in_the_dataset_stats(ushape, tmp_path):
     res = collect(ushape, ["open_drawer", "open_door"], 2, tmp_path, people=0, res=32, log=QUIET)
     r, info = res["report_data"], res["info"]
-    assert r["skipped_unreachable"] == 1 and r["skipped_error"] == 0 and r["skipped"] == 1  # storage_b's drawer; its door stands along the run
+    assert (
+        r["skipped_unreachable"] == 1 and r["skipped_error"] == 0 and r["skipped"] == 1
+    )  # storage_b's drawer; its door stands along the run
     assert {x["stage"] for x in r["skip_reasons"]} == {"preflight"}
     assert "storage_b" in r["skip_reasons"][0]["reason"] and "sink" in r["skip_reasons"][0]["reason"]
     assert info["arrival_skipped_unreachable"] == 1 and info["arrival_attempts"] == r["attempts"] == 2
 
 
 # ---- tasks in the fixture's frame ----
+
 
 def test_start_offsets_run_along_the_counter_whatever_wall_it_is_on(rotated):
     tasks = make_tasks(rotated, ["wipe_counter", "put_in_drawer", "counter_to_sink"], 30, seed=4, log=QUIET)
@@ -134,8 +146,9 @@ def test_start_offsets_run_along_the_counter_whatever_wall_it_is_on(rotated):
         a, b = to_local(objs[t["object_id"]]["position"][:2], src), to_local(t["start"][:2], src)
         got = (round(b[0] - a[0], 4), round(b[1] - a[1], 4))
         # along the same axis and way as a POSE_OFFSETS entry; shorter only where it would cross the counter's edge
-        assert any(all((g == 0) == (c == 0) and g * c >= 0 and abs(g) <= abs(c) for g, c in zip(got, o))
-                   for o in offsets), (t["task_id"], src["id"], got)
+        assert any(
+            all((g == 0) == (c == 0) and g * c >= 0 and abs(g) <= abs(c) for g, c in zip(got, o)) for o in offsets
+        ), (t["task_id"], src["id"], got)
         assert abs(b[0]) < src["size"][0] / 2 and abs(b[1]) < src["size"][1] / 2  # still on the counter top
     assert {"counter_w", "counter_s"} <= seen  # a west wall run (yaw -90) and a south wall run (yaw 180)
 
@@ -154,9 +167,11 @@ def test_every_stand_spot_is_in_front_of_its_fixture_in_the_room(rotated, fixtur
 
 # ---- running end to end ----
 
+
 def test_u_shape_runs_end_to_end_with_people(ushape, tmp_path):
-    res = collect(ushape, ["counter_to_sink", "open_drawer", "wipe_counter"], 3, tmp_path, people=2, res=32, seed=2,
-                  log=QUIET)
+    res = collect(
+        ushape, ["counter_to_sink", "open_drawer", "wipe_counter"], 3, tmp_path, people=2, res=32, seed=2, log=QUIET
+    )
     r = res["report_data"]
     assert r["attempts"] == 3 and r["successes"] == 3 and r["human_contacts"] == 0, r["families"]
     assert r["skipped_unreachable"] == 1 and r["skipped_error"] == 0  # storage_b, in the corner of the U
@@ -171,8 +186,9 @@ def test_u_shape_sink_cabinet_door_closes(ushape):
     from arrival.sim.collect import run_episode
     from arrival.sim.tasks import finish_task
 
-    task = finish_task({"family": "close_door", "fixture": "storage_sink", "lighting": "neutral", "people": 0,
-                        "seed": 0})
+    task = finish_task(
+        {"family": "close_door", "fixture": "storage_sink", "lighting": "neutral", "people": 0, "seed": 0}
+    )
     ep = run_episode(SimEnv(ushape, task, res=32), ScriptedExpert(), task)
     assert ep["success"] and ep["detail"]["qpos"] < np.radians(5), ep["detail"]
 
@@ -182,10 +198,11 @@ def test_no_fridge_visit_inside_the_door_the_robot_closes(rotated):
     person to the fridge whose stand point was 0.55 m from that door's hinge, inside the 1.12 m keep-out every other
     walker respects; reaching round the open door the hand swept 0.19 m into them (on main: human contact, both base
     modes). The visit is now dropped and the same episode closes the door with no contact."""
-    task = finish_task({"family": "close_door", "fixture": "counter_w", "lighting": "neutral", "people": 2,
-                        "seed": 1004})
+    task = finish_task(
+        {"family": "close_door", "fixture": "counter_w", "lighting": "neutral", "people": 2, "seed": 1004}
+    )
     env = SimEnv(rotated, task, res=32, cameras=())
-    (hinge, radius), = env._door_keepout(task)
+    ((hinge, radius),) = env._door_keepout(task)
     v = env.walkers.visit
     assert v is None or min(np.linalg.norm(v[k] - hinge) for k in ("s1", "s2")) >= radius, v
     ep = run_episode(env, ScriptedExpert(), task)
@@ -202,6 +219,7 @@ def test_rotated_kitchen_runs_end_to_end_on_every_wall(rotated, tmp_path):
 
 
 # ---- skip, never crash ----
+
 
 def _episodes(res) -> int:
     return res["info"]["total_episodes"]
@@ -242,7 +260,9 @@ def test_the_walker_crash_from_42_skips_the_task_at_build(rotated, tmp_path, mon
     res = collect(rotated, ["open_drawer"], 2, tmp_path, people=1, res=32, log=QUIET)
     r = res["report_data"]
     assert (r["skipped_error"], r["attempts"], r["successes"]) == (1, 1, 1)
-    assert next(x for x in r["skip_reasons"] if x["stage"] == "build")["reason"].startswith("ValueError: high - low < 0")
+    assert next(x for x in r["skip_reasons"] if x["stage"] == "build")["reason"].startswith(
+        "ValueError: high - low < 0"
+    )
     assert _episodes(res) == 1
 
 
@@ -266,6 +286,7 @@ def test_policy_server_errors_are_not_swallowed_as_skips(ushape, tmp_path, monke
 
 
 # ---- worker ----
+
 
 def _upload(out: Path, room: str) -> dict:
     data = (REPO / SCANS / room / "scan.json").read_bytes()
@@ -295,10 +316,21 @@ def test_worker_finishes_a_partial_dataset_and_records_the_skips(tmp_path):
 
 # ---- the walkers plan in the work wall's frame ----
 
+
 def _rotate(twin: dict, theta: float) -> list[dict]:
     c, s = math.cos(theta), math.sin(theta)
-    return [{**f, "position": [c * f["position"][0] - s * f["position"][1], s * f["position"][0] + c * f["position"][1],
-                               f["position"][2]], "yaw": f.get("yaw", 0.0) + theta} for f in twin["fixtures"]]
+    return [
+        {
+            **f,
+            "position": [
+                c * f["position"][0] - s * f["position"][1],
+                s * f["position"][0] + c * f["position"][1],
+                f["position"][2],
+            ],
+            "yaw": f.get("yaw", 0.0) + theta,
+        }
+        for f in twin["fixtures"]
+    ]
 
 
 @pytest.mark.parametrize("theta", [-math.pi / 2, math.pi / 2, math.pi])
@@ -328,8 +360,17 @@ def test_no_strip_in_front_of_the_run_falls_back_to_a_floor_walk_with_a_note(rot
     try:
         floor, base, front, note = env._free_floor(env.anchor, env.data.body("robot_base").xpos)
         assert note is None and front is not None
-        tiny = {**rotated, "walls": [{**w, "start": [w["start"][0] * 0.3, w["start"][1] * 0.3],
-                                       "end": [w["end"][0] * 0.3, w["end"][1] * 0.3]} for w in rotated["walls"]]}
+        tiny = {
+            **rotated,
+            "walls": [
+                {
+                    **w,
+                    "start": [w["start"][0] * 0.3, w["start"][1] * 0.3],
+                    "end": [w["end"][0] * 0.3, w["end"][1] * 0.3],
+                }
+                for w in rotated["walls"]
+            ],
+        }
         fake = type("E", (), {"twin": tiny})()
         floor, base, front, note = SimEnv._free_floor(fake, env.anchor, env.data.body("robot_base").xpos)
         assert front is None and base is not None and "no free strip" in note
@@ -353,7 +394,11 @@ def test_start_offsets_keep_the_object_on_its_counter(room, rotated, ushape):
                 starts += 1
                 src, h = fx[t["source"]], half[t["object_id"]]
                 lx, ly = to_local(t["start"], src)
-                assert abs(lx) + h <= src["size"][0] / 2 + 1e-9 and abs(ly) + h <= src["size"][1] / 2 + 1e-9,                     (t["family"], t["object_id"], t["start"])
+                assert abs(lx) + h <= src["size"][0] / 2 + 1e-9 and abs(ly) + h <= src["size"][1] / 2 + 1e-9, (
+                    t["family"],
+                    t["object_id"],
+                    t["start"],
+                )
     assert starts
 
 
@@ -369,5 +414,12 @@ def test_unload_dishwasher_puts_the_mug_back_on_the_counter_from_the_offset_near
 
 
 def _drawer_task(twin: dict, fixture: str) -> dict:
-    return {"family": "open_drawer", "fixture": fixture, "handle": f"{fixture}_drawer0_handle",
-            "joint": f"{fixture}_drawer0", "lighting": "neutral", "people": 1, "seed": 1}
+    return {
+        "family": "open_drawer",
+        "fixture": fixture,
+        "handle": f"{fixture}_drawer0_handle",
+        "joint": f"{fixture}_drawer0",
+        "lighting": "neutral",
+        "people": 1,
+        "seed": 1,
+    }

@@ -2,19 +2,18 @@
 
 None of this needs mujoco, a network or a GPU.
 """
+
 import importlib.util
 import io
 import json
 import os
 import socket
-import sys
 import tarfile
 import threading
 import zipfile
 
 import pytest
 import yaml
-
 from conftest import REPO
 
 
@@ -32,6 +31,7 @@ demo_all = _load("demo_all")
 
 # ---- check_links -------------------------------------------------------------------------------
 
+
 def _tree(tmp_path, files):
     for name, text in files.items():
         p = tmp_path / name
@@ -45,20 +45,26 @@ def test_repo_links_are_clean():
 
 
 def test_good_links_and_anchors_pass(tmp_path):
-    root = _tree(tmp_path, {
-        "README.md": "# Top\n[a](docs/a.md) [b](docs/a.md#second-part) [self](#top) ![img](docs/pic.png)\n"
-                     "[dup](docs/a.md#same-1) [ext](https://example.com/x) [mail](mailto:a@b.c)\n",
-        "docs/a.md": "# A\n## Second part\n## Same\n## Same\n[up](../README.md#top)\n",
-        "docs/pic.png": "x",
-    })
+    root = _tree(
+        tmp_path,
+        {
+            "README.md": "# Top\n[a](docs/a.md) [b](docs/a.md#second-part) [self](#top) ![img](docs/pic.png)\n"
+            "[dup](docs/a.md#same-1) [ext](https://example.com/x) [mail](mailto:a@b.c)\n",
+            "docs/a.md": "# A\n## Second part\n## Same\n## Same\n[up](../README.md#top)\n",
+            "docs/pic.png": "x",
+        },
+    )
     assert check_links.check(root) == []
 
 
 def test_broken_file_anchor_and_escape_are_reported(tmp_path, capsys):
-    root = _tree(tmp_path / "repo", {
-        "README.md": "[gone](docs/nope.md)\n[bad](docs/a.md#no-such-heading)\n[out](../outside.md)\n![i](x.png)\n",
-        "docs/a.md": "# A\n",
-    })
+    root = _tree(
+        tmp_path / "repo",
+        {
+            "README.md": "[gone](docs/nope.md)\n[bad](docs/a.md#no-such-heading)\n[out](../outside.md)\n![i](x.png)\n",
+            "docs/a.md": "# A\n",
+        },
+    )
     (tmp_path / "outside.md").write_text("# O\n")
     probs = check_links.check(root)
     assert len(probs) == 4
@@ -84,16 +90,20 @@ def test_slug_matches_github():
 
 # ---- check_docs: planned files under a to-do heading --------------------------------------------
 
+
 def test_check_docs_skips_paths_only_under_a_todo_heading(tmp_path):
     check_docs = _load("check_docs")
     doc = tmp_path / "README.md"
-    text = ("## Code to-do before submission\n\nAdd `arrival/jobs/shards.py` later.\n\n"
-            "## Status\n\nSee `arrival/jobs/shards.py` now.\n")
+    text = (
+        "## Code to-do before submission\n\nAdd `arrival/jobs/shards.py` later.\n\n"
+        "## Status\n\nSee `arrival/jobs/shards.py` now.\n"
+    )
     probs = check_docs.check_paths(tmp_path, doc, text, {})
     assert probs == ["README.md:7: path does not exist `arrival/jobs/shards.py`"]
 
 
 # ---- smoke_package: archive checks ---------------------------------------------------------------
+
 
 def _archives(tmp_path, sdist_files, wheel_files):
     sd, wh = tmp_path / "a-0.tar.gz", tmp_path / "a-0-py3-none-any.whl"
@@ -108,8 +118,11 @@ def _archives(tmp_path, sdist_files, wheel_files):
 
 
 GOOD_SDIST = ["pyproject.toml", "README.md", "arrival/cli.py", "arrival/__init__.py"]
-GOOD_WHEEL = {"arrival/cli.py": "", "arrival/__init__.py": "",
-              "a-0.dist-info/entry_points.txt": "[console_scripts]\narrival = arrival.cli:main\n"}
+GOOD_WHEEL = {
+    "arrival/cli.py": "",
+    "arrival/__init__.py": "",
+    "a-0.dist-info/entry_points.txt": "[console_scripts]\narrival = arrival.cli:main\n",
+}
 
 
 def test_smoke_accepts_a_good_package(tmp_path):
@@ -117,8 +130,12 @@ def test_smoke_accepts_a_good_package(tmp_path):
 
 
 def test_smoke_flags_missing_files_script_and_stray_paths(tmp_path):
-    bad_wheel = {"arrival/__init__.py": "", "tests/test_x.py": "", "scans/hero_kitchen/scan.json": "",
-                 "a-0.dist-info/entry_points.txt": ""}
+    bad_wheel = {
+        "arrival/__init__.py": "",
+        "tests/test_x.py": "",
+        "scans/hero_kitchen/scan.json": "",
+        "a-0.dist-info/entry_points.txt": "",
+    }
     probs = smoke_package.check_archives(*_archives(tmp_path, ["README.md"], bad_wheel))
     text = "\n".join(probs)
     assert "sdist is missing pyproject.toml" in text and "sdist is missing arrival/cli.py" in text
@@ -128,6 +145,7 @@ def test_smoke_flags_missing_files_script_and_stray_paths(tmp_path):
 
 
 # ---- demo_all: GL backend choice, preflight, offline guard, watchdog, index --------------------------
+
 
 def test_gl_candidates_order_per_platform():
     assert demo_all.gl_candidates("linux") == [None, "egl", "osmesa", "glfw"]
@@ -143,8 +161,11 @@ def test_pick_gl_backend_takes_the_first_that_renders():
         seen.append(b)
         return b == "osmesa"
 
-    assert demo_all.pick_gl_backend([None, "egl", "osmesa", "glfw"], probe) == (True, "osmesa",
-                                                                                 ["default", "egl", "osmesa"])
+    assert demo_all.pick_gl_backend([None, "egl", "osmesa", "glfw"], probe) == (
+        True,
+        "osmesa",
+        ["default", "egl", "osmesa"],
+    )
     assert seen == [None, "egl", "osmesa"]
     assert demo_all.pick_gl_backend([None, "egl"], lambda b: False) == (False, None, ["default", "egl"])
     assert demo_all.pick_gl_backend([None], lambda b: True) == (True, None, ["default"])
@@ -236,11 +257,22 @@ def test_watchdog_can_be_cancelled_or_disabled(tmp_path):
 def _summary(tmp_path, room="hero_kitchen", error=None):
     sheet = tmp_path / "sheet.png"
     sheet.write_bytes(b"\x89PNG fake")
-    return {"room": room, "mode": "quick", "overall": "FAIL" if error else "PASS", "seconds": 1.5, "error": error,
-            "stages": [{"stage": "sim dataset", "status": "PASS", "seconds": 1.0, "detail": None}],
-            "dataset": {"path": "out/datasets/x", "episodes": 2, "frames": 10, "physically_valid": True,
-                        "joints_are_placeholder": False},
-            "artifacts": {"contact_sheet": str(sheet)}}
+    return {
+        "room": room,
+        "mode": "quick",
+        "overall": "FAIL" if error else "PASS",
+        "seconds": 1.5,
+        "error": error,
+        "stages": [{"stage": "sim dataset", "status": "PASS", "seconds": 1.0, "detail": None}],
+        "dataset": {
+            "path": "out/datasets/x",
+            "episodes": 2,
+            "frames": 10,
+            "physically_valid": True,
+            "joints_are_placeholder": False,
+        },
+        "artifacts": {"contact_sheet": str(sheet)},
+    }
 
 
 def test_index_html_is_self_contained_honest_and_escaped(tmp_path):
@@ -249,7 +281,7 @@ def test_index_html_is_self_contained_honest_and_escaped(tmp_path):
     assert demo_all.HONEST_LABEL in page
     assert "arrival_physically_valid: true" in page and "joints_are_placeholder: false" in page
     assert "<b>x</b>" not in page and "&lt;b&gt;x&lt;/b&gt;" in page and "a &lt; b" in page
-    assert "http://" not in page and "https://" not in page and "src=\"/" not in page
+    assert "http://" not in page and "https://" not in page and 'src="/' not in page
     assert "<script" not in page
 
 
@@ -262,6 +294,7 @@ def test_index_html_without_a_contact_sheet(tmp_path):
 
 
 # ---- CI workflow and repo files ----------------------------------------------------------------------
+
 
 def _ci():
     return yaml.safe_load((REPO / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))

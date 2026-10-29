@@ -7,11 +7,12 @@ import pytest
 
 mujoco = pytest.importorskip("mujoco")
 
+from conftest import SCANS  # noqa: E402
+
 from arrival.jobs.shards import ShardError  # noqa: E402
 from arrival.scan.bundle import load_room  # noqa: E402
 from arrival.sim import collect as collect_mod  # noqa: E402
 from arrival.twin.compile import compile_twin  # noqa: E402
-from conftest import SCANS  # noqa: E402
 
 RUN = dict(families=["open_drawer"], episodes=2, people=0, res=32, seed=0, log=lambda *_: None)
 

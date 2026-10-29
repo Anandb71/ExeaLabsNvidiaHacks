@@ -55,8 +55,9 @@ def test_cancel_open_stops_the_shards_still_running(tmp_path, made):
 
 
 def test_fanout_command_leaves_no_shard_running(tmp_path, made, monkeypatch, capsys):
-    monkeypatch.setattr(fanout, "LocalBackend", lambda store, scratch: made.append(OneShardFails(store, scratch))
-                        or made[-1])
+    monkeypatch.setattr(
+        fanout, "LocalBackend", lambda store, scratch: made.append(OneShardFails(store, scratch)) or made[-1]
+    )
     rc = cli.main(["fanout", "--room", "hero_kitchen", "--shards", "2", "--episodes", "2", "--out", str(tmp_path)])
     assert rc == cli.EXIT_USAGE and "shard 0/2 failed 3 times" in capsys.readouterr().err
     assert made and len(made[0].procs()) == 4  # three tries of shard 0, one of shard 1

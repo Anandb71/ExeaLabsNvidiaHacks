@@ -4,10 +4,16 @@ import json
 from pathlib import Path
 
 from arrival.eval import cost
-from arrival.eval.report import build_report, write_report
+from arrival.eval.cost import build_report, write_report
 
-BASELINE = {"task": "all_tasks", "room": "hero_kitchen", "n_success": 10, "operator_seconds_total": 1500,
-            "setup_assumptions": ["one operator"], "cost_basis_usd": 50}
+BASELINE = {
+    "task": "all_tasks",
+    "room": "hero_kitchen",
+    "n_success": 10,
+    "operator_seconds_total": 1500,
+    "setup_assumptions": ["one operator"],
+    "cost_basis_usd": 50,
+}
 
 
 def _w(path: Path, data) -> Path:
@@ -19,10 +25,19 @@ def _w(path: Path, data) -> Path:
 def _out(tmp_path: Path) -> Path:
     out = tmp_path / "out"
     # what `arrival sim` writes: physics-checked, 10 successes in 120 s
-    _w(out / "reports" / "hero_kitchen_sim.json",
-       {"room_id": "hero_kitchen", "generator": "mujoco_scripted_ik", "physics_checked_success": True,
-        "attempts": 12, "successes": 10, "seconds": 120.0, "human_contacts": 1,
-        "families": {"counter_to_sink": {"attempts": 12, "successes": 10, "human_contacts": 1, "seconds": 120.0}}})
+    _w(
+        out / "reports" / "hero_kitchen_sim.json",
+        {
+            "room_id": "hero_kitchen",
+            "generator": "mujoco_scripted_ik",
+            "physics_checked_success": True,
+            "attempts": 12,
+            "successes": 10,
+            "seconds": 120.0,
+            "human_contacts": 1,
+            "families": {"counter_to_sink": {"attempts": 12, "successes": 10, "human_contacts": 1, "seconds": 120.0}},
+        },
+    )
     # what `arrival demo` writes for the same room: scripted placeholder motion, 4 kept attempts in 0.25 s
     write_report(build_report("hero_kitchen", 4, 4, 0.25, ["counter_to_counter", "counter_to_sink"]), out / "reports")
     return out

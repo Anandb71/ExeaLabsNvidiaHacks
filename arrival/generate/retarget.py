@@ -16,9 +16,10 @@ from pathlib import Path
 
 import numpy as np
 
-from arrival.sim.collect import FPS, SimEnv, run_episode
+from arrival.sim.collect import SimEnv, run_episode
 from arrival.sim.export import SimDatasetWriter
 from arrival.sim.policy import ScriptedExpert
+from arrival.sim.robot import FPS
 from arrival.sim.tasks import finish_task, make_tasks
 
 GENERATOR = "seed_replay_retarget"
@@ -51,12 +52,28 @@ def record_seed(env, task: dict, seed_id: str) -> dict:
     wps = []
     for name, (pos, R, g, steps, *via) in zip(_segment_names(len(pol.recorded)), pol.recorded):
         anchor = tgt0 if name in TARGET_SEGMENTS else obj0
-        wps.append({"segment": name, "rel": (np.asarray(pos) - anchor).tolist(), "R": np.asarray(R).tolist(),
-                    "gripper": float(g), "steps": int(steps), "via": bool(via and via[0])})
-    return {"seed_episode_id": seed_id, "task_id": task["task_id"], "family": task["family"],
-            "object_id": task["object_id"], "start": [float(x) for x in obj0], "place_point": [float(x) for x in tgt0],
-            "instruction": task["instruction"], "success": bool(ep["success"]), "frames": int(len(ep["states"])),
-            "waypoints": wps}
+        wps.append(
+            {
+                "segment": name,
+                "rel": (np.asarray(pos) - anchor).tolist(),
+                "R": np.asarray(R).tolist(),
+                "gripper": float(g),
+                "steps": int(steps),
+                "via": bool(via and via[0]),
+            }
+        )
+    return {
+        "seed_episode_id": seed_id,
+        "task_id": task["task_id"],
+        "family": task["family"],
+        "object_id": task["object_id"],
+        "start": [float(x) for x in obj0],
+        "place_point": [float(x) for x in tgt0],
+        "instruction": task["instruction"],
+        "success": bool(ep["success"]),
+        "frames": int(len(ep["states"])),
+        "waypoints": wps,
+    }
 
 
 class ReplayPolicy(ScriptedExpert):
@@ -71,8 +88,16 @@ class ReplayPolicy(ScriptedExpert):
     def _waypoints(self, env, task):
         obj = env.body_pos(task["object_id"])
         tgt = env.place_point(task) + self.target_shift
-        return [((tgt if w["segment"] in TARGET_SEGMENTS else obj) + np.array(w["rel"]), np.array(w["R"]),
-                 w["gripper"], w["steps"], w["via"]) for w in self.seed["waypoints"]]
+        return [
+            (
+                (tgt if w["segment"] in TARGET_SEGMENTS else obj) + np.array(w["rel"]),
+                np.array(w["R"]),
+                w["gripper"],
+                w["steps"],
+                w["via"],
+            )
+            for w in self.seed["waypoints"]
+        ]
 
 
 def sample_offsets(n: int, rng, dx=START_DX, dy=START_DY, shift=TARGET_SHIFT) -> list[tuple]:
@@ -80,9 +105,17 @@ def sample_offsets(n: int, rng, dx=START_DX, dy=START_DY, shift=TARGET_SHIFT) ->
     return [tuple(float(v) for v in rng.uniform([-dx, -dy, -shift, -shift], [dx, dy, shift, shift])) for _ in range(n)]
 
 
-def retarget(twin: dict, out_dir: str | Path = "out", attempts: int = 6, seed: int = 0, res: int = 64,
-             family: str = "counter_to_sink", offsets: list[tuple] | None = None, baseline: bool = False,
-             log=print) -> dict:
+def retarget(
+    twin: dict,
+    out_dir: str | Path = "out",
+    attempts: int = 6,
+    seed: int = 0,
+    res: int = 64,
+    family: str = "counter_to_sink",
+    offsets: list[tuple] | None = None,
+    baseline: bool = False,
+    log=print,
+) -> dict:
     """One seed episode, then `attempts` retargeted replays; writes the successes as a LeRobot v2 dataset."""
     if family not in FAMILIES:
         raise ValueError(f"retarget supports {FAMILIES}, not {family}")
@@ -113,8 +146,12 @@ def retarget(twin: dict, out_dir: str | Path = "out", attempts: int = 6, seed: i
     t0 = time.perf_counter()
     rows, drops = [], {"unreachable": 0, "physics_fail": 0}
     for i, (dx, dy, tx, ty) in enumerate(offsets):
-        task = dict(seed_task, task_id=f"{seed_task['task_id']}_rt{i:03d}", seed=seed * 1000 + 100 + i,
-                    start=[seed_task["start"][0] + dx, seed_task["start"][1] + dy, seed_task["start"][2]])
+        task = dict(
+            seed_task,
+            task_id=f"{seed_task['task_id']}_rt{i:03d}",
+            seed=seed * 1000 + 100 + i,
+            start=[seed_task["start"][0] + dx, seed_task["start"][1] + dy, seed_task["start"][2]],
+        )
         pol = ReplayPolicy(seed_info, (tx, ty))
         row = {"attempt": i, "start_xy": task["start"][:2], "target_shift": [tx, ty]}
         with SimEnv(twin, task, res=res) as env:
@@ -129,8 +166,13 @@ def retarget(twin: dict, out_dir: str | Path = "out", attempts: int = 6, seed: i
         row["ik_error"] = round(float(pol.ik_error), 4)
         if ep["success"] and not ep["safety"]["human_contact"]:
             k = writer.add_episode(ep, task)
-            writer.episodes[k].update({"arrival_seed_episode_id": seed_info["seed_episode_id"],
-                                       "arrival_start_xy": task["start"][:2], "arrival_target_shift": [tx, ty]})
+            writer.episodes[k].update(
+                {
+                    "arrival_seed_episode_id": seed_info["seed_episode_id"],
+                    "arrival_start_xy": task["start"][:2],
+                    "arrival_target_shift": [tx, ty],
+                }
+            )
             row["outcome"] = "success"
         else:
             drops["physics_fail"] += 1
@@ -141,25 +183,47 @@ def retarget(twin: dict, out_dir: str | Path = "out", attempts: int = 6, seed: i
     seconds = time.perf_counter() - t0
     info = writer.finish(len(offsets))
     succ = len(writer.episodes)
-    info.update({"arrival_generator": GENERATOR, "arrival_physically_valid": True,
-                 "arrival_success_check": "physics", "arrival_seed_episode_id": seed_info["seed_episode_id"],
-                 "arrival_seed_ref": str(seed_path.relative_to(out_dir)), "arrival_attempts": len(offsets),
-                 "arrival_successes": succ, "arrival_dropped": len(offsets) - succ,
-                 "arrival_retarget": "object-centric segment replay of one scripted-expert seed; translation only"})
+    info.update(
+        {
+            "arrival_generator": GENERATOR,
+            "arrival_physically_valid": True,
+            "arrival_success_check": "physics",
+            "arrival_seed_episode_id": seed_info["seed_episode_id"],
+            "arrival_seed_ref": str(seed_path.relative_to(out_dir)),
+            "arrival_attempts": len(offsets),
+            "arrival_successes": succ,
+            "arrival_dropped": len(offsets) - succ,
+            "arrival_retarget": "object-centric segment replay of one scripted-expert seed; translation only",
+        }
+    )
     (writer.root / "meta" / "info.json").write_text(json.dumps(info, indent=2))
     ok_xy = np.array([r["start_xy"] for r in rows if r["outcome"] == "success"]).reshape(-1, 2)
-    report = {"room_id": room, "generator": GENERATOR, "family": family, "seed_episode_id": seed_info["seed_episode_id"],
-              "seed_candidates_tried": seed_tries, "attempts": len(offsets), "successes": succ,
-              "dropped": len(offsets) - succ, "drop_reasons": drops,
-              "success_rate": round(succ / len(offsets), 3) if offsets else 0.0,
-              "start_xy_std_m": ok_xy.std(axis=0).round(4).tolist() if succ else None,
-              "start_xy_range_m": np.ptp(ok_xy, axis=0).round(4).tolist() if succ else None,
-              "seconds": round(seconds, 2), "demos_per_hour": round(succ / seconds * 3600, 1) if seconds else 0.0,
-              "resolution": res, "people": 0, "physics_checked_success": True, "rows": rows}
+    report = {
+        "room_id": room,
+        "generator": GENERATOR,
+        "family": family,
+        "seed_episode_id": seed_info["seed_episode_id"],
+        "seed_candidates_tried": seed_tries,
+        "attempts": len(offsets),
+        "successes": succ,
+        "dropped": len(offsets) - succ,
+        "drop_reasons": drops,
+        "success_rate": round(succ / len(offsets), 3) if offsets else 0.0,
+        "start_xy_std_m": ok_xy.std(axis=0).round(4).tolist() if succ else None,
+        "start_xy_range_m": np.ptp(ok_xy, axis=0).round(4).tolist() if succ else None,
+        "seconds": round(seconds, 2),
+        "demos_per_hour": round(succ / seconds * 3600, 1) if seconds else 0.0,
+        "resolution": res,
+        "people": 0,
+        "physics_checked_success": True,
+        "rows": rows,
+    }
     if baseline:  # the scripted expert on the same number of tasks, same room, family and resolution
         from arrival.sim.collect import collect
 
-        b = collect(twin, [family], len(offsets), out_dir / "baseline", people=0, res=res, seed=seed, log=lambda *_: None)
+        b = collect(
+            twin, [family], len(offsets), out_dir / "baseline", people=0, res=res, seed=seed, log=lambda *_: None
+        )
         bd = b["report_data"]
         report["scripted_baseline"] = {k: bd[k] for k in ("attempts", "successes", "seconds", "demos_per_hour")}
     rp = out_dir / "reports" / f"{room}_seed_replay.json"

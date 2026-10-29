@@ -6,18 +6,30 @@ import pytest
 
 mujoco = pytest.importorskip("mujoco")
 
+from conftest import REPO  # noqa: E402
+
 from arrival.eval.harness import evaluate, wilson  # noqa: E402
+from arrival.eval.manifest import EVAL_SEED_BASE  # noqa: E402
 from arrival.scan.bundle import load_room  # noqa: E402
 from arrival.sim import collect as collect_mod  # noqa: E402
 from arrival.sim.collect import SimEnv, collect, run_episode  # noqa: E402
 from arrival.sim.people import CLEAR, LANE, Walkers  # noqa: E402
 from arrival.sim.policy import ScriptedExpert, VLANotConfigured  # noqa: E402
 from arrival.twin.compile import compile_twin  # noqa: E402
-from conftest import REPO  # noqa: E402
 
-SINK_TASK = {"family": "counter_to_sink", "object_id": "mug_1", "object_label": "mug", "source": "counter_a",
-             "target": "sink_1", "target_x": 1.6, "start": [1.0, 0.35, 0.97], "lighting": "neutral",
-             "instruction": "Put the mug in the sink.", "task_id": "t0", "seed": 0}
+SINK_TASK = {
+    "family": "counter_to_sink",
+    "object_id": "mug_1",
+    "object_label": "mug",
+    "source": "counter_a",
+    "target": "sink_1",
+    "target_x": 1.6,
+    "start": [1.0, 0.35, 0.97],
+    "lighting": "neutral",
+    "instruction": "Put the mug in the sink.",
+    "task_id": "t0",
+    "seed": 0,
+}
 
 
 @pytest.fixture(scope="module")
@@ -43,8 +55,7 @@ def test_eval_doc_quotes_wilson_widths():
 
 
 def test_scripted_eval_shape(twin, tmp_path):
-    rep = evaluate(twin, ["counter_to_sink", "open_drawer"], 2, res=32, people=1, out_dir=tmp_path,
-                   log=lambda *_: None)
+    rep = evaluate(twin, ["counter_to_sink", "open_drawer"], 2, res=32, people=1, out_dir=tmp_path, log=lambda *_: None)
     saved = json.loads(rep["path"].read_text(encoding="utf-8"))
     assert set(saved["families"]) == {"counter_to_sink", "open_drawer"}
     for f in saved["families"].values():
@@ -97,8 +108,7 @@ def test_holdout_uses_template_4_and_y_offset(twin, tmp_path, monkeypatch):
 
     ran = []
     monkeypatch.setattr(harness, "run_episode", lambda env, pol, task: ran.append(task) or run_episode(env, pol, task))
-    rep = evaluate(twin, ["counter_to_sink"], 1, res=32, people=0, holdout=True, out_dir=tmp_path,
-                   log=lambda *_: None)
+    rep = evaluate(twin, ["counter_to_sink"], 1, res=32, people=0, holdout=True, out_dir=tmp_path, log=lambda *_: None)
     assert rep["holdout"] is True and rep["families"]["counter_to_sink"]["min_human_distance_m"] is None
     (task,) = ran
     obj = next(o for o in twin["objects"] if o["id"] == task["object_id"])
@@ -134,15 +144,41 @@ def test_training_tasks_exclude_the_holdout(twin):
 def test_eval_vla_needs_server(twin, monkeypatch, tmp_path):
     monkeypatch.delenv("GR00T_POLICY_URL", raising=False)
     with pytest.raises(VLANotConfigured):
-        evaluate(twin, ["counter_to_sink"], 1, policy_name="vla", checkpoint_id="test-mock", out_dir=tmp_path, log=lambda *_: None)
+        evaluate(
+            twin,
+            ["counter_to_sink"],
+            1,
+            policy_name="vla",
+            checkpoint_id="test-mock",
+            out_dir=tmp_path,
+            log=lambda *_: None,
+        )
 
 
 def test_cli_eval_vla_unreachable_exits_2(monkeypatch, capsys):
     from arrival.cli import main
 
     monkeypatch.setenv("GR00T_POLICY_URL", "http://127.0.0.1:9")  # discard port, nothing listens
-    assert main(["eval", "--policy", "vla", "--checkpoint-id", "test-mock", "--episodes", "1", "--families", "counter_to_sink", "--people", "0",
-                 "--res", "32"]) == 2
+    assert (
+        main(
+            [
+                "eval",
+                "--policy",
+                "vla",
+                "--checkpoint-id",
+                "test-mock",
+                "--episodes",
+                "1",
+                "--families",
+                "counter_to_sink",
+                "--people",
+                "0",
+                "--res",
+                "32",
+            ]
+        )
+        == 2
+    )
     err = capsys.readouterr().err
     assert err.startswith("policy vla: no answer from http://127.0.0.1:9:") and "Traceback" not in err
 
@@ -192,7 +228,7 @@ def test_normal_run_has_finite_positive_distance(twin, tmp_path):
 
 @pytest.mark.parametrize("base", [(1.3, 1.0), (3.2, 1.445)])  # sink run; counter_b drawer near the east wall
 def test_walkers_interact_and_avoid_base(base):
-    from arrival.sim.people import _seg_dist
+    from arrival.sim.geometry import point_segment_distance
 
     floor, front = (0.4, 1.65, 3.6, 2.7), 0.75
     for seed in range(6):
@@ -204,7 +240,7 @@ def test_walkers_interact_and_avoid_base(base):
             assert np.linalg.norm(path[0] - np.array(base)) >= CLEAR  # spawn clear of the base column
             for a, b in zip(path, path[1:] + path[:1]):
                 lane = a is path[2] and b is path[3]
-                assert _seg_dist(a, b, np.array(base)) >= (LANE[0] if lane else CLEAR), (seed, a, b)
+                assert point_segment_distance(np.array(base), a, b) >= (LANE[0] if lane else CLEAR), (seed, a, b)
     once, again = (Walkers(2, floor, seed=3, base_xy=base, front_y=front).paths for _ in range(2))
     assert all(np.allclose(a, b) for pa, pb in zip(once, again) for a, b in zip(pa, pb))
 
@@ -235,7 +271,7 @@ def test_eval_isolates_a_failing_episode_and_offsets_seeds(twin, tmp_path, monke
     f = rep["families"]["counter_to_sink"]
     assert f["episodes"] == 2 and f["errors"] == ["RuntimeError: ik exploded"] and f["successes"] <= 1
     assert rep["totals"]["errors"] == 1 and rep["path"].is_file()
-    assert all(t["seed"] >= harness.EVAL_SEED_BASE * 1000 for t in seen)
+    assert all(t["seed"] >= EVAL_SEED_BASE * 1000 for t in seen)
 
 
 def test_every_family_has_a_held_out_wording(twin):

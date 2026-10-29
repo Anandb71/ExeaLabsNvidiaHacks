@@ -13,17 +13,35 @@ import random
 import pytest
 import yaml
 
-from arrival.catalog.fixtures import default_size
+from arrival.catalog.categories import default_size
 from arrival.scan import roomplan
 from arrival.scan.bundle import ScanBundleError
 from arrival.tasks.propose import propose
 from arrival.twin.compile import compile_twin, layout_dict, place_default_objects
 
-CATEGORIES = ("bathtub", "bed", "chair", "dishwasher", "fireplace", "oven", "refrigerator", "sink", "sofa", "stairs",
-              "storage", "stove", "table", "television", "toilet", "washerDryer")
+CATEGORIES = (
+    "bathtub",
+    "bed",
+    "chair",
+    "dishwasher",
+    "fireplace",
+    "oven",
+    "refrigerator",
+    "sink",
+    "sofa",
+    "stairs",
+    "storage",
+    "stove",
+    "table",
+    "television",
+    "toilet",
+    "washerDryer",
+)
 FLOOR_Y = -1.4
 H = 2.5
-N_FUZZ = int(os.environ.get("ARRIVAL_FUZZ_N", 300))  # a longer sweep: ARRIVAL_FUZZ_N=5000 pytest tests/test_scan_fuzz.py
+N_FUZZ = int(
+    os.environ.get("ARRIVAL_FUZZ_N", 300)
+)  # a longer sweep: ARRIVAL_FUZZ_N=5000 pytest tests/test_scan_fuzz.py
 
 
 def _t(x, y, z, yaw=0.0):
@@ -34,21 +52,37 @@ def _t(x, y, z, yaw=0.0):
 def _wall(i, x0, z0, x1, z1):
     length = math.hypot(x1 - x0, z1 - z0)
     yaw = -math.atan2(z1 - z0, x1 - x0)
-    return {"identifier": f"wall{i}", "category": {"wall": {}}, "confidence": {"high": {}},
-            "dimensions": [length, H, 0], "transform": _t((x0 + x1) / 2, FLOOR_Y + H / 2, (z0 + z1) / 2, yaw)}
+    return {
+        "identifier": f"wall{i}",
+        "category": {"wall": {}},
+        "confidence": {"high": {}},
+        "dimensions": [length, H, 0],
+        "transform": _t((x0 + x1) / 2, FLOOR_Y + H / 2, (z0 + z1) / 2, yaw),
+    }
 
 
 def _obj(ident, cat, x, z, yaw=0.0, size=None, confidence="high"):
     sx, sy, sz = size or default_size(roomplan._snake(cat))
-    return {"identifier": ident, "category": {cat: {}}, "confidence": {confidence: {}},
-            "dimensions": [sx, sz, sy], "transform": _t(x, FLOOR_Y + sz / 2, z, yaw)}
+    return {
+        "identifier": ident,
+        "category": {cat: {}},
+        "confidence": {confidence: {}},
+        "dimensions": [sx, sz, sy],
+        "transform": _t(x, FLOOR_Y + sz / 2, z, yaw),
+    }
 
 
 def _room(w=5.0, d=4.0, objects=(), open_side=None, extra_walls=()):
     corners = [(-w / 2, -d / 2), (w / 2, -d / 2), (w / 2, d / 2), (-w / 2, d / 2)]
     walls = [_wall(i, *corners[i], *corners[(i + 1) % 4]) for i in range(4) if i != open_side]
-    return {"walls": walls + list(extra_walls), "floors": [], "doors": [], "windows": [], "openings": [],
-            "objects": list(objects)}
+    return {
+        "walls": walls + list(extra_walls),
+        "floors": [],
+        "doors": [],
+        "windows": [],
+        "openings": [],
+        "objects": list(objects),
+    }
 
 
 def _rotate(rp, deg):
@@ -83,18 +117,22 @@ def _scale_room(w, d):
 
 def _u_kitchen():
     """The shape reported in #42: a U of base cabinets on three walls, one wall open."""
-    objs = [_obj("sink", "sink", 0.0, -1.5, size=[0.6, 0.5, 0.25]),
-            _obj("base_n", "storage", 0.0, -1.7, size=[1.2, 0.6, 0.9]),
-            _obj("base_e", "storage", 1.9, 0.0, math.pi / 2, size=[1.4, 0.6, 0.9]),
-            _obj("stove", "stove", -1.5, -1.65, size=[0.7, 0.65, 0.9]),
-            _obj("fridge", "refrigerator", -2.0, 1.2, size=[0.9, 0.7, 1.8])]
+    objs = [
+        _obj("sink", "sink", 0.0, -1.5, size=[0.6, 0.5, 0.25]),
+        _obj("base_n", "storage", 0.0, -1.7, size=[1.2, 0.6, 0.9]),
+        _obj("base_e", "storage", 1.9, 0.0, math.pi / 2, size=[1.4, 0.6, 0.9]),
+        _obj("stove", "stove", -1.5, -1.65, size=[0.7, 0.65, 0.9]),
+        _obj("fridge", "refrigerator", -2.0, 1.2, size=[0.9, 0.7, 1.8]),
+    ]
     return _room(5.0, 4.0, objs, open_side=2)
 
 
 def _island_kitchen():
-    objs = [_obj("sink", "sink", 0.0, -1.7, size=[0.6, 0.5, 0.25]),
-            _obj("island", "table", 0.0, 0.3, size=[2.0, 0.9, 0.92]),
-            _obj("fridge", "refrigerator", -2.0, -1.5, size=[0.9, 0.7, 1.8])]
+    objs = [
+        _obj("sink", "sink", 0.0, -1.7, size=[0.6, 0.5, 0.25]),
+        _obj("island", "table", 0.0, 0.3, size=[2.0, 0.9, 0.92]),
+        _obj("fridge", "refrigerator", -2.0, -1.5, size=[0.9, 0.7, 1.8]),
+    ]
     return _room(5.0, 4.0, objs)
 
 
@@ -120,19 +158,51 @@ REFUSED = {
 
 
 def _surface_items(rp):
-    return [i for k in ("walls", "doors", "windows", "openings", "floors", "objects")
-            for i in (rp.get(k) if isinstance(rp.get(k), list) else []) if isinstance(i, dict)]
+    return [
+        i
+        for k in ("walls", "doors", "windows", "openings", "floors", "objects")
+        for i in (rp.get(k) if isinstance(rp.get(k), list) else [])
+        if isinstance(i, dict)
+    ]
 
 
 def _mutate(rp, rng):
     """One random corruption of a valid export."""
     if not isinstance(rp, dict) or "rooms" in rp:
         return rp  # already unrecognisable
-    kind = rng.choice(["drop_dim", "zero_dim", "neg_dim", "nan_dim", "huge_dim", "short_dim", "drop_transform",
-                       "nan_transform", "short_transform", "inf_transform", "string_transform", "drop_walls",
-                       "walls_none", "objects_none", "objects_not_list", "item_not_dict", "dup_ids", "bad_category",
-                       "no_category", "weird_id", "bad_story", "huge_coord", "same_wall_ends", "top_level_list",
-                       "rooms_garbage", "drop_ident", "bad_confidence", "text_dim", "floor_bad_polygon"])
+    kind = rng.choice(
+        [
+            "drop_dim",
+            "zero_dim",
+            "neg_dim",
+            "nan_dim",
+            "huge_dim",
+            "short_dim",
+            "drop_transform",
+            "nan_transform",
+            "short_transform",
+            "inf_transform",
+            "string_transform",
+            "drop_walls",
+            "walls_none",
+            "objects_none",
+            "objects_not_list",
+            "item_not_dict",
+            "dup_ids",
+            "bad_category",
+            "no_category",
+            "weird_id",
+            "bad_story",
+            "huge_coord",
+            "same_wall_ends",
+            "top_level_list",
+            "rooms_garbage",
+            "drop_ident",
+            "bad_confidence",
+            "text_dim",
+            "floor_bad_polygon",
+        ]
+    )
     items = _surface_items(rp)
     pick = rng.choice(items) if items else None
     if kind == "top_level_list":
@@ -150,7 +220,8 @@ def _mutate(rp, rng):
     elif pick is None:
         return rp
     elif kind in ("nan_transform", "inf_transform", "short_transform", "huge_coord") and not (
-            isinstance(pick.get("transform"), list) and len(pick["transform"]) == 16):
+        isinstance(pick.get("transform"), list) and len(pick["transform"]) == 16
+    ):
         return rp  # the transform was already corrupted by an earlier mutation
     elif kind == "drop_dim":
         pick.pop("dimensions", None)
@@ -199,9 +270,15 @@ def _mutate(rp, rng):
     elif kind == "bad_confidence":
         pick["confidence"] = rng.choice(["low", 3, None, [], {"low": {}}])
     elif kind == "floor_bad_polygon":
-        rp["floors"] = [{"identifier": "f", "category": {"floor": {}}, "dimensions": [1, 1, 0],
-                         "transform": _t(0, FLOOR_Y, 0), "polygonCorners": rng.choice([[[0, 0], [1, 0], [1, 1]], "x",
-                                                                                         [[0, 0, 0]] * 3 + [None]])}]
+        rp["floors"] = [
+            {
+                "identifier": "f",
+                "category": {"floor": {}},
+                "dimensions": [1, 1, 0],
+                "transform": _t(0, FLOOR_Y, 0),
+                "polygonCorners": rng.choice([[[0, 0], [1, 0], [1, 1]], "x", [[0, 0, 0]] * 3 + [None]]),
+            }
+        ]
     return rp
 
 
@@ -211,9 +288,16 @@ def _fuzz_export(rng):
     objs = []
     for i in range(rng.randint(0, 9)):
         cat = rng.choice(CATEGORIES)
-        objs.append(_obj(f"o{i}", cat, rng.uniform(-w / 2, w / 2), rng.uniform(-d / 2, d / 2),
-                         rng.choice([0.0, math.pi / 2, math.pi, rng.uniform(0, 6.28)]),
-                         confidence=rng.choice(["high", "high", "medium", "low"])))
+        objs.append(
+            _obj(
+                f"o{i}",
+                cat,
+                rng.uniform(-w / 2, w / 2),
+                rng.uniform(-d / 2, d / 2),
+                rng.choice([0.0, math.pi / 2, math.pi, rng.uniform(0, 6.28)]),
+                confidence=rng.choice(["high", "high", "medium", "low"]),
+            )
+        )
     rp = _room(w, d, objs, open_side=rng.choice([None, None, 0, 1, 2, 3]))
     rp = _rotate(rp, rng.choice([0, 0, 90, rng.uniform(0, 360)]))
     if rng.random() < 0.3:
@@ -303,13 +387,16 @@ def test_fuzz_hits_both_outcomes():
     assert outcomes == {True, False}
 
 
-@pytest.mark.parametrize("mutation,needle", [
-    (lambda rp: rp["walls"][0].pop("transform"), "wall0"),
-    (lambda rp: rp["walls"][0]["transform"].__setitem__(12, float("nan")), "wall0"),
-    (lambda rp: rp["walls"][0].__setitem__("dimensions", [float("inf"), 2.5, 0]), "wall0"),
-    (lambda rp: rp["objects"][0].__setitem__("dimensions", [1e6, 1.0, 1.0]), "sink"),
-    (lambda rp: rp.__setitem__("walls", "not a list"), "walls"),
-])
+@pytest.mark.parametrize(
+    "mutation,needle",
+    [
+        (lambda rp: rp["walls"][0].pop("transform"), "wall0"),
+        (lambda rp: rp["walls"][0]["transform"].__setitem__(12, float("nan")), "wall0"),
+        (lambda rp: rp["walls"][0].__setitem__("dimensions", [float("inf"), 2.5, 0]), "wall0"),
+        (lambda rp: rp["objects"][0].__setitem__("dimensions", [1e6, 1.0, 1.0]), "sink"),
+        (lambda rp: rp.__setitem__("walls", "not a list"), "walls"),
+    ],
+)
 def test_specific_corruptions_name_the_offender(mutation, needle):
     rp = _room(objects=[_obj("sink", "sink", 0.0, 0.0)])
     mutation(rp)

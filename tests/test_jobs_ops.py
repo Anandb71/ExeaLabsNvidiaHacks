@@ -18,10 +18,25 @@ import pytest
 from arrival.eval import cost
 from arrival.jobs import worker
 from arrival.jobs.limits import LimitError, Limits, QueueFull
-from arrival.jobs.queue import count_active, create_job, read_job, write_status
+from arrival.jobs.queue import count_active, create_job, write_status
 from arrival.jobs.retention import JobBusy, delete_job, gc
-from arrival.jobs.worker import (CANCEL, LOCK, Heartbeat, UnsupportedLayout, UnusableDataset, build_usage, cancel_job,
-                                 claim_next, process, reap_stale, release, requeue_failed, retryable, run_once, work)
+from arrival.jobs.worker import (
+    CANCEL,
+    LOCK,
+    Heartbeat,
+    UnsupportedLayout,
+    UnusableDataset,
+    build_usage,
+    cancel_job,
+    claim_next,
+    process,
+    reap_stale,
+    release,
+    requeue_failed,
+    retryable,
+    run_once,
+    work,
+)
 from arrival.web.app import make_server
 
 REPO = Path(__file__).resolve().parents[1]
@@ -62,14 +77,22 @@ def dead_pid():
 
 # ---- limits ----------------------------------------------------------------------------------------------------
 
+
 def test_limits_defaults_env_and_ceilings():
     lim = Limits.from_env({})
     assert lim.max_upload_bytes == 200 * 1024 * 1024 and lim.max_episodes == 100 and lim.max_people == 4
     assert lim.max_job_seconds == 1800 and lim.max_queue == 20 and lim.retention_hours is None and lim.job_retries == 2
     assert lim.job_retry_backoff == 5
-    env = {"ARRIVAL_MAX_UPLOAD_MB": "1.5", "ARRIVAL_MAX_EPISODES": "3", "ARRIVAL_MAX_PEOPLE": "2",
-           "ARRIVAL_MAX_JOB_SECONDS": "9.5", "ARRIVAL_MAX_QUEUE": "7", "ARRIVAL_RETENTION_HOURS": "24",
-           "ARRIVAL_JOB_RETRIES": "0", "ARRIVAL_JOB_RETRY_BACKOFF": "8"}
+    env = {
+        "ARRIVAL_MAX_UPLOAD_MB": "1.5",
+        "ARRIVAL_MAX_EPISODES": "3",
+        "ARRIVAL_MAX_PEOPLE": "2",
+        "ARRIVAL_MAX_JOB_SECONDS": "9.5",
+        "ARRIVAL_MAX_QUEUE": "7",
+        "ARRIVAL_RETENTION_HOURS": "24",
+        "ARRIVAL_JOB_RETRIES": "0",
+        "ARRIVAL_JOB_RETRY_BACKOFF": "8",
+    }
     lim = Limits.from_env(env)
     assert (lim.max_upload_bytes, lim.max_episodes, lim.max_people) == (int(1.5 * 1024 * 1024), 3, 2)
     assert (lim.max_job_seconds, lim.max_queue, lim.retention_hours, lim.job_retries) == (9.5, 7, 24.0, 0)
@@ -117,8 +140,10 @@ def _post(port, body: bytes, ctype="multipart/form-data; boundary=BB", length=No
 
 
 def _multipart(payload: bytes) -> bytes:
-    return (b'--BB\r\nContent-Disposition: form-data; name="scan"; filename="k.json"\r\n'
-            b"Content-Type: application/json\r\n\r\n" + payload + b"\r\n--BB--\r\n")
+    return (
+        b'--BB\r\nContent-Disposition: form-data; name="scan"; filename="k.json"\r\n'
+        b"Content-Type: application/json\r\n\r\n" + payload + b"\r\n--BB--\r\n"
+    )
 
 
 def test_web_enforces_queue_and_configured_upload_limits(tmp_path, monkeypatch):
@@ -186,16 +211,23 @@ def test_oversized_upload_fails_at_normalize_with_a_clear_error(tmp_path):
 
 # ---- wall-clock limit: the job runs in a child process that is killed -----------------------------------------
 
-STAGE_THEN_HANG = ("import sys, json, time; from pathlib import Path; p = Path(sys.argv[1]) / 'status.json'; "
-                   "s = json.loads(p.read_text()); s['stage'] = 'sim'; p.write_text(json.dumps(s)); time.sleep(120)")
+STAGE_THEN_HANG = (
+    "import sys, json, time; from pathlib import Path; p = Path(sys.argv[1]) / 'status.json'; "
+    "s = json.loads(p.read_text()); s['stage'] = 'sim'; p.write_text(json.dumps(s)); time.sleep(120)"
+)
 
 
 def test_job_over_wall_clock_limit_is_killed_and_recorded_with_its_stage(tmp_path):
     out = tmp_path / "out"
     job = create_job(jobs_of(out), "slow.json", data=b"{}")
     t0 = time.monotonic()
-    st = run_once(out, limits=Limits(max_job_seconds=1.0), isolate=True, log=QUIET,
-                  child_cmd=[sys.executable, "-c", STAGE_THEN_HANG])
+    st = run_once(
+        out,
+        limits=Limits(max_job_seconds=1.0),
+        isolate=True,
+        log=QUIET,
+        child_cmd=[sys.executable, "-c", STAGE_THEN_HANG],
+    )
     assert time.monotonic() - t0 < 30  # killed at ~1 s, not after the child's 120 s sleep
     assert st["status"] == "failed" and st["stage"] == "sim"
     assert st["job_attempts"] == 1 and "retry_errors" not in st  # a timeout is not retried: the limit is per job
@@ -213,8 +245,12 @@ def test_job_over_wall_clock_limit_is_killed_and_recorded_with_its_stage(tmp_pat
 def test_child_that_dies_is_retried_then_recorded_not_left_running(tmp_path):
     out = tmp_path / "out"
     job = create_job(jobs_of(out), "k.json", data=b"{}")
-    kw = dict(limits=Limits(max_job_seconds=30, job_retries=1, job_retry_backoff=0), isolate=True, log=QUIET,
-              child_cmd=[sys.executable, "-c", "import sys; sys.exit(7)"])
+    kw = dict(
+        limits=Limits(max_job_seconds=30, job_retries=1, job_retry_backoff=0),
+        isolate=True,
+        log=QUIET,
+        child_cmd=[sys.executable, "-c", "import sys; sys.exit(7)"],
+    )
     st = run_once(out, **kw)
     assert st["status"] == "queued" and st["error"] is None and "code 7" in st["retry_errors"][0]
     st = run_once(out, **kw)
@@ -233,6 +269,7 @@ def test_real_child_process_runs_a_job_to_its_own_failure_once(tmp_path):
 
 
 # ---- concurrent claiming ---------------------------------------------------------------------------------------
+
 
 def test_threads_racing_on_one_queue_claim_each_job_once(tmp_path):
     out = tmp_path / "out"
@@ -258,10 +295,14 @@ def test_processes_racing_on_one_queue_claim_each_job_once(tmp_path):
     """O_EXCL across real processes, not just threads."""
     out = tmp_path / "out"
     ids = {create_job(jobs_of(out), f"k{i}.json", data=b"{}")["id"] for i in range(10)}
-    code = ("import sys; from arrival.jobs.worker import claim_next; from pathlib import Path\n"
-            "while (c := claim_next(Path(sys.argv[1]), sys.argv[2])) is not None: print(c[1]['id'], flush=True)")
-    procs = [subprocess.Popen([sys.executable, "-c", code, str(jobs_of(out)), f"p{i}"], stdout=subprocess.PIPE, text=True)
-             for i in range(3)]
+    code = (
+        "import sys; from arrival.jobs.worker import claim_next; from pathlib import Path\n"
+        "while (c := claim_next(Path(sys.argv[1]), sys.argv[2])) is not None: print(c[1]['id'], flush=True)"
+    )
+    procs = [
+        subprocess.Popen([sys.executable, "-c", code, str(jobs_of(out)), f"p{i}"], stdout=subprocess.PIPE, text=True)
+        for i in range(3)
+    ]
     claimed = [line for p in procs for line in p.communicate(timeout=60)[0].split()]
     assert sorted(claimed) == sorted(ids)
 
@@ -279,6 +320,7 @@ def test_a_locked_job_is_skipped_and_a_finished_one_is_not_reclaimed(tmp_path):
 
 
 # ---- heartbeat, stale workers, crash then requeue ------------------------------------------------------------------
+
 
 def test_heartbeat_keeps_the_lock_fresh_while_a_job_runs(tmp_path):
     out = tmp_path / "out"
@@ -370,6 +412,7 @@ def test_work_reaps_a_dead_workers_job_at_startup(tmp_path):
 
 # ---- cancel ----------------------------------------------------------------------------------------------------
 
+
 def test_cancel_a_queued_job_before_any_worker_takes_it(tmp_path):
     out = tmp_path / "out"
     job = create_job(jobs_of(out), "k.json", data=b"{}")
@@ -396,8 +439,13 @@ def test_cancel_kills_a_job_running_in_a_child_process(tmp_path):
     job = create_job(jobs_of(out), "k.json", data=b"{}")
     threading.Timer(0.5, lambda: cancel_job(jobs_of(out), job["id"])).start()
     t0 = time.monotonic()
-    st = run_once(out, limits=Limits(max_job_seconds=60), isolate=True, log=QUIET,
-                  child_cmd=[sys.executable, "-c", STAGE_THEN_HANG])
+    st = run_once(
+        out,
+        limits=Limits(max_job_seconds=60),
+        isolate=True,
+        log=QUIET,
+        child_cmd=[sys.executable, "-c", STAGE_THEN_HANG],
+    )
     assert time.monotonic() - t0 < 30
     assert st["status"] == "cancelled" and st["error"] is None
     assert not (jobs_of(out) / job["id"] / CANCEL).exists()
@@ -423,8 +471,15 @@ def fake_sim(monkeypatch, plan, invalid=()):
         ds = Path(out_dir) / "datasets" / f"{twin['room_id']}_sim"
         (ds / "meta").mkdir(parents=True, exist_ok=True)
         (ds / "meta" / "info.json").write_text(json.dumps({"total_frames": 10}))
-        report = {"attempts": episodes, "successes": episodes, "skipped": 0, "skipped_unreachable": 0,
-                  "skipped_error": 0, "skip_reasons": [], **outcome}
+        report = {
+            "attempts": episodes,
+            "successes": episodes,
+            "skipped": 0,
+            "skipped_unreachable": 0,
+            "skipped_error": 0,
+            "skip_reasons": [],
+            **outcome,
+        }
         return {"dataset": ds, "report_data": report}
 
     monkeypatch.setitem(sys.modules, "arrival.sim.collect", types.SimpleNamespace(collect=collect))
@@ -435,11 +490,23 @@ def fake_sim(monkeypatch, plan, invalid=()):
 def test_retryable_tells_the_uploads_faults_from_the_machines():
     from arrival.scan.bundle import ScanBundleError
 
-    for e in (OSError(28, "No space left on device"), MemoryError(), RuntimeError("renderer lost its context"),
-              ImportError("no mujoco on this worker")):
+    for e in (
+        OSError(28, "No space left on device"),
+        MemoryError(),
+        RuntimeError("renderer lost its context"),
+        ImportError("no mujoco on this worker"),
+    ):
         assert retryable(e), e
-    for e in (ValueError("x"), json.JSONDecodeError("x", "", 0), ScanBundleError("x"), LimitError("x"),
-              UnsupportedLayout("x"), UnusableDataset("x"), KeyboardInterrupt(), SystemExit(1)):
+    for e in (
+        ValueError("x"),
+        json.JSONDecodeError("x", "", 0),
+        ScanBundleError("x"),
+        LimitError("x"),
+        UnsupportedLayout("x"),
+        UnusableDataset("x"),
+        KeyboardInterrupt(),
+        SystemExit(1),
+    ):
         assert not retryable(e), e
 
 
@@ -454,7 +521,9 @@ def test_a_transient_failure_is_retried_and_the_job_then_succeeds(tmp_path, monk
     assert first["status"] == "queued" and first["job_attempts"] == 1 and first["error"] is None
     assert first["retry_errors"] == ["OSError: [Errno 28] No space left on device"]
     assert first["stage"] is None and first["finished_at"] is None and first["worker"] is None
-    assert "failed" not in written  # the capture app stops polling at "failed"; a job that will run again never shows it
+    assert (
+        "failed" not in written
+    )  # the capture app stops polling at "failed"; a job that will run again never shows it
     assert status_of(out, job) == first and not (jobs_of(out) / job["id"] / LOCK).exists()
     second = run_once(out, limits=Limits(job_retry_backoff=0), log=QUIET)
     assert second["status"] == "done" and second["job_attempts"] == 2 and second["error"] is None
@@ -464,16 +533,22 @@ def test_a_transient_failure_is_retried_and_the_job_then_succeeds(tmp_path, monk
     assert [(x["job_attempts"], x["status"]) for x in ledger] == [(1, "failed"), (2, "done")]  # one line per attempt
 
 
-CRASH_ONCE = ("import sys, json; from pathlib import Path; p = Path(sys.argv[1]) / 'status.json'; "
-              "s = json.loads(p.read_text())\nif s['job_attempts'] == 1: sys.exit(9)\n"
-              "s.update(status='done', stage='zip'); p.write_text(json.dumps(s))")
+CRASH_ONCE = (
+    "import sys, json; from pathlib import Path; p = Path(sys.argv[1]) / 'status.json'; "
+    "s = json.loads(p.read_text())\nif s['job_attempts'] == 1: sys.exit(9)\n"
+    "s.update(status='done', stage='zip'); p.write_text(json.dumps(s))"
+)
 
 
 def test_a_child_that_dies_once_is_retried_and_the_next_attempt_finishes(tmp_path):
     out = tmp_path / "out"
     job = create_job(jobs_of(out), "k.json", data=b"{}")
-    kw = dict(limits=Limits(max_job_seconds=30, job_retry_backoff=0), isolate=True, log=QUIET,
-              child_cmd=[sys.executable, "-c", CRASH_ONCE])
+    kw = dict(
+        limits=Limits(max_job_seconds=30, job_retry_backoff=0),
+        isolate=True,
+        log=QUIET,
+        child_cmd=[sys.executable, "-c", CRASH_ONCE],
+    )
     first = run_once(out, **kw)  # killed, as by the OOM killer: the parent records it and queues the job again
     assert first["status"] == "queued" and first["job_attempts"] == 1
     assert first["retry_errors"][0].startswith("WorkerProcessError") and "code 9" in first["retry_errors"][0]
@@ -492,20 +567,31 @@ def test_retries_run_out_and_the_job_fails_with_its_last_error_and_attempts(tmp_
     st = status_of(out, job)
     assert st["job_attempts"] == retries + 1 and st["stage"] == "sim" and st["finished_at"]
     assert st["error"] == f"RuntimeError: renderer lost its context ({retries + 1})"
-    assert st.get("retry_errors", []) == [f"RuntimeError: renderer lost its context ({n})" for n in range(1, retries + 1)]
+    assert st.get("retry_errors", []) == [
+        f"RuntimeError: renderer lost its context ({n})" for n in range(1, retries + 1)
+    ]
     assert f"({retries + 1})" in (jobs_of(out) / job["id"] / "error.txt").read_text()  # the last attempt's traceback
 
 
-@pytest.mark.parametrize("case, error", [
-    ("not_json", "JSONDecodeError: "), ("invalid_scan", "ScanBundleError: units must be 'meters'"),
-    ("over_limit", "LimitError: upload is"), ("unsupported_layout", "unsupported layout: "),
-    ("no_successes", "UnusableDataset: no successful episodes"), ("invalid_dataset", "UnusableDataset: dataset invalid")])
+@pytest.mark.parametrize(
+    "case, error",
+    [
+        ("not_json", "JSONDecodeError: "),
+        ("invalid_scan", "ScanBundleError: units must be 'meters'"),
+        ("over_limit", "LimitError: upload is"),
+        ("unsupported_layout", "unsupported layout: "),
+        ("no_successes", "UnusableDataset: no successful episodes"),
+        ("invalid_dataset", "UnusableDataset: dataset invalid"),
+    ],
+)
 def test_bad_input_and_failures_a_rerun_would_repeat_are_not_retried(tmp_path, monkeypatch, case, error):
     out = tmp_path / "out"
     data = {"not_json": b"not json", "invalid_scan": b'{"schema_version": "1", "units": "feet"}'}.get(case, HERO_SCAN)
     job = create_job(jobs_of(out), "k.json", data=data)
     report = {"unsupported_layout": {"attempts": 0, "successes": 0}, "no_successes": {"successes": 0}}.get(case, {})
-    runs = fake_sim(monkeypatch, lambda n: report, invalid=["episode 0 has no frames"] if case == "invalid_dataset" else ())
+    runs = fake_sim(
+        monkeypatch, lambda n: report, invalid=["episode 0 has no frames"] if case == "invalid_dataset" else ()
+    )
     limits = Limits(max_upload_bytes=100) if case == "over_limit" else Limits()
     st = run_once(out, limits=limits, log=QUIET)
     assert st["id"] == job["id"] and st["status"] == "failed" and st["error"].startswith(error)
@@ -519,7 +605,9 @@ def test_a_job_queued_for_a_retry_stays_locked_until_its_worker_lets_go(tmp_path
     fake_sim(monkeypatch, lambda n: OSError("flaky disk") if n == 1 else {})
     d, st = claim_next(jobs_of(out), "w1")
     limits = Limits(job_retry_backoff=0)
-    assert process(d, st, out, limits=limits, log=QUIET)["status"] == "queued" and (d / LOCK).exists()  # w1 has not released it yet
+    assert (
+        process(d, st, out, limits=limits, log=QUIET)["status"] == "queued" and (d / LOCK).exists()
+    )  # w1 has not released it yet
     assert claim_next(jobs_of(out), "w2") is None and reap_stale(jobs_of(out), 120, log=QUIET) == 0
     release(d)
     d2, st2 = claim_next(jobs_of(out), "w2")
@@ -536,8 +624,9 @@ def test_racing_workers_run_each_attempt_of_a_retried_job_once(tmp_path, monkeyp
     def racer(name):
         start.wait()
         deadline = time.monotonic() + 60
-        while time.monotonic() < deadline and any(status_of(out, {"id": i})["status"] in ("queued", "running")
-                                                  for i in ids):
+        while time.monotonic() < deadline and any(
+            status_of(out, {"id": i})["status"] in ("queued", "running") for i in ids
+        ):
             if run_once(out, worker=name, limits=Limits(job_retry_backoff=0), log=QUIET) is None:
                 time.sleep(0.01)
 
@@ -617,8 +706,10 @@ def test_claim_skips_a_waiting_retry_and_takes_the_next_ready_job(tmp_path):
     out = tmp_path / "out"
     waiting = create_job(jobs_of(out), "a.json", data=b"{}")
     ready = create_job(jobs_of(out), "b.json", data=b"{}")
-    write_status(jobs_of(out) / waiting["id"],
-                 {**status_of(out, waiting), "created_unix": 1, "not_before": int(time.time()) + 60})
+    write_status(
+        jobs_of(out) / waiting["id"],
+        {**status_of(out, waiting), "created_unix": 1, "not_before": int(time.time()) + 60},
+    )
     write_status(jobs_of(out) / ready["id"], {**status_of(out, ready), "created_unix": 2})
     d, st = claim_next(jobs_of(out))
     assert st["id"] == ready["id"] and d.name == ready["id"]
@@ -638,6 +729,7 @@ def test_a_requeued_job_is_not_claimed_before_not_before(tmp_path, monkeypatch):
 
 
 # ---- retention -------------------------------------------------------------------------------------------------
+
 
 def _finished_job(out, name, hours_old, status="done", with_outputs=True):
     job = create_job(jobs_of(out), f"{name}.json", data=b"{}")
@@ -681,8 +773,14 @@ def test_gc_deletes_old_finished_jobs_and_everything_they_produced(tmp_path):
     assert not (out / "progress" / f"{old_room}_sim.jsonl").exists()
     assert (out / "progress" / f"{young_room}_sim.jsonl").exists()
     assert hand_made.is_dir()  # odd's room_id does not end with its job id, so its room is not its to delete
-    for p in (jobs_of(out) / young["id"], jobs_of(out) / running["id"], jobs_of(out) / queued["id"],
-              out / "twins" / young_room, out / "datasets" / f"{young_room}_sim", out / "reports" / f"{young_room}_sim.json"):
+    for p in (
+        jobs_of(out) / young["id"],
+        jobs_of(out) / running["id"],
+        jobs_of(out) / queued["id"],
+        out / "twins" / young_room,
+        out / "datasets" / f"{young_room}_sim",
+        out / "reports" / f"{young_room}_sim.json",
+    ):
         assert p.exists(), p
     assert gc(out, 24)["removed"] == []
     with pytest.raises(ValueError):
@@ -694,8 +792,12 @@ def test_delete_job_removes_twin_dataset_report_and_zip_but_not_a_busy_job(tmp_p
     job, room = _finished_job(out, "mine", 0.1)
     res = delete_job(out, job["id"])
     assert res["bytes"] >= 250 and not (jobs_of(out) / job["id"]).exists()
-    for p in (out / "twins" / room, out / "datasets" / f"{room}_sim", out / "reports" / f"{room}_sim.json",
-              out / "progress" / f"{room}_sim.jsonl"):
+    for p in (
+        out / "twins" / room,
+        out / "datasets" / f"{room}_sim",
+        out / "reports" / f"{room}_sim.json",
+        out / "progress" / f"{room}_sim.jsonl",
+    ):
         assert not p.exists(), p
     assert delete_job(out, job["id"]) is None and delete_job(out, "../out") is None
     q = create_job(jobs_of(out), "q.json", data=b"{}")
@@ -781,6 +883,7 @@ def test_work_sweeps_old_jobs_when_retention_is_set(tmp_path):
 
 # ---- metering --------------------------------------------------------------------------------------------------
 
+
 def test_failed_job_is_metered_with_unmeasured_fields_null(tmp_path):
     out = tmp_path / "out"
     job = create_job(jobs_of(out), "broken.json", data=b"not json")
@@ -801,8 +904,9 @@ def test_build_usage_reads_frames_and_sizes_from_the_written_dataset(tmp_path):
     (ds / "data.bin").write_bytes(b"x" * 1000)
     zp = tmp_path / "dataset.zip"
     zp.write_bytes(b"z" * 40)
-    u = build_usage({"attempts": 4, "successes": 3, "bytes": 77, "dataset_dir": str(ds), "zip": str(zp)}, 12.3456,
-                    {"sim": 9.0})
+    u = build_usage(
+        {"attempts": 4, "successes": 3, "bytes": 77, "dataset_dir": str(ds), "zip": str(zp)}, 12.3456, {"sim": 9.0}
+    )
     assert u["frames"] == 321 and u["zip_bytes"] == 40 and u["upload_bytes"] == 77
     assert u["dataset_bytes"] == 1000 + len(json.dumps({"total_frames": 321}))
     assert (u["episodes_attempted"], u["episodes_succeeded"], u["wall_seconds"]) == (4, 3, 12.346)
@@ -811,16 +915,42 @@ def test_build_usage_reads_frames_and_sizes_from_the_written_dataset(tmp_path):
 
 def test_cost_report_reads_job_metering_from_status_and_ledger(tmp_path):
     out = tmp_path / "out"
-    live = {"id": "job_live", "room_id": "k_job_live", "status": "done", "started_at": 100, "finished_at": 130,
-            "attempts": 4, "successes": 3,
-            "usage": {"wall_seconds": 25.5, "episodes_attempted": 4, "episodes_succeeded": 3, "frames": 900,
-                      "upload_bytes": 10, "zip_bytes": 20, "dataset_bytes": None}}
+    live = {
+        "id": "job_live",
+        "room_id": "k_job_live",
+        "status": "done",
+        "started_at": 100,
+        "finished_at": 130,
+        "attempts": 4,
+        "successes": 3,
+        "usage": {
+            "wall_seconds": 25.5,
+            "episodes_attempted": 4,
+            "episodes_succeeded": 3,
+            "frames": 900,
+            "upload_bytes": 10,
+            "zip_bytes": 20,
+            "dataset_bytes": None,
+        },
+    }
     (out / "jobs" / "job_live").mkdir(parents=True)
     (out / "jobs" / "job_live" / "status.json").write_text(json.dumps(live))
     (out / "usage").mkdir()
-    ledger = [{"id": "job_gone", "room_id": "g_job_gone", "status": "done", "attempts": 2, "successes": 2,
-               "wall_seconds": 10.0, "frames": 100, "upload_bytes": 5, "zip_bytes": None, "dataset_bytes": 300},
-              {"id": "job_live", "wall_seconds": 999.0, "frames": 1, "attempts": 1, "successes": 1}]
+    ledger = [
+        {
+            "id": "job_gone",
+            "room_id": "g_job_gone",
+            "status": "done",
+            "attempts": 2,
+            "successes": 2,
+            "wall_seconds": 10.0,
+            "frames": 100,
+            "upload_bytes": 5,
+            "zip_bytes": None,
+            "dataset_bytes": 300,
+        },
+        {"id": "job_live", "wall_seconds": 999.0, "frames": 1, "attempts": 1, "successes": 1},
+    ]
     (out / "usage" / "jobs.jsonl").write_text("\n".join(json.dumps(x) for x in ledger) + "\n{cut off by a cra")
     rep = cost.build(out)
     rows = {r["room"]: r for r in rep["rows"] if r["source"] == "job"}
@@ -838,6 +968,7 @@ def test_cost_report_reads_job_metering_from_status_and_ledger(tmp_path):
 
 # ---- per-episode progress and the optional memory cap ----------------------------------------------------------------
 
+
 def test_progress_log_counts_finished_sim_tasks(tmp_path):
     from arrival.jobs.worker import progress_log
 
@@ -847,8 +978,13 @@ def test_progress_log_counts_finished_sim_tasks(tmp_path):
     seen = []
     hook = progress_log(d, st, 3, seen.append)
     assert status_of(out, job)["progress"] == {"done": 0, "total": 3}
-    for line in ("[sim] t0: planned by rule -> {}", "[sim] t0: OK door ik_err=0.1", "[sim] t1: MISS x",
-                 "[sim] t2: SKIP at env: why", "[sim] t3: DROP human_contact y"):
+    for line in (
+        "[sim] t0: planned by rule -> {}",
+        "[sim] t0: OK door ik_err=0.1",
+        "[sim] t1: MISS x",
+        "[sim] t2: SKIP at env: why",
+        "[sim] t3: DROP human_contact y",
+    ):
         hook(line)
     assert len(seen) == 5 and status_of(out, job)["progress"] == {"done": 3, "total": 3}  # capped; planner line ignored
 
@@ -870,9 +1006,11 @@ def test_memory_limit_is_off_by_default_and_read_in_megabytes():
 
 
 # allocates `MB` megabytes in a grandchild (the way the job's video encoder is a process of its own) and waits
-GRANDCHILD_ALLOCATES = ("import subprocess, sys, time; "
-                        "subprocess.Popen([sys.executable, '-c', 'import time; b = b\"x\" * ({MB} << 20); time.sleep(60)']); "
-                        "time.sleep(60)")
+GRANDCHILD_ALLOCATES = (
+    "import subprocess, sys, time; "
+    "subprocess.Popen([sys.executable, '-c', 'import time; b = b\"x\" * ({MB} << 20); time.sleep(60)']); "
+    "time.sleep(60)"
+)
 
 
 def test_tree_rss_counts_the_processes_a_child_starts():
@@ -886,24 +1024,32 @@ def test_tree_rss_counts_the_processes_a_child_starts():
     finally:
         p.kill()
         p.wait()
-    assert worker.tree_rss(os.getpid()) > 0 and worker.tree_rss(2 ** 22 + 12345) is None
+    assert worker.tree_rss(os.getpid()) > 0 and worker.tree_rss(2**22 + 12345) is None
 
 
-STAGE_THEN_ALLOCATE = ("import sys, json, time; from pathlib import Path; p = Path(sys.argv[1]) / 'status.json'; "
-                       "s = json.loads(p.read_text()); s['stage'] = 'sim'; p.write_text(json.dumps(s)); "
-                       "b = b'x' * (300 << 20); time.sleep(120)")
+STAGE_THEN_ALLOCATE = (
+    "import sys, json, time; from pathlib import Path; p = Path(sys.argv[1]) / 'status.json'; "
+    "s = json.loads(p.read_text()); s['stage'] = 'sim'; p.write_text(json.dumps(s)); "
+    "b = b'x' * (300 << 20); time.sleep(120)"
+)
 
 
 def test_job_over_memory_limit_is_killed_and_recorded_with_its_stage(tmp_path):
     out = tmp_path / "out"
     job = create_job(jobs_of(out), "big.json", data=b"{}")
     t0 = time.monotonic()
-    st = run_once(out, limits=Limits(max_job_seconds=60, max_job_bytes=100 << 20, job_retries=2), isolate=True,
-                  log=QUIET, child_cmd=[sys.executable, "-c", STAGE_THEN_ALLOCATE])
+    st = run_once(
+        out,
+        limits=Limits(max_job_seconds=60, max_job_bytes=100 << 20, job_retries=2),
+        isolate=True,
+        log=QUIET,
+        child_cmd=[sys.executable, "-c", STAGE_THEN_ALLOCATE],
+    )
     assert time.monotonic() - t0 < 30  # killed once it passes 100 MB, not after the child's 120 s sleep
     assert st["status"] == "failed" and st["stage"] == "sim" and st["job_attempts"] == 1  # not retried
     assert st["error"].startswith("MemoryLimitError: the job used ") and st["error"].endswith(
-        " MB resident, over the 100 MB limit (ARRIVAL_MAX_JOB_MB), during stage 'sim'")
+        " MB resident, over the 100 MB limit (ARRIVAL_MAX_JOB_MB), during stage 'sim'"
+    )
     assert float(st["error"].split("used ")[1].split(" MB")[0]) > 100
     assert "MemoryLimitError" in (jobs_of(out) / job["id"] / "error.txt").read_text()
     assert status_of(out, job)["status"] == "failed" and not (jobs_of(out) / job["id"] / LOCK).exists()
@@ -913,8 +1059,13 @@ def test_job_under_memory_limit_is_not_killed(tmp_path):
     out = tmp_path / "out"
     create_job(jobs_of(out), "small.json", data=b"{}")
     small = "import time, sys; b = b'x' * (20 << 20); time.sleep(1.5); sys.exit(7)"
-    st = run_once(out, limits=Limits(max_job_seconds=60, max_job_bytes=1 << 30, job_retries=0), isolate=True,
-                  log=QUIET, child_cmd=[sys.executable, "-c", small])
+    st = run_once(
+        out,
+        limits=Limits(max_job_seconds=60, max_job_bytes=1 << 30, job_retries=0),
+        isolate=True,
+        log=QUIET,
+        child_cmd=[sys.executable, "-c", small],
+    )
     assert st["status"] == "failed" and st["error"].startswith("WorkerProcessError") and "code 7" in st["error"]
 
 

@@ -10,31 +10,35 @@ from pathlib import Path
 import mujoco
 import numpy as np
 
+from arrival.catalog.categories import HANDLE_HELD, RIM_HELD, THIN_HELD
+from arrival.provenance import run_record
 from arrival.sim import menagerie, robot
-from arrival.sim.people import Walkers, frame
-from arrival.sim.safety import SafetyMonitor
-from arrival.catalog.objects import HANDLE_HELD, RIM_HELD, THIN_HELD
 from arrival.sim.export import STATE_DIM
-from arrival.sim.preflight import DRAWER_OPEN_PUT, base_pose, corners, drive_spot, front, mobile_drive, place_point, rack_spot
-from arrival.sim.scene import BOWL_WALL, DOOR_FLAT, PLATE_FLOOR, PLATE_RIM, RACK_OUT, build_mjcf
+from arrival.sim.people import Walkers, frame
+from arrival.sim.robot import FPS, HANDLE_ROOT, PAD_BELOW_EEF, SUBSTEPS
+from arrival.sim.safety import SafetyMonitor
+from arrival.sim.scene import BOWL_WALL, CARCASS_H, DOOR_FLAT, PLATE_FLOOR, PLATE_RIM, RACK_OUT, RACK_Z, build_mjcf
+from arrival.sim.stand import (
+    DOOR_OPEN,
+    DRAWER_OPEN_PUT,
+    base_pose,
+    corners,
+    drive_spot,
+    front,
+    mobile_drive,
+    place_point,
+    rack_spot,
+)
 from arrival.twin.compile import is_counter_host, to_local
 
-FPS = 20
-SUBSTEPS = 25  # 0.002 s physics -> 20 Hz control
 SETTLE_STEPS = 12
 DRAWER_OPEN = 0.30  # start state (m) for close_drawer; open_drawer counts > 0.15 as open
-HANDLE_ROOT = 0.022  # grasp point out from a pan's ring: pad half-width 0.015 plus 7 mm
-PAD_BELOW_EEF = 0.023  # the finger pads reach this far below the eef site (robot.py hand geometry)
 PAD_CLEAR = 0.003  # pad tips over the counter when pinching a flat object: lower and they drag on the top
-DOOR_OPEN = np.radians(70)  # start state for close_door; open_door counts > 60 deg as open
 FRIDGE_OPEN = np.radians(60)  # open_fridge counts the door open past this, the same bar as open_door
 SKIP_REASONS_KEPT = 50  # reasons kept in the report and the dataset info
 WIPE_MIN = 0.4  # metres the sponge must travel pressed to the counter for wipe_counter to count
 FLAP_OPEN = 1.0  # rad; open_oven / open_dishwasher count a bottom-hinged door past this as open
 FAUCET_ON = 0.6  # rad; the lever lifted past this is water on (range is 0 to 1.2)
-
-
-_front, _corners = front, corners  # the stand-rule helpers live in preflight; the old names stay importable
 
 
 BASE_MODES = ("fixed", "mobile")
@@ -44,8 +48,20 @@ DOOR_KEEP = 0.3  # m past the panel's width that walkers keep from the hinge (th
 
 
 class SimEnv:
-    def __init__(self, twin: dict, task: dict, res: int = 128, cameras=("ego_view", "wrist"), overview: bool = False,
-                 base: str = "fixed", arm: str = "procedural"):
+    """One task's MuJoCo episode in the twin: builds the scene (arm, moving parts, walkers, cameras), sets the task's
+    start state, steps physics at FPS with SUBSTEPS per action, renders observations and judges success with the
+    physics. Close it to free the renderers."""
+
+    def __init__(
+        self,
+        twin: dict,
+        task: dict,
+        res: int = 128,
+        cameras=("ego_view", "wrist"),
+        overview: bool = False,
+        base: str = "fixed",
+        arm: str = "procedural",
+    ):
         if base not in BASE_MODES:
             raise ValueError(f"base must be one of {BASE_MODES}, got {base!r}")
         self.twin, self.task, self.mobile = twin, task, base == "mobile"
@@ -64,8 +80,18 @@ class SimEnv:
             obj_pos[task["object_id"]] = [xy[0], xy[1], z + self.objs[task["object_id"]]["size"][2] / 2 + 0.003]
         base, yaw = self._base_pose(task, obj_pos)
         self.base0 = np.array([base[0], base[1], np.radians(yaw)])  # parked pose, room frame; base joints are zero here
-        xml = build_mjcf(twin, base, yaw, obj_pos, task.get("lighting", "neutral"), task.get("people", 0),
-                         seed=task.get("seed"), people_seed=task.get("seed", 0), base="mobile" if self.mobile else "fixed", arm=arm)
+        xml = build_mjcf(
+            twin,
+            base,
+            yaw,
+            obj_pos,
+            task.get("lighting", "neutral"),
+            task.get("people", 0),
+            seed=task.get("seed"),
+            people_seed=task.get("seed", 0),
+            base="mobile" if self.mobile else "fixed",
+            arm=arm,
+        )
         self.model = mujoco.MjModel.from_xml_string(xml)
         self.data = mujoco.MjData(self.model)
         self.qadr = [int(self.model.joint(j).qposadr[0]) for j in robot.ARM_JOINTS]
@@ -76,12 +102,12 @@ class SimEnv:
         self.data.qpos[self.qadr] = robot.HOME
         self.data.qpos[self.fadr] = self.finger_open
         if task["family"] in ("close_drawer", "close_door", "put_in_drawer"):  # the part starts open
-            jn = f'{task["fixture"]}_door' if task["family"] == "close_door" else f'{task["fixture"]}_drawer0'
+            jn = f"{task['fixture']}_door" if task["family"] == "close_door" else f"{task['fixture']}_drawer0"
             start = {"close_drawer": DRAWER_OPEN, "close_door": DOOR_OPEN, "put_in_drawer": DRAWER_OPEN_PUT}
             self.data.qpos[int(self.model.joint(jn).qposadr[0])] = start[task["family"]]
         if task["family"] in ("load_dishwasher", "unload_dishwasher"):  # door flat, upper rack rolled out over it
-            self.data.qpos[int(self.model.joint(f'{task["fixture"]}_door').qposadr[0])] = DOOR_FLAT
-            self.data.qpos[int(self.model.joint(f'{task["fixture"]}_rack').qposadr[0])] = RACK_OUT
+            self.data.qpos[int(self.model.joint(f"{task['fixture']}_door").qposadr[0])] = DOOR_FLAT
+            self.data.qpos[int(self.model.joint(f"{task['fixture']}_rack").qposadr[0])] = RACK_OUT
         self.data.ctrl[:9] = list(robot.HOME) + [self.finger_open] * 2  # base actuators, if any, stay at zero
         self.wiped = 0.0  # xy distance the sponge travelled while pressed to the counter (wipe_counter)
         self.people_note = None
@@ -92,9 +118,17 @@ class SimEnv:
         if task.get("people"):
             free, bxy, front, self.people_note = self._free_floor(self.anchor, base)
             to = None if self.drive_to is None else frame(self.anchor.get("yaw", 0.0)) @ self.drive_to[:2]
-            self.walkers = Walkers(task["people"], free, seed=task.get("seed", 0), base_xy=bxy, front_y=front,
-                                   fixtures=twin["fixtures"], yaw=self.anchor.get("yaw", 0.0), base_to=to,
-                                   keep=self._door_keepout(task))
+            self.walkers = Walkers(
+                task["people"],
+                free,
+                seed=task.get("seed", 0),
+                base_xy=bxy,
+                front_y=front,
+                fixtures=twin["fixtures"],
+                yaw=self.anchor.get("yaw", 0.0),
+                base_to=to,
+                keep=self._door_keepout(task),
+            )
         self.safety = SafetyMonitor(self.model)
         mujoco.mj_forward(self.model, self.data)
         self.cameras, self.res = cameras, res
@@ -115,14 +149,20 @@ class SimEnv:
     def _door_keepout(self, task: dict) -> list:
         """The disc the robot's door swings through, for the walkers to stay out of: centred on the hinge, with the
         panel's width plus 0.3 m as radius. Nothing for a task without a hinged door."""
-        name = f'{task.get("fixture")}_door'
+        name = f"{task.get('fixture')}_door"
         try:
             b = self.model.body(name).id
         except KeyError:
             return []
         mujoco.mj_forward(self.model, self.data)
-        w = max((2 * float(max(self.model.geom_size[g][:2])) for g in range(self.model.ngeom)
-                 if self.model.geom_bodyid[g] == b and self.model.geom_type[g] == mujoco.mjtGeom.mjGEOM_BOX), default=0.0)
+        w = max(
+            (
+                2 * float(max(self.model.geom_size[g][:2]))
+                for g in range(self.model.ngeom)
+                if self.model.geom_bodyid[g] == b and self.model.geom_type[g] == mujoco.mjtGeom.mjGEOM_BOX
+            ),
+            default=0.0,
+        )
         return [(self.data.xpos[b][:2].copy(), w + DOOR_KEEP)] if w else []
 
     def _free_floor(self, anchor: dict, base):
@@ -131,14 +171,14 @@ class SimEnv:
         run on it, narrowed by runs on the side walls. Returns (floor, base_xy, front_y, note) in that frame.
         A room with no usable strip gets the whole floor and front_y None (no counter stop), and `note` says so."""
         M = frame(anchor.get("yaw", 0.0))
-        n = _front(anchor)[:2]
+        n = front(anchor)[:2]
         pts = np.array([M @ np.array(p, dtype=float) for w in self.twin["walls"] for p in (w["start"], w["end"])])
         bx, by = M @ np.array(base[:2])
         x0, x1, y1 = float(pts[:, 0].min()) + 0.4, float(pts[:, 0].max()) - 0.4, float(pts[:, 1].max()) - 0.3
         deep, sides = -np.inf, []
         for f in self.twin["fixtures"]:
-            c = np.array([M @ np.array(p) for p in _corners(f)])
-            d = float(np.dot(_front(f)[:2], n))
+            c = np.array([M @ np.array(p) for p in corners(f)])
+            d = float(np.dot(front(f)[:2], n))
             if d > 0.9:
                 deep = max(deep, float(c[:, 1].max()))
             elif d < -0.9:
@@ -154,9 +194,18 @@ class SimEnv:
                     x1 = min(x1, float(c[:, 0].min()) - 0.4)
         if max(x1 - bx, bx - x0) >= 0.8 and x1 - x0 >= 1.0 and y1 - y0 >= 0.6:
             return (x0, y0, x1, y1), (bx, by), deep, None
-        whole = (float(pts[:, 0].min()) + 0.4, float(pts[:, 1].min()) + 0.4,
-                 float(pts[:, 0].max()) - 0.4, float(pts[:, 1].max()) - 0.4)
-        return whole, (bx, by), None, f"no free strip in front of {anchor['id']}: people walk the whole floor, no counter stop"
+        whole = (
+            float(pts[:, 0].min()) + 0.4,
+            float(pts[:, 1].min()) + 0.4,
+            float(pts[:, 0].max()) - 0.4,
+            float(pts[:, 1].max()) - 0.4,
+        )
+        return (
+            whole,
+            (bx, by),
+            None,
+            f"no free strip in front of {anchor['id']}: people walk the whole floor, no counter stop",
+        )
 
     def _base_pose(self, task: dict, obj_pos: dict):
         """Base pose in front of the fixture the task works at (kept as `self.anchor`), facing it, on any wall."""
@@ -200,8 +249,11 @@ class SimEnv:
         if cid in THIN_HELD:  # lying flat, too thin to hold from above the body: the pads close across the short
             # side with their tips PAD_CLEAR over the top it lies on (object_xml ignores the twin yaw, so that is x)
             across = 0 if o["size"][0] < o["size"][1] else 1
-            return {"off": np.zeros(2), "yaw": np.pi / 2 if across == 0 else 0.0,
-                    "z": p[2] - sz / 2 + self.pad_reach() + PAD_CLEAR}
+            return {
+                "off": np.zeros(2),
+                "yaw": np.pi / 2 if across == 0 else 0.0,
+                "z": p[2] - sz / 2 + self.pad_reach() + PAD_CLEAR,
+            }
         return None
 
     def pad_reach(self) -> float:
@@ -223,9 +275,13 @@ class SimEnv:
         return place_point(self.twin, task)
 
     def pull_axis(self, task: dict) -> np.ndarray:
-        if task["family"] == "turn_on_faucet":  # the lever is pushed from in front of the counter run the sink is set in
-            return _front(self.anchor)
-        return _front(self.fx[task["fixture"]])
+        """The outward horizontal normal of the part the task works on (the fixture's front, or the counter's front for
+        the faucet)."""
+        if (
+            task["family"] == "turn_on_faucet"
+        ):  # the lever is pushed from in front of the counter run the sink is set in
+            return front(self.anchor)
+        return front(self.fx[task["fixture"]])
 
     def run_yaw(self) -> float:
         """Yaw of the run the task works at: 0 on the hero kitchen's north wall, so grasp yaws written for it
@@ -238,11 +294,11 @@ class SimEnv:
     def drawer_place_point(self, task: dict) -> np.ndarray:
         """Where to set an object down on the pulled-out part of the open drawer's tray."""
         c = self.fx[task["fixture"]]
-        n = _front(c)
-        tray = self.data.geom(f'{task["fixture"]}_drawer0_tray')
-        half = self.model.geom(f'{task["fixture"]}_drawer0_tray').size
-        front = np.array(c["position"][:2]) + n[:2] * (c["size"][1] / 2 - 0.02)  # a point on the carcass face
-        along = float(np.dot(tray.xpos[:2] - front, n[:2]))  # tray centre, measured out from that face
+        n = front(c)
+        tray = self.data.geom(f"{task['fixture']}_drawer0_tray")
+        half = self.model.geom(f"{task['fixture']}_drawer0_tray").size
+        face = np.array(c["position"][:2]) + n[:2] * (c["size"][1] / 2 - 0.02)  # a point on the carcass face
+        along = float(np.dot(tray.xpos[:2] - face, n[:2]))  # tray centre, measured out from that face
         far = along + float(half[1])  # how far the tray reaches past the face
         mid = 0.02 + (far - 0.02) / 2  # middle of the exposed part of the tray
         xy = tray.xpos[:2] + n[:2] * (mid - along)  # keep the drawer's own x; the counter centre is not the drawer
@@ -251,8 +307,6 @@ class SimEnv:
     def _rack_spot(self, task: dict):
         """(xy, z of an object's base) in the middle of the part of the rack that is out past the dishwasher front,
         computed from the twin (before the model exists)."""
-        from arrival.sim.scene import RACK_Z
-
         return np.array(rack_spot(self.fx[task["fixture"]])), RACK_Z + 0.01
 
     def rack_place_point(self, task: dict) -> np.ndarray:
@@ -270,8 +324,8 @@ class SimEnv:
         return b.xpos.copy(), self.site_pos(task["handle"]), b.xmat.reshape(3, 3).copy()
 
     def door_geometry(self, task: dict):
-        b = self.data.body(f'{task["fixture"]}_door')
-        return b.xpos.copy(), self.site_pos(f'{task["fixture"]}_door_handle'), b.xmat.reshape(3, 3).copy()
+        b = self.data.body(f"{task['fixture']}_door")
+        return b.xpos.copy(), self.site_pos(f"{task['fixture']}_door_handle"), b.xmat.reshape(3, 3).copy()
 
     # ---- stepping ----
     def state(self) -> np.ndarray:
@@ -288,7 +342,11 @@ class SimEnv:
         before = self.body_pos(self.task["object_id"])[:2] if self.task["family"] == "wipe_counter" else None
         for _ in range(SUBSTEPS):
             mujoco.mj_step(self.model, self.data)
-        self.people_xy = self.walkers.step(self.model, self.data, 1.0 / FPS, self.safety.yield_clearance(self.data)) if self.walkers else []
+        self.people_xy = (
+            self.walkers.step(self.model, self.data, 1.0 / FPS, self.safety.yield_clearance(self.data))
+            if self.walkers
+            else []
+        )
         if before is not None:
             p = self.body_pos(self.task["object_id"])
             if p[2] < self._top(self.fx[self.task["source"]]) + self.obj_half_h(self.task["object_id"]) + 0.01:
@@ -296,11 +354,13 @@ class SimEnv:
         self.safety.update(self.model, self.data, getattr(self.walkers, "driven_geoms", ()))
 
     def render(self, cam: str, big: bool = False) -> np.ndarray:
+        """One RGB frame from camera `cam`, at the dataset resolution or, with big=True, from the 480x360 overview
+        renderer (built only with overview=True)."""
         r = self.big if big else self.renderer
         r.update_scene(self.data, cam)
         return r.render().copy()
 
-    def __enter__(self) -> "SimEnv":
+    def __enter__(self) -> SimEnv:
         return self
 
     def __exit__(self, *exc) -> None:
@@ -315,6 +375,7 @@ class SimEnv:
         self.renderer = self.big = None
 
     def obs(self) -> dict:
+        """The policy's observation: the state vector and one frame per dataset camera."""
         o = {"state": self.state()}
         for c in self.cameras:
             o[c] = self.render(c)
@@ -322,6 +383,8 @@ class SimEnv:
 
     # ---- physics success ----
     def success(self, task: dict) -> tuple[bool, dict]:
+        """Whether the task is done in the physics right now, per family (object resting at the target, drawer or door
+        past its open or closed bar, lever lifted, sponge travel), with the measurements behind the verdict."""
         fam = task["family"]
         if fam == "move_on_table":  # resting on the table top within 6 cm of the target spot, nearly still
             oid = task["object_id"]
@@ -330,7 +393,10 @@ class SimEnv:
             err = float(np.linalg.norm(p[:2] - np.asarray(task["target_xy"])))
             resting = abs(p[2] - (self._top(self.fx[task["target"]]) + self.obj_half_h(oid))) < 0.025
             return bool(err < 0.06 and resting and v < 0.05), {
-                "object_pos": p.round(4).tolist(), "object_speed": round(v, 4), "target_error_m": round(err, 4)}
+                "object_pos": p.round(4).tolist(),
+                "object_speed": round(v, 4),
+                "target_error_m": round(err, 4),
+            }
         if fam in ("counter_to_sink", "counter_to_counter"):
             oid = task["object_id"]
             p = self.body_pos(oid)
@@ -348,34 +414,42 @@ class SimEnv:
             oid = task["object_id"]
             p = self.body_pos(oid)
             v = float(np.linalg.norm(self.data.joint(oid).qvel[:3]))
-            tray = self.data.geom(f'{task["fixture"]}_drawer0_tray')
-            half = self.model.geom(f'{task["fixture"]}_drawer0_tray').size
+            tray = self.data.geom(f"{task['fixture']}_drawer0_tray")
+            half = self.model.geom(f"{task['fixture']}_drawer0_tray").size
             local = tray.xmat.reshape(3, 3).T @ (p - tray.xpos)
             inside = abs(local[0]) < half[0] - 0.02 and abs(local[1]) < half[1] - 0.02
             resting = abs(local[2] - (half[2] + self.obj_half_h(oid))) < 0.03
             return bool(inside and resting and v < 0.05), {
-                "object_pos": p.round(4).tolist(), "object_speed": round(v, 4),
-                "drawer_qpos": round(float(self.data.joint(task["joint"]).qpos[0]), 4)}
+                "object_pos": p.round(4).tolist(),
+                "object_speed": round(v, 4),
+                "drawer_qpos": round(float(self.data.joint(task["joint"]).qpos[0]), 4),
+            }
         if fam == "wipe_counter":
             oid = task["object_id"]
             p = self.body_pos(oid)
             v = float(np.linalg.norm(self.data.joint(oid).qvel[:3]))
             src = self.fx[task["source"]]
             (lx, ly), (sx, sy, _) = to_local(p[:2], src), src["size"]
-            on_top = (abs(lx) < sx / 2 and abs(ly) < sy / 2
-                      and abs(p[2] - (self._top(src) + self.obj_half_h(oid))) < 0.025)
+            on_top = (
+                abs(lx) < sx / 2 and abs(ly) < sy / 2 and abs(p[2] - (self._top(src) + self.obj_half_h(oid))) < 0.025
+            )
             return bool(on_top and self.wiped >= WIPE_MIN and v < 0.05), {
-                "object_pos": p.round(4).tolist(), "wiped_m": round(self.wiped, 3)}
+                "object_pos": p.round(4).tolist(),
+                "wiped_m": round(self.wiped, 3),
+            }
         if fam == "load_dishwasher":
             oid = task["object_id"]
             p = self.body_pos(oid)
             v = float(np.linalg.norm(self.data.joint(oid).qvel[:3]))
-            tray = self.data.geom(f'{task["fixture"]}_rack_tray')
-            half = self.model.geom(f'{task["fixture"]}_rack_tray').size
+            tray = self.data.geom(f"{task['fixture']}_rack_tray")
+            half = self.model.geom(f"{task['fixture']}_rack_tray").size
             local = tray.xmat.reshape(3, 3).T @ (p - tray.xpos)
             inside = abs(local[0]) < half[0] - 0.02 and abs(local[1]) < half[1] - 0.02
             resting = abs(local[2] - (half[2] + self.obj_half_h(oid))) < 0.03
-            return bool(inside and resting and v < 0.05), {"object_pos": p.round(4).tolist(), "object_speed": round(v, 4)}
+            return bool(inside and resting and v < 0.05), {
+                "object_pos": p.round(4).tolist(),
+                "object_speed": round(v, 4),
+            }
         if fam == "unload_dishwasher":
             oid = task["object_id"]
             p = self.body_pos(oid)
@@ -387,20 +461,28 @@ class SimEnv:
             return bool(ok), {"object_pos": p.round(4).tolist(), "object_speed": round(v, 4)}
         jn = task["joint"]
         q = float(self.data.joint(jn).qpos[0])
-        ok = {"open_drawer": q > 0.15, "open_door": q > np.radians(60), "open_fridge": q > FRIDGE_OPEN,
-              "close_drawer": q < 0.03, "close_door": q < np.radians(5),
-              "open_oven": q > FLAP_OPEN, "open_dishwasher": q > FLAP_OPEN, "turn_on_faucet": q > FAUCET_ON}[fam]
+        ok = {
+            "open_drawer": q > 0.15,
+            "open_door": q > np.radians(60),
+            "open_fridge": q > FRIDGE_OPEN,
+            "close_drawer": q < 0.03,
+            "close_door": q < np.radians(5),
+            "open_oven": q > FLAP_OPEN,
+            "open_dishwasher": q > FLAP_OPEN,
+            "turn_on_faucet": q > FAUCET_ON,
+        }[fam]
         return bool(ok), {"joint": jn, "qpos": round(q, 4)}
 
 
 def robot_drawer_z() -> float:
-    from arrival.sim.scene import CARCASS_H
-
     return CARCASS_H - 0.01
 
 
 EXEC_NOISE_TAU = 10.0  # steps (0.5 s): how long a joint-noise excursion lasts
-EXEC_NOISE_SPREAD = (0.4, 1.6)  # each episode draws its noise level from this range times --dart, for a spread of off-plan states
+EXEC_NOISE_SPREAD = (
+    0.4,
+    1.6,
+)  # each episode draws its noise level from this range times --dart, for a spread of off-plan states
 EXEC_NOISE_NEAR_GRIP = 0.25  # noise scale within 12 steps of a gripper command: a grasp needs a steady arm
 GRIP_WINDOW = 12
 
@@ -412,8 +494,9 @@ def _grip_events(plan) -> np.ndarray:
     return np.where(np.abs(np.diff([float(p[7]) for p in plan])) > 1e-6)[0]
 
 
-def run_episode(env: SimEnv, policy, task: dict, max_steps: int = 400, preview: list | None = None,
-                exec_noise: float = 0.0) -> dict:
+def run_episode(
+    env: SimEnv, policy, task: dict, max_steps: int = 400, preview: list | None = None, exec_noise: float = 0.0
+) -> dict:
     """exec_noise > 0 (rad, the typical std of smooth noise on the 7 arm joint targets; each episode uses 0.4 to 1.6
     times it) is DART: the arm is driven by
     target + noise, but the dataset keeps the clean target as the action, so a trained policy sees states that are
@@ -421,7 +504,9 @@ def run_episode(env: SimEnv, policy, task: dict, max_steps: int = 400, preview: 
     near gripper commands, and the physics check still has to pass, so a perturbation that spoils a grasp drops
     the episode like any other failure."""
     rng = np.random.default_rng(int(task.get("seed", 0)) + 1) if exec_noise > 0 else None
-    level = exec_noise * rng.uniform(EXEC_NOISE_SPREAD[0], EXEC_NOISE_SPREAD[1]) if rng is not None else 0.0  # per episode
+    level = (
+        exec_noise * rng.uniform(EXEC_NOISE_SPREAD[0], EXEC_NOISE_SPREAD[1]) if rng is not None else 0.0
+    )  # per episode
     rho, drift, events = float(np.exp(-1.0 / EXEC_NOISE_TAU)), np.zeros(7), None
     try:
         policy.reset(env, task)
@@ -434,7 +519,7 @@ def run_episode(env: SimEnv, policy, task: dict, max_steps: int = 400, preview: 
             obs = env.obs()
             a = np.asarray(policy.act(obs), dtype=float)
             if len(a) < STATE_DIM:  # arm-only policies: the base holds where it is
-                a = np.concatenate([a, obs["state"][len(a):STATE_DIM]])
+                a = np.concatenate([a, obs["state"][len(a) : STATE_DIM]])
             states.append(obs["state"])
             actions.append(a.astype(np.float32))
             for c in env.cameras:
@@ -443,7 +528,9 @@ def run_episode(env: SimEnv, policy, task: dict, max_steps: int = 400, preview: 
                 preview.append(env.render("overview", big=True))
             if rng is not None:
                 near = len(events) > 0 and np.min(np.abs(events - t)) < GRIP_WINDOW
-                drift = rho * drift + np.sqrt(1 - rho * rho) * level * (EXEC_NOISE_NEAR_GRIP if near else 1.0) * rng.standard_normal(7)
+                drift = rho * drift + np.sqrt(1 - rho * rho) * level * (
+                    EXEC_NOISE_NEAR_GRIP if near else 1.0
+                ) * rng.standard_normal(7)
                 driven = a.copy()
                 driven[:7] += drift
                 env.step(driven)
@@ -457,18 +544,125 @@ def run_episode(env: SimEnv, policy, task: dict, max_steps: int = 400, preview: 
         ok, detail = env.success(task)
     finally:
         env.close()  # idempotent; frees both GL renderers when the policy, the step or the success check raises
-    return {"states": np.array(states), "actions": np.array(actions), "videos": {c: np.array(v) for c, v in frames.items()},
-            "success": ok, "detail": detail, "people_xy": people, "ik_error": getattr(policy, "ik_error", None),
-            "safety": env.safety.summary(),
-            "fridge_visit": bool(getattr(env.walkers, "visit", None) and getattr(env.walkers, "door_max", 0.0) > 0.0)}
+    return {
+        "states": np.array(states),
+        "actions": np.array(actions),
+        "videos": {c: np.array(v) for c, v in frames.items()},
+        "success": ok,
+        "detail": detail,
+        "people_xy": people,
+        "ik_error": getattr(policy, "ik_error", None),
+        "safety": env.safety.summary(),
+        "fridge_visit": bool(getattr(env.walkers, "visit", None) and getattr(env.walkers, "door_max", 0.0) > 0.0),
+    }
 
 
-def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path = "out", people: int = 2,
-            policy_name: str = "scripted", res: int = 128, seed: int = 0, save_preview: bool = False,
-            planner_name: str = "rule", cache_path: str | Path | None = None,
-            split: str = "train", use_generated_instructions: bool = False, base: str = "fixed",
-            shard: tuple[int, int] | None = None, resume: bool = False, arm: str = "procedural",
-            exec_noise: float = 0.0, exocentric: bool = False, instruction_style: str = "mixed", log=print) -> dict:
+def _family_row(per: dict, family: str) -> dict:
+    """The running per-family counters of a collect run, created at zero on first use."""
+    return per.setdefault(
+        family,
+        {"attempts": 0, "successes": 0, "human_contacts": 0, "fridge_visits": 0, "door_contacts": 0, "seconds": 0.0},
+    )
+
+
+def _apply_plan(planner, task: dict, twin: dict, log) -> None:
+    """Ask the VLM planner for the task's instruction (with the target fixture's Tavily research when the twin has
+    it) and record the plan on the task. The plan only refines the task's own fields: its family, and the pick/place
+    fields other families lack, stay as make_tasks set them (a rewritten family would miss its source/target/fixture
+    or flip open/close), and a plan for another family names that family's roles, so none of its fields are taken."""
+    obj_ids = [o["id"] for o in twin.get("objects", [])]
+    fx_ids = [f["id"] for f in twin.get("fixtures", [])]
+    research_ctx = None
+    if "tavily_research" in twin:
+        target_fx = task.get("target") or task.get("fixture") or ""
+        target_type = next((f.get("type", "") for f in twin.get("fixtures", []) if f.get("id") == target_fx), "")
+        if target_type and target_type in twin["tavily_research"]:
+            r_info = twin["tavily_research"][target_type]
+            research_ctx = f"{r_info.get('summary', '')} {' '.join(r_info.get('safety_guidelines', []))}"
+    plan = planner.plan(task["instruction"], obj_ids, fx_ids, research_context=research_ctx, twin=twin)
+    task["vlm_plan"] = plan
+    task["planned_by"] = planner.source
+    if research_ctx:
+        task["tavily_enriched"] = True
+    if plan.get("family") and plan["family"] != task["family"]:
+        log(f"[sim] task {task['task_id']}: planner family {plan['family']} != {task['family']}; keeping the task's")
+    else:
+        if plan.get("object") and plan["object"] in obj_ids and "object_id" in task:
+            task["object_id"] = plan["object"]
+        if plan.get("target") and plan["target"] in fx_ids and "target" in task:
+            task["target"] = plan["target"]
+    log(f"[sim] task {task['task_id']}: planned by {planner.source} -> {plan}")
+
+
+def _restore(done: list[dict], per: dict, skips: list[dict]) -> tuple[float, int]:
+    """Count a resumed run's journaled tasks into the per-family rows and the skip list, as if they had just run.
+    Returns the seconds they took and how many were skipped with an error."""
+    prior_seconds, errors = 0.0, 0
+    for r in done:
+        prior_seconds += r["seconds"]
+        if r["outcome"] == "skip":
+            errors += 1
+            skips.append({"stage": r["stage"], "task_id": r["task_id"], "family": r["family"], "reason": r["reason"]})
+            continue
+        fam = _family_row(per, r["family"])
+        fam["attempts"] += 1
+        fam["seconds"] += r["seconds"]
+        fam["successes"] += r["outcome"] == "ok"
+        fam["human_contacts"] += r["human_contact"]
+        fam["fridge_visits"] += r["fridge_visit"]
+        fam["door_contacts"] += r["door_contact"]
+    return prior_seconds, errors
+
+
+def _rollout(
+    twin: dict, task: dict, policy, policy_name: str, *, preview, overview, res, cameras, base, arm, exec_noise, log
+) -> tuple[dict | None, dict | None]:
+    """Build the task's env and run one episode. Returns (episode, None), or (None, skip) with the stage that raised
+    ("build" or "rollout") and the reason: one bad geometry costs this task, not the run. An unconfigured VLA policy
+    and, under the VLA policy, an OSError (the policy server did not answer) are not the task's fault and re-raise."""
+    from arrival.sim.policy import VLANotConfigured
+
+    stage = "build"
+    try:
+        env = SimEnv(twin, task, res=res, cameras=cameras, overview=overview, base=base, arm=arm)
+        stage = "rollout"
+        try:
+            if env.people_note:
+                log(f"[sim] {task['task_id']}: {env.people_note}")
+            return run_episode(env, policy, task, preview=preview, exec_noise=exec_noise), None
+        finally:
+            env.close()  # idempotent; frees both GL renderers when the policy or the episode raises
+    except VLANotConfigured:
+        raise
+    except Exception as e:  # noqa: BLE001 - nothing is written for a skipped task
+        if isinstance(e, OSError) and policy_name == "vla":
+            raise
+        return None, {"stage": stage, "task_id": task["task_id"], "family": task["family"], "reason": one_line(e)}
+
+
+def collect(
+    twin: dict,
+    families: list[str],
+    episodes: int,
+    out_dir: str | Path = "out",
+    people: int = 2,
+    policy_name: str = "scripted",
+    res: int = 128,
+    seed: int = 0,
+    save_preview: bool = False,
+    planner_name: str = "rule",
+    cache_path: str | Path | None = None,
+    split: str = "train",
+    use_generated_instructions: bool = False,
+    base: str = "fixed",
+    shard: tuple[int, int] | None = None,
+    resume: bool = False,
+    arm: str = "procedural",
+    exec_noise: float = 0.0,
+    exocentric: bool = False,
+    instruction_style: str = "mixed",
+    log=print,
+) -> dict:
     """Collect `episodes` attempts; failed attempts are dropped and counted. A task whose stand spot or reach the
     pre-flight rejects never runs (`skipped_unreachable`, counted per rejected variation), and one whose env build
     or rollout raises is logged with its reason, counted as `skipped_error` and never written, so a bad geometry
@@ -483,7 +677,7 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
     refused with a ShardError) and the result is the dataset an uninterrupted run would have written."""
     from arrival.jobs.shards import Journal, shard_dir, shard_range, twin_sha256
     from arrival.sim.export import SimDatasetWriter
-    from arrival.sim.policy import ScriptedExpert, VLAClient, VLANotConfigured, VLMPlanner
+    from arrival.sim.policy import ScriptedExpert, VLAClient, VLMPlanner
     from arrival.sim.tasks import finish_task, make_tasks
 
     cameras = ("ego_view", "wrist", "overview") if exocentric else ("ego_view", "wrist")
@@ -491,9 +685,20 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
     room = twin["room_id"]
     twin_hash = twin_sha256(twin)  # the room as given, before anything below reads it
     pre: dict = {}
-    tasks = make_tasks(twin, families, episodes, seed=seed, people=people,
-                       split=split, use_generated_instructions=use_generated_instructions, mobile=base == "mobile", log=log,
-                       preflight=pre, arm=arm, instruction_style=instruction_style)
+    tasks = make_tasks(
+        twin,
+        families,
+        episodes,
+        seed=seed,
+        people=people,
+        split=split,
+        use_generated_instructions=use_generated_instructions,
+        mobile=base == "mobile",
+        log=log,
+        preflight=pre,
+        arm=arm,
+        instruction_style=instruction_style,
+    )
     lo, hi = shard_range(len(tasks), *shard) if shard else (0, len(tasks))
     if shard:
         out_dir = shard_dir(out_dir, *shard)
@@ -503,38 +708,58 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
         finish_task(t)
     policy = ScriptedExpert() if policy_name == "scripted" else VLAClient()
     planner = VLMPlanner(log=log, cache_path=cache_path) if planner_name == "vlm" else None
-    from arrival.export.provenance import run_record
-
-    prov = run_record(twin, seed=seed, generator="mujoco_scripted_ik", policy=policy_name, planner=planner_name,
-                      episodes=episodes, families=list(families), people=people, res=res, split=split,
-                      exec_noise=exec_noise, cameras=list(cameras))
-    fingerprint = {"room": room, "families": list(families), "episodes": episodes, "seed": seed, "people": people,
-                   "policy": policy_name, "planner": planner_name, "split": split,
-                   "instructions": use_generated_instructions, "base": base, "arm": arm, "res": res,
-                   "shard": list(shard) if shard else None, "exec_noise": exec_noise, "cameras": list(cameras),
-                   "twin": twin_hash}
+    prov = run_record(
+        twin,
+        seed=seed,
+        generator="mujoco_scripted_ik",
+        policy=policy_name,
+        planner=planner_name,
+        episodes=episodes,
+        families=list(families),
+        people=people,
+        res=res,
+        split=split,
+        exec_noise=exec_noise,
+        cameras=list(cameras),
+    )
+    fingerprint = {
+        "room": room,
+        "families": list(families),
+        "episodes": episodes,
+        "seed": seed,
+        "people": people,
+        "policy": policy_name,
+        "planner": planner_name,
+        "split": split,
+        "instructions": use_generated_instructions,
+        "base": base,
+        "arm": arm,
+        "res": res,
+        "shard": list(shard) if shard else None,
+        "exec_noise": exec_noise,
+        "cameras": list(cameras),
+        "twin": twin_hash,
+    }
     journal = Journal(out_dir / "progress" / f"{room}_sim.jsonl")
     done = journal.start(fingerprint, resume, tasks[lo:hi])
-    writer = SimDatasetWriter(out_dir / "datasets" / f"{room}_sim", room, FPS, res, cameras, provenance=prov,
-                              base=base, resume=bool(done), arm=arm)
+    writer = SimDatasetWriter(
+        out_dir / "datasets" / f"{room}_sim",
+        room,
+        FPS,
+        res,
+        cameras,
+        provenance=prov,
+        base=base,
+        resume=bool(done),
+        arm=arm,
+    )
     per: dict = {}
     prior_seconds = 0.0
     if done:
-        writer.restore([r["episode"] for r in done if r["outcome"] == "ok"], [r["stats"] for r in done if r["outcome"] == "ok"])
-        for r in done:
-            prior_seconds += r["seconds"]
-            if r["outcome"] == "skip":
-                errors += 1
-                skips.append({"stage": r["stage"], "task_id": r["task_id"], "family": r["family"], "reason": r["reason"]})
-                continue
-            fam = per.setdefault(r["family"], {"attempts": 0, "successes": 0, "human_contacts": 0,
-                                               "fridge_visits": 0, "door_contacts": 0, "seconds": 0.0})
-            fam["attempts"] += 1
-            fam["seconds"] += r["seconds"]
-            fam["successes"] += r["outcome"] == "ok"
-            fam["human_contacts"] += r["human_contact"]
-            fam["fridge_visits"] += r["fridge_visit"]
-            fam["door_contacts"] += r["door_contact"]
+        writer.restore(
+            [r["episode"] for r in done if r["outcome"] == "ok"], [r["stats"] for r in done if r["outcome"] == "ok"]
+        )
+        prior_seconds, errors = _restore(done, per, skips)
         log(f"[sim] resume: {len(done)} of {hi - lo} tasks already done, {len(writer.episodes)} episodes kept")
     finished = {r["task_id"] for r in done}
     t0 = time.perf_counter()
@@ -544,103 +769,134 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
             continue
         t_task = time.perf_counter()
         if planner is not None:
-            obj_ids = [o["id"] for o in twin.get("objects", [])]
-            fx_ids = [f["id"] for f in twin.get("fixtures", [])]
-            research_ctx = None
-            if "tavily_research" in twin:
-                target_fx = task.get("target") or task.get("fixture") or ""
-                target_type = next((f.get("type", "") for f in twin.get("fixtures", []) if f.get("id") == target_fx), "")
-                if target_type and target_type in twin["tavily_research"]:
-                    r_info = twin["tavily_research"][target_type]
-                    research_ctx = f"{r_info.get('summary', '')} {' '.join(r_info.get('safety_guidelines', []))}"
-            plan = planner.plan(task["instruction"], obj_ids, fx_ids, research_context=research_ctx,
-                                twin=twin)
-            task["vlm_plan"] = plan
-            task["planned_by"] = planner.source
-            if research_ctx:
-                task["tavily_enriched"] = True
-            # the planner only refines a task's own fields: its family, and the pick/place fields other families lack,
-            # stay as make_tasks set them (a rewritten family would miss its source/target/fixture or flip open/close)
-            # a plan for another family names that family's roles (wipe_counter's target is the counter to wipe),
-            # so none of its fields are taken
-            if plan.get("family") and plan["family"] != task["family"]:
-                log(f"[sim] task {task['task_id']}: planner family {plan['family']} != {task['family']}; keeping the task's")
-            else:
-                if plan.get("object") and plan["object"] in obj_ids and "object_id" in task:
-                    task["object_id"] = plan["object"]
-                if plan.get("target") and plan["target"] in fx_ids and "target" in task:
-                    task["target"] = plan["target"]
-            log(f"[sim] task {task['task_id']}: planned by {planner.source} -> {plan}")
-        stage = "build"
-        try:
-            env = SimEnv(twin, task, res=res, cameras=cameras, overview=save_preview and i == 0, base=base, arm=arm)
-            stage = "rollout"
-            try:
-                if env.people_note:
-                    log(f"[sim] {task['task_id']}: {env.people_note}")
-                ep = run_episode(env, policy, task, preview=preview if i == 0 else None, exec_noise=exec_noise)
-            finally:
-                env.close()  # idempotent; frees both GL renderers when the policy or the episode raises
-        except VLANotConfigured:
-            raise
-        except Exception as e:  # noqa: BLE001 - one bad geometry must cost this task, not the run; nothing is written for it
-            if isinstance(e, OSError) and policy_name == "vla":  # the policy server did not answer: not this task's fault
-                raise
+            _apply_plan(planner, task, twin, log)
+        ep, skip = _rollout(
+            twin,
+            task,
+            policy,
+            policy_name,
+            preview=preview if i == 0 else None,
+            overview=save_preview and i == 0,
+            res=res,
+            cameras=cameras,
+            base=base,
+            arm=arm,
+            exec_noise=exec_noise,
+            log=log,
+        )
+        if skip is not None:
             errors += 1
-            skips.append({"stage": stage, "task_id": task["task_id"], "family": task["family"],
-                          "reason": one_line(e)})
-            log(f"[sim] {task['task_id']}: SKIP at {stage}: {skips[-1]['reason']}")
-            journal.append({"task_id": task["task_id"], "outcome": "skip", "family": task["family"], "stage": stage,
-                            "reason": skips[-1]["reason"], "seconds": round(time.perf_counter() - t_task, 3)})
+            skips.append(skip)
+            log(f"[sim] {task['task_id']}: SKIP at {skip['stage']}: {skip['reason']}")
+            journal.append(
+                {
+                    "task_id": task["task_id"],
+                    "outcome": "skip",
+                    "family": task["family"],
+                    "stage": skip["stage"],
+                    "reason": skip["reason"],
+                    "seconds": round(time.perf_counter() - t_task, 3),
+                }
+            )
             continue
-        fam = per.setdefault(task["family"], {"attempts": 0, "successes": 0, "human_contacts": 0,
-                                              "fridge_visits": 0, "door_contacts": 0, "seconds": 0.0})
+        fam = _family_row(per, task["family"])
         fam["attempts"] += 1
         contact = ep["safety"]["human_contact"]
         fam["human_contacts"] += contact
         fam["fridge_visits"] += ep["fridge_visit"]
         fam["door_contacts"] += ep["safety"]["door_contact"]
         tag = "DROP human_contact" if contact else ("OK " if ep["success"] else "MISS")
-        log(f"[sim] {task['task_id']}: {tag} {ep['detail']} ik_err={ep['ik_error'] if ep['ik_error'] is None else round(ep['ik_error'], 4)} "
-            f"min_human_d={ep['safety']['min_human_distance_m']}" + (" fridge_visit" if ep["fridge_visit"] else ""))
+        log(
+            f"[sim] {task['task_id']}: {tag} {ep['detail']} ik_err={ep['ik_error'] if ep['ik_error'] is None else round(ep['ik_error'], 4)} "
+            f"min_human_d={ep['safety']['min_human_distance_m']}" + (" fridge_visit" if ep["fridge_visit"] else "")
+        )
         kept = ep["success"] and not contact
         if kept:
             fam["successes"] += 1
             writer.add_episode(ep, task)
         task_seconds = round(time.perf_counter() - t_task, 3)
         fam["seconds"] += task_seconds
-        journal.append({"task_id": task["task_id"], "outcome": "ok" if kept else ("contact" if contact else "miss"),
-                        "family": task["family"], "human_contact": contact, "fridge_visit": int(ep["fridge_visit"]),
-                        "door_contact": ep["safety"]["door_contact"], "seconds": task_seconds,
-                        **({"episode": writer.episodes[-1], "stats": writer.stats[-1]} if kept else {})})  # after the files
+        journal.append(
+            {
+                "task_id": task["task_id"],
+                "outcome": "ok" if kept else ("contact" if contact else "miss"),
+                "family": task["family"],
+                "human_contact": contact,
+                "fridge_visit": int(ep["fridge_visit"]),
+                "door_contact": ep["safety"]["door_contact"],
+                "seconds": task_seconds,
+                **({"episode": writer.episodes[-1], "stats": writer.stats[-1]} if kept else {}),
+            }
+        )  # after the files
         if save_preview and i == 0:
             _write_preview(out_dir / "previews", room, preview, ep)
             preview = None  # up to ~200 MB of overview frames; not needed past the first episode
     seconds = prior_seconds + time.perf_counter() - t0
-    attempts = sum(f["attempts"] for f in per.values())  # tasks that ran to the physics check; a skipped one is not an attempt
-    skipped = {"skipped_unreachable": pre["rejected"], "skipped_error": errors,
-               "skipped": pre["rejected"] + errors, "skip_reasons": skips[:SKIP_REASONS_KEPT]}
-    shard_info = ({"index": shard[0], "count": shard[1], "task_range": [lo, hi], "total_tasks": len(tasks),
-                   "episodes": episodes, "seed": seed, "families": list(families), "people": people,
-                   "policy": policy_name, "planner": planner_name, "split": split,
-                   "instructions": use_generated_instructions, "base": base, "arm": arm, "res": res}) if shard else None
+    attempts = sum(
+        f["attempts"] for f in per.values()
+    )  # tasks that ran to the physics check; a skipped one is not an attempt
+    skipped = {
+        "skipped_unreachable": pre["rejected"],
+        "skipped_error": errors,
+        "skipped": pre["rejected"] + errors,
+        "skip_reasons": skips[:SKIP_REASONS_KEPT],
+    }
+    shard_info = (
+        (
+            {
+                "index": shard[0],
+                "count": shard[1],
+                "task_range": [lo, hi],
+                "total_tasks": len(tasks),
+                "episodes": episodes,
+                "seed": seed,
+                "families": list(families),
+                "people": people,
+                "policy": policy_name,
+                "planner": planner_name,
+                "split": split,
+                "instructions": use_generated_instructions,
+                "base": base,
+                "arm": arm,
+                "res": res,
+            }
+        )
+        if shard
+        else None
+    )
     extra = {"shard": shard_info} if shard else {}
     if exec_noise > 0:  # DART: say so in info.json, next to arrival_generator, not only in the provenance block
         extra["exec_noise_rad"] = exec_noise
     info = writer.finish(attempts, skipped, extra or None)
     succ = sum(f["successes"] for f in per.values())
-    report = {"room_id": room, "generator": "mujoco_scripted_ik", "policy": policy_name,
-              "planner": planner_name, "attempts": attempts, **skipped,
-              "successes": succ, "dropped": attempts - succ, "seconds": round(seconds, 2),
-              "demos_per_hour": round(succ / seconds * 3600, 1) if seconds else 0.0,
-              "human_contacts": sum(f["human_contacts"] for f in per.values()),
-              "fridge_visits": sum(f["fridge_visits"] for f in per.values()),
-              "door_contacts": sum(f["door_contacts"] for f in per.values()),
-              "families": {k: {**v, "seconds": round(v["seconds"], 2), "success_rate": round(v["successes"] / v["attempts"], 3)}
-                           for k, v in per.items()},
-              "people": people, "resolution": res, "physics_checked_success": True, "grasp": "friction",
-              "base": base, "arm": arm, "cameras": list(cameras), **({"shard": shard_info} if shard else {}),
-              **({"resumed_tasks": len(done)} if done else {})}
+    report = {
+        "room_id": room,
+        "generator": "mujoco_scripted_ik",
+        "policy": policy_name,
+        "planner": planner_name,
+        "attempts": attempts,
+        **skipped,
+        "successes": succ,
+        "dropped": attempts - succ,
+        "seconds": round(seconds, 2),
+        "demos_per_hour": round(succ / seconds * 3600, 1) if seconds else 0.0,
+        "human_contacts": sum(f["human_contacts"] for f in per.values()),
+        "fridge_visits": sum(f["fridge_visits"] for f in per.values()),
+        "door_contacts": sum(f["door_contacts"] for f in per.values()),
+        "families": {
+            k: {**v, "seconds": round(v["seconds"], 2), "success_rate": round(v["successes"] / v["attempts"], 3)}
+            for k, v in per.items()
+        },
+        "people": people,
+        "resolution": res,
+        "physics_checked_success": True,
+        "grasp": "friction",
+        "base": base,
+        "arm": arm,
+        "cameras": list(cameras),
+        **({"shard": shard_info} if shard else {}),
+        **({"resumed_tasks": len(done)} if done else {}),
+    }
     rp = out_dir / "reports" / f"{room}_sim.json"
     rp.parent.mkdir(parents=True, exist_ok=True)
     rp.write_text(json.dumps(report, indent=2))
@@ -668,8 +924,15 @@ def _write_preview(d: Path, room: str, frames: list, ep: dict) -> None:
     picks = [frames[int(k)] for k in np.linspace(0, len(frames) - 1, 6)]
     ego = ep["videos"]["ego_view"]
     egos = [np.array(Image.fromarray(ego[int(k)]).resize((480, 360))) for k in np.linspace(0, len(ego) - 1, 6)]
-    sheet = np.concatenate([np.concatenate(picks[:3], 1), np.concatenate(picks[3:], 1),
-                            np.concatenate(egos[:3], 1), np.concatenate(egos[3:], 1)], 0)
+    sheet = np.concatenate(
+        [
+            np.concatenate(picks[:3], 1),
+            np.concatenate(picks[3:], 1),
+            np.concatenate(egos[:3], 1),
+            np.concatenate(egos[3:], 1),
+        ],
+        0,
+    )
     Image.fromarray(sheet).save(d / f"{room}_sim_contact.png")
     if "overview" in ep["videos"]:
         from arrival.render.multiview import write_paired_preview

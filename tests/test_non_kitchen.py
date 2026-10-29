@@ -10,11 +10,12 @@ import pytest
 
 mujoco = pytest.importorskip("mujoco")
 
-from arrival.catalog.objects import GRASPABLE, ROOM_OBJECTS, TABLE_MOVABLE, catalog_id, room_kind, sample_size  # noqa: E402
+from arrival.catalog.categories import GRASPABLE, ROOM_OBJECTS, TABLE_MOVABLE, catalog_id, room_kind, sample_size  # noqa: E402
 from arrival.scan import roomplan  # noqa: E402
 from arrival.sim.collect import SimEnv, run_episode  # noqa: E402
+from arrival.sim.geometry import is_table  # noqa: E402
 from arrival.sim.policy import ScriptedExpert  # noqa: E402
-from arrival.sim.scene import build_mjcf, is_table, part_names  # noqa: E402
+from arrival.sim.scene import build_mjcf, part_names  # noqa: E402
 from arrival.sim.tasks import SIM_FAMILIES, make_tasks  # noqa: E402
 from arrival.twin.compile import compile_twin, place_default_objects, to_local  # noqa: E402
 
@@ -36,7 +37,7 @@ def test_table_is_built_as_a_table(office):
     table = next(f for f in office["fixtures"] if is_table(f))
     m = mujoco.MjModel.from_xml_string(build_mjcf(office, (2.0, 0.6, 0.75)))
     names = {m.geom(i).name for i in range(m.ngeom)}
-    assert f'{table["id"]}_top' in names and all(f'{table["id"]}_leg{k}' in names for k in range(4))
+    assert f"{table['id']}_top" in names and all(f"{table['id']}_leg{k}" in names for k in range(4))
     joints = {m.joint(i).name for i in range(m.njnt)}
     assert not any(j.startswith(table["id"]) for j in joints)  # no drawers or doors under a dining table
     assert not any(p["fixture"] == table["id"] for p in part_names(office))
@@ -46,7 +47,7 @@ def test_furniture_is_solid(office):
     chairs = [f for f in office["fixtures"] if f["source_category"] == "chair"]
     m = mujoco.MjModel.from_xml_string(build_mjcf(office, (2.0, 0.6, 0.75)))
     for c in chairs:
-        g = m.geom(f'{c["id"]}_box')
+        g = m.geom(f"{c['id']}_box")
         assert m.geom_contype[g.id] and m.geom_conaffinity[g.id]
 
 
@@ -92,6 +93,7 @@ def test_desk_behind_a_chair_is_worked_from_beside_the_chair(base):
 
 # ---- L9: room-appropriate objects ----
 
+
 def _fx(category: str) -> dict:
     return {"id": category, "source_category": category}
 
@@ -121,11 +123,28 @@ def test_living_room_gets_a_remote_and_a_kitchen_keeps_its_five():
     living["fixtures"].append({**chair, "id": "sofa_x", "source_category": "sofa"})
     assert room_kind(living["fixtures"]) == "living_room"
     assert {o["label"] for o in place_default_objects(living, seed=0)} == {"remote", "book", "cup"}
-    kitchen = {"walls": [], "objects": [], "fixtures": [
-        {"id": "s", "type": "sink", "source_category": "sink", "size": [0.6, 0.5, 0.25], "position": [1.6, 0.4, 0.85],
-         "yaw": 0.0},
-        {"id": "c", "type": "counter", "source_category": "counter", "size": [3.0, 0.65, 0.92],
-         "position": [1.5, 0.35, 0.46], "yaw": 0.0}]}
+    kitchen = {
+        "walls": [],
+        "objects": [],
+        "fixtures": [
+            {
+                "id": "s",
+                "type": "sink",
+                "source_category": "sink",
+                "size": [0.6, 0.5, 0.25],
+                "position": [1.6, 0.4, 0.85],
+                "yaw": 0.0,
+            },
+            {
+                "id": "c",
+                "type": "counter",
+                "source_category": "counter",
+                "size": [3.0, 0.65, 0.92],
+                "position": [1.5, 0.35, 0.46],
+                "yaw": 0.0,
+            },
+        ],
+    }
     assert {o["label"] for o in place_default_objects(kitchen, seed=0)} == set(ROOM_OBJECTS["kitchen"])
 
 
@@ -140,8 +159,14 @@ def test_objects_move_on_the_table_in_physics(office, label):
     base = next(o for o in office["objects"] if o["label"] == "book")
     size = sample_size(label, random.Random(0))
     z = base["position"][2] - base["size"][2] / 2 + size[2] / 2
-    obj = {**base, "id": f"{label}_1", "label": label, "catalog_id": catalog_id(label), "size": size,
-           "position": [*base["position"][:2], z]}
+    obj = {
+        **base,
+        "id": f"{label}_1",
+        "label": label,
+        "catalog_id": catalog_id(label),
+        "size": size,
+        "position": [*base["position"][:2], z],
+    }
     twin = {**office, "objects": [obj]}
     tasks = make_tasks(twin, ["move_on_table"], 1, seed=0, log=lambda *_: None)
     assert tasks, f"a {label} lying on the table should be reachable"

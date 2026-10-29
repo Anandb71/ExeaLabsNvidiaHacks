@@ -1,5 +1,6 @@
 """Right-hinged fridge: the twin field `hinge: "right"` mirrors the door in the MJCF, the expert's pull and push,
 the stand spot and the walker's visit. Without the field nothing changes."""
+
 import copy
 import hashlib
 
@@ -124,6 +125,7 @@ def test_a_fridge_on_a_side_wall_opens():
 
 
 # ---- hinge side inferred from the walls when the scan does not give one ----
+
 
 def _fridge(twin):
     return next(f for f in twin["fixtures"] if f["type"].startswith("fridge"))

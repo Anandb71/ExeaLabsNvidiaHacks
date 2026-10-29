@@ -8,6 +8,8 @@ import pytest
 
 mujoco = pytest.importorskip("mujoco")
 
+from conftest import SCANS  # noqa: E402
+
 from arrival.eval.cost import load_baseline  # noqa: E402
 from arrival.export.validate import validate  # noqa: E402
 from arrival.scan.bundle import load_room  # noqa: E402
@@ -15,8 +17,6 @@ from arrival.sim import teleop  # noqa: E402
 from arrival.sim.collect import SimEnv  # noqa: E402
 from arrival.sim.tasks import finish_task, make_tasks  # noqa: E402
 from arrival.twin.compile import compile_twin  # noqa: E402
-
-from conftest import SCANS  # noqa: E402
 
 QUIET = lambda *_: None  # noqa: E731
 
@@ -42,8 +42,18 @@ def _moves(ctl, goal) -> list[list[str]]:
     for comp, (pos_key, neg_key) in ((d @ ctl.fwd, ("w", "s")), (d @ ctl.left, ("a", "d")), (d[2], ("r", "f"))):
         n = int(round(comp / teleop.STEP))
         out += [[pos_key if n > 0 else neg_key]] * abs(n)
-    ctl.pos = ctl.pos + sum(np.array({"w": ctl.fwd, "s": -ctl.fwd, "a": ctl.left, "d": -ctl.left,
-                                       "r": [0, 0, 1], "f": [0, 0, -1]}[k[0]]) * teleop.STEP for k in out) if out else ctl.pos
+    ctl.pos = (
+        ctl.pos
+        + sum(
+            np.array(
+                {"w": ctl.fwd, "s": -ctl.fwd, "a": ctl.left, "d": -ctl.left, "r": [0, 0, 1], "f": [0, 0, -1]}[k[0]]
+            )
+            * teleop.STEP
+            for k in out
+        )
+        if out
+        else ctl.pos
+    )
     return out
 
 
@@ -91,15 +101,28 @@ def test_keys_move_the_target_in_the_robot_frame(twin):
 
 
 def test_scripted_keyboard_demo_succeeds_and_writes_a_valid_baseline(twin, tmp_path):
-    s = teleop.run(twin, _demo_frames(twin), tmp_path, operator_usd_per_hour=36.0, setup_usd=5.0,
-                   setup_assumptions=["test operator"], target_successes=1, res=64, record=True, realtime=False,
-                   clock=_clock(), log=QUIET)
+    s = teleop.run(
+        twin,
+        _demo_frames(twin),
+        tmp_path,
+        operator_usd_per_hour=36.0,
+        setup_usd=5.0,
+        setup_assumptions=["test operator"],
+        target_successes=1,
+        res=64,
+        record=True,
+        realtime=False,
+        clock=_clock(),
+        log=QUIET,
+    )
     assert s["n_success"] == 1 and s["attempts"] == 1
     b = load_baseline(tmp_path / "teleop_baseline.json")  # the cost report accepts it
     assert b["task"] == "counter_to_sink" and b["room"] == "hero_kitchen" and b["n_success"] == 1
     assert b["cost_basis_usd"] == pytest.approx(b["operator_seconds_total"] / 3600 * 36.0 + 5.0, abs=1e-4)
     assert "test operator" in b["setup_assumptions"]
-    rows = [json.loads(ln) for ln in (tmp_path / "reports" / "hero_kitchen_teleop_attempts.jsonl").read_text().splitlines()]
+    rows = [
+        json.loads(ln) for ln in (tmp_path / "reports" / "hero_kitchen_teleop_attempts.jsonl").read_text().splitlines()
+    ]
     assert rows[0]["success"] and rows[0]["ended_by"] == "judge"
     ds = tmp_path / "datasets" / "hero_kitchen_teleop"
     assert validate(ds) == []
@@ -110,11 +133,22 @@ def test_scripted_keyboard_demo_succeeds_and_writes_a_valid_baseline(twin, tmp_p
 
 def test_failed_and_abandoned_attempts_count_time_but_write_no_baseline(twin, tmp_path):
     frames = [["w"], ["\r"]] + [["a"]] * 3 + [["x"]]  # judged at once (mug still on the counter), then given up
-    s = teleop.run(twin, frames, tmp_path, operator_usd_per_hour=36.0, target_successes=2, res=64,
-                   realtime=False, clock=_clock(), log=QUIET)
+    s = teleop.run(
+        twin,
+        frames,
+        tmp_path,
+        operator_usd_per_hour=36.0,
+        target_successes=2,
+        res=64,
+        realtime=False,
+        clock=_clock(),
+        log=QUIET,
+    )
     assert s["n_success"] == 0 and s["attempts"] == 2 and s["operator_seconds_total"] > 0
     assert not (tmp_path / "teleop_baseline.json").exists()
-    rows = [json.loads(ln) for ln in (tmp_path / "reports" / "hero_kitchen_teleop_attempts.jsonl").read_text().splitlines()]
+    rows = [
+        json.loads(ln) for ln in (tmp_path / "reports" / "hero_kitchen_teleop_attempts.jsonl").read_text().splitlines()
+    ]
     assert [r["ended_by"] for r in rows] == ["judge", "give_up"] and not any(r["success"] for r in rows)
 
 
@@ -130,23 +164,36 @@ def test_max_ik_error_is_the_largest_of_the_attempt_not_the_last(twin, tmp_path,
 
     monkeypatch.setattr(teleop.ik, "solve", spy)
     frames = [["R"]] * 40 + [["F"]] * 40 + [["x"]]
-    teleop.run(twin, frames, tmp_path, operator_usd_per_hour=36.0, target_successes=1, res=64, realtime=False,
-               clock=_clock(), log=QUIET)
+    teleop.run(
+        twin,
+        frames,
+        tmp_path,
+        operator_usd_per_hour=36.0,
+        target_successes=1,
+        res=64,
+        realtime=False,
+        clock=_clock(),
+        log=QUIET,
+    )
     row = json.loads((tmp_path / "reports" / "hero_kitchen_teleop_attempts.jsonl").read_text().splitlines()[0])
     assert max(errs) > errs[-1] + 0.1
     assert row["max_ik_error_m"] == pytest.approx(max(errs), abs=1e-4)
 
 
-@pytest.mark.parametrize("extra, why", [
-    (["--operator-usd-per-hour", "nan"], "finite"),
-    (["--operator-usd-per-hour", "40", "--setup-usd", "inf"], "finite"),
-    (["--operator-usd-per-hour", "40", "--people", "-1"], "--people"),
-    (["--operator-usd-per-hour", "40", "--seed", "-1"], "--seed"),
-    (["--operator-usd-per-hour", "40", "--res", "100"], "--res"),
-])
+@pytest.mark.parametrize(
+    "extra, why",
+    [
+        (["--operator-usd-per-hour", "nan"], "finite"),
+        (["--operator-usd-per-hour", "40", "--setup-usd", "inf"], "finite"),
+        (["--operator-usd-per-hour", "40", "--people", "-1"], "--people"),
+        (["--operator-usd-per-hour", "40", "--seed", "-1"], "--seed"),
+        (["--operator-usd-per-hour", "40", "--res", "100"], "--res"),
+    ],
+)
 def test_bad_arguments_stop_before_the_session(extra, why, tmp_path, capsys, monkeypatch):
     def session_started(*_a, **_k):
         raise AssertionError("the teleop session started")
+
     monkeypatch.setattr(teleop, "TeleopWindow", session_started)
     with pytest.raises(SystemExit) as e:
         teleop.main([*extra, "--scans", str(SCANS), "--out", str(tmp_path)])

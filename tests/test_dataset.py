@@ -4,16 +4,16 @@ import math
 
 import pyarrow.parquet as pq
 import pytest
+from conftest import SCANS
 
 from arrival.cli import main, run_demo
 from arrival.export.validate import validate
 from arrival.generate.mimicgen import probe
 from arrival.generate.scripted import count_attempts, generate, target_point
 from arrival.render import sim_texture
-from arrival.render.splat import SplatCompositeNotImplemented, render as splat_render
+from arrival.render.splat import SplatCompositeNotImplemented
+from arrival.render.splat import render as splat_render
 from arrival.tasks.propose import propose
-
-from conftest import SCANS
 
 
 @pytest.fixture
@@ -44,9 +44,11 @@ def test_generator_is_deterministic(hero_twin, hero_tasks):
 
 def test_retarget_translates_seed(hero_twin, hero_tasks):
     from arrival.generate.scripted import build_seeds, make_attempt
+
     seeds = build_seeds(hero_tasks, hero_twin)
-    t = next(t for t in hero_tasks if t["object_id"] == "mug_1" and t["pose_index"] == 1
-             and t["family"] == "counter_to_sink")
+    t = next(
+        t for t in hero_tasks if t["object_id"] == "mug_1" and t["pose_index"] == 1 and t["family"] == "counter_to_sink"
+    )
     att = make_attempt(0, t, hero_twin, seeds)
     seed_frames = seeds[("counter_to_sink", "mug_1")][1]
     assert att["frames"][0]["eef"][0] == pytest.approx(seed_frames[0]["eef"][0] + 0.08)
@@ -60,6 +62,7 @@ def test_attempt_counts(n, attempts, dropped):
 
 def test_sim_texture(hero_twin, hero_tasks):
     from arrival.generate.scripted import build_seeds, make_attempt
+
     t = next(t for t in hero_tasks if t["object_id"] == "mug_1" and t["lighting"] == "dim")
     att = make_attempt(0, t, hero_twin, build_seeds(hero_tasks, hero_twin))
     frames = sim_texture.render_episode(att["frames"], "dim")
@@ -119,9 +122,11 @@ def test_demo_20_report(tmp_path):
 def test_validate_cli_reports_invalid_total_videos(tmp_path, capsys, value):
     import numpy as np
 
-    modality = {"state": {"arm": {"start": 0, "end": 2}},
-                "action": {"arm": {"start": 0, "end": 2, "absolute": True}},
-                "annotation": {"human.task_description": {}}}
+    modality = {
+        "state": {"arm": {"start": 0, "end": 2}},
+        "action": {"arm": {"start": 0, "end": 2, "absolute": True}},
+        "annotation": {"human.task_description": {}},
+    }
     writer = _writer(tmp_path, modality=modality)
     writer.add_episode(np.zeros((2, 2)), np.zeros((2, 2)), np.arange(2) / 20, "task", True)
     writer.finish(1)
@@ -158,8 +163,9 @@ def test_cli_usage_errors(tmp_path):
 
 
 def test_from_roomplan(tmp_path):
-    res = run_demo("hero_kitchen", 2, "none", out_dir=tmp_path, scans_dir=SCANS, from_roomplan=True,
-                   log=lambda *a: None)
+    res = run_demo(
+        "hero_kitchen", 2, "none", out_dir=tmp_path, scans_dir=SCANS, from_roomplan=True, log=lambda *a: None
+    )
     twin = json.loads((res["twin_dir"] / "twin.json").read_text())
     sink = next(f for f in twin["fixtures"] if f["id"] == "sink_1")
     assert sink["position"] == pytest.approx([1.6, 0.4, 0.85])
@@ -168,12 +174,13 @@ def test_from_roomplan(tmp_path):
 
 def test_release_is_smooth_and_offset_constant(hero_twin, hero_tasks):
     from arrival.generate.scripted import GRASP, SEG, build_seeds, make_attempt
+
     seeds = build_seeds(hero_tasks, hero_twin)
     for t in hero_tasks[:6]:
         fr = make_attempt(0, t, hero_twin, seeds)["frames"]
         for a, b in zip(fr, fr[1:]):
             assert math.dist(a["object_position"], b["object_position"]) < 0.12
-        for f in fr[2 * SEG + 1:4 * SEG]:
+        for f in fr[2 * SEG + 1 : 4 * SEG]:
             assert f["eef"][2] - f["object_position"][2] == pytest.approx(GRASP, abs=1e-5)
 
 
@@ -208,6 +215,7 @@ def test_chunking_1001(tmp_path):
 
 def test_validator_catches_corruption(tmp_path):
     import pyarrow as pa
+
     res = run_demo("hero_kitchen", 3, "all", out_dir=tmp_path, scans_dir=SCANS, log=lambda *a: None)
     ds = res["dataset"]
     p = ds / "data" / "chunk-000" / "episode_000001.parquet"
@@ -227,9 +235,11 @@ def test_validator_reports_wrong_column_type_before_value_checks(tmp_path, colum
     import numpy as np
     import pyarrow as pa
 
-    modality = {"state": {"arm": {"start": 0, "end": 2}},
-                "action": {"arm": {"start": 0, "end": 2, "absolute": True}},
-                "annotation": {"human.task_description": {}}}
+    modality = {
+        "state": {"arm": {"start": 0, "end": 2}},
+        "action": {"arm": {"start": 0, "end": 2, "absolute": True}},
+        "annotation": {"human.task_description": {}},
+    }
     writer = _writer(tmp_path, modality=modality)
     writer.add_episode(np.zeros((2, 2)), np.zeros((2, 2)), np.arange(2) / 20, "task", True)
     writer.finish(1)
@@ -237,8 +247,11 @@ def test_validator_reports_wrong_column_type_before_value_checks(tmp_path, colum
     assert validate(root) == []
     path = root / "data/chunk-000/episode_000000.parquet"
     table = pq.read_table(path)
-    values = (pa.array([0.0, 0.0], type=pa.float32()) if column in ("observation.state", "action")
-              else pa.array([[0.0], [0.0]], type=pa.list_(pa.float32())))
+    values = (
+        pa.array([0.0, 0.0], type=pa.float32())
+        if column in ("observation.state", "action")
+        else pa.array([[0.0], [0.0]], type=pa.list_(pa.float32()))
+    )
     table = table.set_column(table.schema.get_field_index(column), column, values)
     pq.write_table(table, path)
     errors = validate(root)
@@ -249,6 +262,7 @@ def test_validator_catches_nan_and_bad_timestamps(tmp_path):
     import json
 
     import pyarrow as pa
+
     res = run_demo("hero_kitchen", 2, "none", out_dir=tmp_path, scans_dir=SCANS, log=lambda *a: None)
     ds = res["dataset"]
     assert validate(ds) == []
@@ -279,18 +293,37 @@ def test_validator_catches_nan_and_bad_timestamps(tmp_path):
 
 def test_generic_writer(tmp_path):
     import numpy as np
+
     from arrival.export.lerobot import LeRobotWriter
-    modality = {"state": {"arm": {"start": 0, "end": 5}, "base": {"start": 5, "end": 7}},
-                "action": {"arm": {"start": 0, "end": 5, "absolute": True}},
-                "annotation": {"human.task_description": {}}}
-    w = LeRobotWriter(tmp_path / "ds", "r", "all", state_dim=7, action_dim=5, modality=modality,
-                      video_keys=["front", "wrist"], embodiment={"embodiment": "test"},
-                      extra_info={"arrival_generator": "mujoco_test", "arrival_physically_valid": True})
+
+    modality = {
+        "state": {"arm": {"start": 0, "end": 5}, "base": {"start": 5, "end": 7}},
+        "action": {"arm": {"start": 0, "end": 5, "absolute": True}},
+        "annotation": {"human.task_description": {}},
+    }
+    w = LeRobotWriter(
+        tmp_path / "ds",
+        "r",
+        "all",
+        state_dim=7,
+        action_dim=5,
+        modality=modality,
+        video_keys=["front", "wrist"],
+        embodiment={"embodiment": "test"},
+        extra_info={"arrival_generator": "mujoco_test", "arrival_physically_valid": True},
+    )
     T = 12
     for ep in range(3):
         vids = {k: np.full((T, 32, 48, 3), 40 * ep, dtype=np.uint8) for k in ("front", "wrist")}
-        w.add_episode(np.zeros((T, 7)), np.ones((T, 5)), np.arange(T) / 20, f"task {ep % 2}", True,
-                      videos=vids, extra={"arrival_family": "f"})
+        w.add_episode(
+            np.zeros((T, 7)),
+            np.ones((T, 5)),
+            np.arange(T) / 20,
+            f"task {ep % 2}",
+            True,
+            videos=vids,
+            extra={"arrival_family": "f"},
+        )
     with pytest.raises(ValueError):
         w.add_episode(np.zeros((T, 6)), np.ones((T, 5)), np.arange(T) / 20, "x", True)
     info = w.finish(3)
@@ -314,12 +347,12 @@ def test_writer_rejects_invalid_fps_before_creating_dataset(tmp_path, fps):
     with pytest.raises(ValueError, match="fps"):
         _writer(tmp_path, fps=fps)
 
+
 @pytest.mark.parametrize("chunks_size", [0, -1, True, 2.5, "1000"])
 def test_writer_rejects_invalid_chunk_size_before_creating_dataset(tmp_path, chunks_size):
     with pytest.raises(ValueError, match="chunks_size"):
         _writer(tmp_path, chunks_size=chunks_size)
     assert not (tmp_path / "ds").exists()
-
 
 
 @pytest.mark.parametrize("names", [["../outside"], ["ego_view", "ego_view"], ["ego/view"], []])
@@ -336,7 +369,7 @@ def test_writer_rejects_unsafe_supplied_video_name_before_writing(tmp_path):
     z = np.zeros((2, 2))
     clip = np.zeros((2, 32, 32, 3), np.uint8)
     with pytest.raises(ValueError, match="camera name"):
-        w.add_episode(z, z, [0, .05], "task", True, videos={"ego_view": clip, "../outside": clip})
+        w.add_episode(z, z, [0, 0.05], "task", True, videos={"ego_view": clip, "../outside": clip})
     assert not list((tmp_path / "ds").glob("data/**/*.parquet"))
     assert not (tmp_path / "outside").exists()
     w.close()
@@ -349,11 +382,11 @@ def test_writer_rejects_nan_and_leaves_no_orphan(tmp_path):
         good = np.zeros((3, 2))
         bad = good.copy()
         bad[1, 1] = np.nan
-        for s, a, t in ((bad, good, [0, .05, .1]), (good, bad, [0, .05, .1]), (good, good, [0, np.inf, .1])):
+        for s, a, t in ((bad, good, [0, 0.05, 0.1]), (good, bad, [0, 0.05, 0.1]), (good, good, [0, np.inf, 0.1])):
             with pytest.raises(ValueError, match="NaN or inf"):
                 w.add_episode(s, a, t, "x", True)
         assert not list((tmp_path / "ds").glob("data/**/*.parquet"))
-        w.add_episode(good, good, [0, .05, .1], "x", True)
+        w.add_episode(good, good, [0, 0.05, 0.1], "x", True)
         w.finish(1)
     json.loads((tmp_path / "ds" / "meta" / "stats.json").read_text(), parse_constant=lambda c: pytest.fail(c))
 
@@ -365,7 +398,7 @@ def test_writer_rejects_missing_task_instruction_before_writing(tmp_path, instru
     w = _writer(tmp_path)
     z = np.zeros((2, 2))
     with pytest.raises(ValueError, match="instruction must be a nonempty string"):
-        w.add_episode(z, z, [0, .05], instruction, True)
+        w.add_episode(z, z, [0, 0.05], instruction, True)
     assert not list((tmp_path / "ds").glob("data/**/*.parquet"))
     w.close()
 
@@ -376,9 +409,9 @@ def test_writer_checks_videos_before_writing_and_closes_sidecar(tmp_path):
     w = _writer(tmp_path, policy="all")
     z = np.zeros((2, 2))
     with pytest.raises(ValueError, match="needs frames"):
-        w.add_episode(z, z, [0, .05], "x", True)
+        w.add_episode(z, z, [0, 0.05], "x", True)
     with pytest.raises(ValueError, match="multiples of 16"):
-        w.add_episode(z, z, [0, .05], "x", True, videos={"ego_view": np.zeros((2, 40, 40, 3), np.uint8)})
+        w.add_episode(z, z, [0, 0.05], "x", True, videos={"ego_view": np.zeros((2, 40, 40, 3), np.uint8)})
     assert not list((tmp_path / "ds").glob("data/**/*.parquet"))
     w.close()
     assert w._sidecar.closed
@@ -391,7 +424,7 @@ def test_writer_rejects_video_pixel_coercion_before_writing(tmp_path):
     z = np.zeros((2, 2))
     bad = np.full((2, 32, 32, 3), 300, dtype=np.int16)
     with pytest.raises(ValueError, match="uint8 RGB pixels"):
-        w.add_episode(z, z, [0, .05], "task", True, videos={"ego_view": bad})
+        w.add_episode(z, z, [0, 0.05], "task", True, videos={"ego_view": bad})
     assert not list((tmp_path / "ds").glob("data/**/*.parquet"))
     w.close()
 
@@ -400,9 +433,11 @@ def test_writer_rejects_video_pixel_coercion_before_writing(tmp_path):
 def test_validator_reports_invalid_chunk_size_without_crashing(tmp_path, size):
     import numpy as np
 
-    modality = {"state": {"arm": {"start": 0, "end": 2}},
-                "action": {"arm": {"start": 0, "end": 2, "absolute": True}},
-                "annotation": {"human.task_description": {}}}
+    modality = {
+        "state": {"arm": {"start": 0, "end": 2}},
+        "action": {"arm": {"start": 0, "end": 2, "absolute": True}},
+        "annotation": {"human.task_description": {}},
+    }
     writer = _writer(tmp_path, modality=modality)
     writer.add_episode(np.zeros((2, 2)), np.zeros((2, 2)), np.arange(2) / 20, "task", True)
     writer.finish(1)
@@ -416,13 +451,14 @@ def test_validator_reports_invalid_chunk_size_without_crashing(tmp_path, size):
     assert any("chunks_size" in error and "positive integer" in error for error in errors)
 
 
-
 def test_validator_reports_unreadable_parquet_and_continues(tmp_path):
     import numpy as np
 
-    modality = {"state": {"arm": {"start": 0, "end": 2}},
-                "action": {"arm": {"start": 0, "end": 2, "absolute": True}},
-                "annotation": {"human.task_description": {}}}
+    modality = {
+        "state": {"arm": {"start": 0, "end": 2}},
+        "action": {"arm": {"start": 0, "end": 2, "absolute": True}},
+        "annotation": {"human.task_description": {}},
+    }
     writer = _writer(tmp_path, modality=modality)
     for _ in range(2):
         writer.add_episode(np.zeros((2, 2)), np.zeros((2, 2)), np.arange(2) / 20, "task", True)
@@ -436,16 +472,22 @@ def test_validator_reports_unreadable_parquet_and_continues(tmp_path):
     assert not any("index is not continuous" in error for error in errors)
 
 
-@pytest.mark.parametrize(("annotation", "message"), [
-    (999, "not in tasks.jsonl"), (1, "does not match episodes.jsonl tasks"),
-])
+@pytest.mark.parametrize(
+    ("annotation", "message"),
+    [
+        (999, "not in tasks.jsonl"),
+        (1, "does not match episodes.jsonl tasks"),
+    ],
+)
 def test_validator_resolves_training_annotation_tasks(tmp_path, annotation, message):
     import numpy as np
     import pyarrow as pa
 
-    modality = {"state": {"arm": {"start": 0, "end": 2}},
-                "action": {"arm": {"start": 0, "end": 2, "absolute": True}},
-                "annotation": {"human.task_description": {}}}
+    modality = {
+        "state": {"arm": {"start": 0, "end": 2}},
+        "action": {"arm": {"start": 0, "end": 2, "absolute": True}},
+        "annotation": {"human.task_description": {}},
+    }
     writer = _writer(tmp_path, modality=modality)
     for task in ("task0", "task1"):
         writer.add_episode(np.zeros((2, 2)), np.zeros((2, 2)), np.arange(2) / 20, task, True)
@@ -455,8 +497,9 @@ def test_validator_resolves_training_annotation_tasks(tmp_path, annotation, mess
     path = root / "data/chunk-000/episode_000000.parquet"
     table = pq.read_table(path)
     column = "annotation.human.task_description"
-    table = table.set_column(table.schema.get_field_index(column), column,
-                             pa.array([annotation, annotation], type=pa.int64()))
+    table = table.set_column(
+        table.schema.get_field_index(column), column, pa.array([annotation, annotation], type=pa.int64())
+    )
     pq.write_table(table, path)
     assert any(column in error and message in error for error in validate(root))
 
@@ -467,9 +510,11 @@ def test_validator_reports_null_vector_rows(tmp_path, column, row):
     import numpy as np
     import pyarrow as pa
 
-    modality = {"state": {"arm": {"start": 0, "end": 2}},
-                "action": {"arm": {"start": 0, "end": 2, "absolute": True}},
-                "annotation": {"human.task_description": {}}}
+    modality = {
+        "state": {"arm": {"start": 0, "end": 2}},
+        "action": {"arm": {"start": 0, "end": 2, "absolute": True}},
+        "annotation": {"human.task_description": {}},
+    }
     writer = _writer(tmp_path, modality=modality)
     writer.add_episode(np.zeros((2, 2)), np.zeros((2, 2)), np.arange(2) / 20, "task", True)
     writer.finish(1)
@@ -479,21 +524,30 @@ def test_validator_reports_null_vector_rows(tmp_path, column, row):
     table = pq.read_table(path)
     values = table.column(column).to_pylist()
     values[row] = None
-    table = table.set_column(table.schema.get_field_index(column), column,
-                             pa.array(values, type=pa.list_(pa.float32())))
+    table = table.set_column(
+        table.schema.get_field_index(column), column, pa.array(values, type=pa.list_(pa.float32()))
+    )
     pq.write_table(table, path)
     assert any(column in error for error in validate(root))
 
 
 @pytest.mark.parametrize("group", ["state", "action"])
-@pytest.mark.parametrize(("field", "value"), [
-    ("start", None), ("start", "0"), ("start", 0.5), ("end", True), ("slice", None),
-])
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("start", None),
+        ("start", "0"),
+        ("start", 0.5),
+        ("end", True),
+        ("slice", None),
+    ],
+)
 def test_validator_reports_invalid_modality_before_sorting(tmp_path, group, field, value):
     import numpy as np
 
-    modality = {name: {"arm": {"start": 0, "end": 1}, "gripper": {"start": 1, "end": 2}}
-                for name in ("state", "action")}
+    modality = {
+        name: {"arm": {"start": 0, "end": 1}, "gripper": {"start": 1, "end": 2}} for name in ("state", "action")
+    }
     modality["annotation"] = {"human.task_description": {}}
     writer = _writer(tmp_path, modality=modality)
     writer.add_episode(np.zeros((2, 2)), np.zeros((2, 2)), np.arange(2) / 20, "task", True)
@@ -519,14 +573,13 @@ def test_writer_rejects_undeclared_camera_without_mutation(tmp_path, policy):
     clip = np.zeros((2, 32, 32, 3), np.uint8)
     try:
         with pytest.raises(ValueError, match="undeclared camera"):
-            w.add_episode(z, z, [0, .05], "task", True,
-                          videos={"ego_view": clip, "surprise": clip})
+            w.add_episode(z, z, [0, 0.05], "task", True, videos={"ego_view": clip, "surprise": clip})
         assert w.next_episode == 0
         assert w.task_index == {} and w.total_frames == 0
         assert w.videos == w.previews == 0
         assert not list(w.root.rglob("*.parquet"))
         assert not list(tmp_path.rglob("*.mp4"))
-        w.add_episode(z, z, [0, .05], "task", True, videos={"ego_view": clip})
+        w.add_episode(z, z, [0, 0.05], "task", True, videos={"ego_view": clip})
         assert w.next_episode == 1
     finally:
         w.close()

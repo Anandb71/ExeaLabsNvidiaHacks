@@ -5,16 +5,31 @@ import json
 import math
 
 import pytest
+from conftest import REPO
 
-from arrival.catalog.fixtures import DEFAULT_SIZES, FIXTURE_MAP, default_size
+from arrival.catalog.categories import DEFAULT_SIZES, FIXTURE_MAP, default_size
 from arrival.scan import roomplan
 from arrival.twin.compile import compile_twin, layout_dict
 
-from conftest import REPO
-
 # CapturedRoom.Object.Category cases, as Apple spells them (developer.apple.com/documentation/roomplan).
-APPLE_CATEGORIES = ("bathtub", "bed", "chair", "dishwasher", "fireplace", "oven", "refrigerator", "sink",
-                    "sofa", "stairs", "storage", "stove", "table", "television", "toilet", "washerDryer")
+APPLE_CATEGORIES = (
+    "bathtub",
+    "bed",
+    "chair",
+    "dishwasher",
+    "fireplace",
+    "oven",
+    "refrigerator",
+    "sink",
+    "sofa",
+    "stairs",
+    "storage",
+    "stove",
+    "table",
+    "television",
+    "toilet",
+    "washerDryer",
+)
 FLOOR_Y = -1.4
 W, D, H = 6.0, 5.0, 2.5
 FIXTURES = REPO / "tests" / "fixtures" / "roomplan"
@@ -27,31 +42,59 @@ def _t(x, y, z, yaw=0.0):
 
 
 def _wall(ident, x, z, length, yaw):
-    return {"identifier": ident, "category": {"wall": {}}, "confidence": {"high": {}},
-            "dimensions": [length, H, 0], "transform": _t(x, FLOOR_Y + H / 2, z, yaw)}
+    return {
+        "identifier": ident,
+        "category": {"wall": {}},
+        "confidence": {"high": {}},
+        "dimensions": [length, H, 0],
+        "transform": _t(x, FLOOR_Y + H / 2, z, yaw),
+    }
 
 
 def _room(objects=(), floors=None, **extra):
     """W by D room, floor at ARKit y = FLOOR_Y, walls centred on the origin."""
-    walls = [_wall("north", 0, -D / 2, W, 0), _wall("south", 0, D / 2, W, 0),
-             _wall("east", W / 2, 0, D, math.pi / 2), _wall("west", -W / 2, 0, D, math.pi / 2)]
+    walls = [
+        _wall("north", 0, -D / 2, W, 0),
+        _wall("south", 0, D / 2, W, 0),
+        _wall("east", W / 2, 0, D, math.pi / 2),
+        _wall("west", -W / 2, 0, D, math.pi / 2),
+    ]
     if floors is None:
-        floors = [{"identifier": "floor", "category": {"floor": {}}, "dimensions": [W, D, 0],
-                   "transform": _t(0, FLOOR_Y, 0)}]
-    return {"walls": walls, "floors": floors, "doors": [], "windows": [], "openings": [],
-            "objects": list(objects), **extra}
+        floors = [
+            {"identifier": "floor", "category": {"floor": {}}, "dimensions": [W, D, 0], "transform": _t(0, FLOOR_Y, 0)}
+        ]
+    return {
+        "walls": walls,
+        "floors": floors,
+        "doors": [],
+        "windows": [],
+        "openings": [],
+        "objects": list(objects),
+        **extra,
+    }
 
 
 def _object(cat, x=0.0, z=0.0, size=None, confidence="high", ident=None):
     sx, sy, sz = size or default_size(roomplan._snake(cat))
-    return {"identifier": ident or cat, "category": {cat: {}}, "confidence": {confidence: {}},
-            "dimensions": [sx, sz, sy], "transform": _t(x, FLOOR_Y + sz / 2, z)}
+    return {
+        "identifier": ident or cat,
+        "category": {cat: {}},
+        "confidence": {confidence: {}},
+        "dimensions": [sx, sz, sy],
+        "transform": _t(x, FLOOR_Y + sz / 2, z),
+    }
 
 
 def _surface(kind, ident, parent, x, y, z, w, h, yaw=0.0, is_open=None):
     cat = {kind: {"isOpen": is_open}} if kind == "door" else {kind: {}}
-    return {"identifier": ident, "parentIdentifier": parent, "category": cat, "confidence": {"high": {}},
-            "dimensions": [w, h, 0], "transform": _t(x, y, z, yaw)}
+    return {
+        "identifier": ident,
+        "parentIdentifier": parent,
+        "category": cat,
+        "confidence": {"high": {}},
+        "dimensions": [w, h, 0],
+        "transform": _t(x, y, z, yaw),
+    }
 
 
 def test_catalog_covers_every_apple_category():
@@ -124,12 +167,23 @@ def test_authored_fixture_portals_sit_on_their_walls(name):
 
 def test_polygon_floor_sets_extent():
     # L-shaped floor polygon in local plane coordinates, wider than the walls on +X.
-    corners = [[-W / 2, -D / 2, 0], [W / 2 + 1, -D / 2, 0], [W / 2 + 1, 0, 0], [W / 2, 0, 0],
-               [W / 2, D / 2, 0], [-W / 2, D / 2, 0]]
+    corners = [
+        [-W / 2, -D / 2, 0],
+        [W / 2 + 1, -D / 2, 0],
+        [W / 2 + 1, 0, 0],
+        [W / 2, 0, 0],
+        [W / 2, D / 2, 0],
+        [-W / 2, D / 2, 0],
+    ]
     # Floor transform: local x -> ARKit x, local y -> ARKit z, local z -> ARKit y.
     m = [1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, FLOOR_Y, 0, 1]
-    floor = {"identifier": "fl", "category": {"floor": {}}, "dimensions": [W + 1, D, 0], "transform": m,
-             "polygonCorners": corners}
+    floor = {
+        "identifier": "fl",
+        "category": {"floor": {}},
+        "dimensions": [W + 1, D, 0],
+        "transform": m,
+        "polygonCorners": corners,
+    }
     b = roomplan.to_bundle(_room(floors=[floor]), "r")
     assert len(b["floors"]) == 1 and b["floors"][0]["z"] == 0.0
     xs = [c[0] for c in b["floors"][0]["corners"]]
@@ -191,8 +245,15 @@ def test_island_needs_walls():
 
 def _two_story_structure():
     ground = _room([_object("sofa", x=1.0)])
-    upper = copy.deepcopy(_room([_object("bed", x=0.5, ident="bed"), _object("chair", x=-1.5, ident="c1"),
-                                 _object("chair", x=-2.0, z=1.0, ident="c2")]))
+    upper = copy.deepcopy(
+        _room(
+            [
+                _object("bed", x=0.5, ident="bed"),
+                _object("chair", x=-1.5, ident="c1"),
+                _object("chair", x=-2.0, z=1.0, ident="c2"),
+            ]
+        )
+    )
     for item in upper["walls"] + upper["floors"] + upper["objects"]:  # second story 3 m up
         item["transform"] = list(item["transform"])
         item["transform"][13] += 3.0
@@ -268,8 +329,19 @@ def test_portal_on_a_curved_wall_names_the_chord_it_sits_on():
     rp = _room()
     radius, a = 4.0, math.radians(72)
     rp["walls"][0]["curve"] = {"startAngle": 0.0, "endAngle": math.pi / 2, "radius": radius}
-    rp["windows"] = [_surface("window", "w1", "north", radius * math.cos(a), FLOOR_Y + 1.5,
-                              -D / 2 + radius * math.sin(a), 0.8, 1.0, yaw=-(a + math.pi / 2))]
+    rp["windows"] = [
+        _surface(
+            "window",
+            "w1",
+            "north",
+            radius * math.cos(a),
+            FLOOR_Y + 1.5,
+            -D / 2 + radius * math.sin(a),
+            0.8,
+            1.0,
+            yaw=-(a + math.pi / 2),
+        )
+    ]
     b = roomplan.to_bundle(rp, "r")
     w = b["windows"][0]
     chords = [s for s in b["walls"] if s["id"] == "north" or s["id"].startswith("north_")]
@@ -290,16 +362,22 @@ def test_wall_polygon_supplies_bounds_and_asymmetric_centres(dimensions, encodin
         # A non-centred local polygon represents exactly the original world wall, including yawed walls.
         cx, cy = 0.75, 0.3
         points = [[-length / 2 + cx, -H / 2 + cy, 0], [length / 2 + cx, H / 2 + cy, 0]]
-        wall["polygonCorners"] = ([p[:2] for p in points] if encoding == "xy" else
-                                  [dict(zip(("x", "y", "z"), p)) for p in points] if encoding == "dict" else points)
+        wall["polygonCorners"] = (
+            [p[:2] for p in points]
+            if encoding == "xy"
+            else [dict(zip(("x", "y", "z"), p)) for p in points]
+            if encoding == "dict"
+            else points
+        )
         m = wall["transform"]
         for row in range(3):
             m[12 + row] -= m[row] * cx + m[4 + row] * cy
         if dimensions == "missing":
             del wall["dimensions"]
         else:
-            wall["dimensions"] = {"zero": [0, 0, 0], "negative": [-1, -1, 0],
-                                  "undersized": [length / 2, H / 2, 0]}[dimensions]
+            wall["dimensions"] = {"zero": [0, 0, 0], "negative": [-1, -1, 0], "undersized": [length / 2, H / 2, 0]}[
+                dimensions
+            ]
     untouched = copy.deepcopy(raw)
     bundle = roomplan.to_bundle(raw, "polygon_walls")
     assert raw == untouched
@@ -326,23 +404,37 @@ def test_matching_or_smaller_wall_polygons_preserve_dimensions_exactly(delta):
     expected = roomplan.to_bundle(raw, "r")
     for wall in raw["walls"]:
         length = wall["dimensions"][0]
-        wall["polygonCorners"] = [[-(length + delta) / 2, -(H + delta) / 2, 0],
-                                  [(length + delta) / 2, (H + delta) / 2, 0]]
+        wall["polygonCorners"] = [
+            [-(length + delta) / 2, -(H + delta) / 2, 0],
+            [(length + delta) / 2, (H + delta) / 2, 0],
+        ]
     assert roomplan.to_bundle(raw, "r") == expected
 
 
 def test_equal_span_asymmetric_polygon_moves_the_wall_without_changing_its_size():
     raw = _room()
     wall = raw["walls"][0]
-    wall["polygonCorners"] = [[-W / 2 + .5, -H / 2 + .25], [W / 2 + .5, H / 2 + .25]]
+    wall["polygonCorners"] = [[-W / 2 + 0.5, -H / 2 + 0.25], [W / 2 + 0.5, H / 2 + 0.25]]
     w = next(w for w in roomplan.to_bundle(raw, "r")["walls"] if w["id"] == "north")
-    assert w["start"] == [0.5, D] and w["end"] == [W + .5, D]
+    assert w["start"] == [0.5, D] and w["end"] == [W + 0.5, D]
     assert w["height"] == H
 
 
-@pytest.mark.parametrize("corner", [[float("nan"), 0, 0], [0, float("inf"), 0], [0, 0, float("-inf")],
-                                     ["bad", 0], [True, 1, 0], [0], [0, 0, 0, 0], {"x": 0},
-                                     {"x": 0, "y": 0, "z": "bad"}, "not-a-point"])
+@pytest.mark.parametrize(
+    "corner",
+    [
+        [float("nan"), 0, 0],
+        [0, float("inf"), 0],
+        [0, 0, float("-inf")],
+        ["bad", 0],
+        [True, 1, 0],
+        [0],
+        [0, 0, 0, 0],
+        {"x": 0},
+        {"x": 0, "y": 0, "z": "bad"},
+        "not-a-point",
+    ],
+)
 def test_invalid_wall_polygon_points_name_the_wall_and_field(corner):
     raw = _room()
     raw["walls"][0]["polygonCorners"] = [[-3, -1], [3, 1], corner]
@@ -365,12 +457,15 @@ def test_degenerate_polygon_cannot_supply_a_missing_height():
         roomplan.to_bundle(raw, "r")
 
 
-@pytest.mark.parametrize(("ids", "expected"), [
-    (["a", "a", "a_2"], ["a", "a_3", "a_2"]),
-    (["a", "a_2", "a", "a_3"], ["a", "a_2", "a_4", "a_3"]),
-    (["a", "a", "a"], ["a", "a_2", "a_3"]),
-    (["a", "a", "a_2", "a_2"], ["a", "a_3", "a_2", "a_2_2"]),
-])
+@pytest.mark.parametrize(
+    ("ids", "expected"),
+    [
+        (["a", "a", "a_2"], ["a", "a_3", "a_2"]),
+        (["a", "a_2", "a", "a_3"], ["a", "a_2", "a_4", "a_3"]),
+        (["a", "a", "a"], ["a", "a_2", "a_3"]),
+        (["a", "a", "a_2", "a_2"], ["a", "a_3", "a_2", "a_2_2"]),
+    ],
+)
 def test_duplicate_ids_do_not_claim_existing_suffixes(ids, expected):
     items = [{"id": ident} for ident in ids]
     roomplan._unique(items)
@@ -381,8 +476,7 @@ def test_roomplan_duplicate_wall_ids_preserve_suffixed_parent():
     raw = _room()
     for wall, ident in zip(raw["walls"], ["a", "a", "a_2", "west"]):
         wall["identifier"] = ident
-    raw["windows"] = [_surface("window", "window", "a_2", W / 2, FLOOR_Y + 1.5, 0,
-                               0.8, 1.0, yaw=math.pi / 2)]
+    raw["windows"] = [_surface("window", "window", "a_2", W / 2, FLOOR_Y + 1.5, 0, 0.8, 1.0, yaw=math.pi / 2)]
     bundle = roomplan.to_bundle(raw, "r")
     assert [wall["id"] for wall in bundle["walls"]] == ["a", "a_3", "a_2", "west"]
     assert bundle["windows"][0]["wall_id"] == "a_2"

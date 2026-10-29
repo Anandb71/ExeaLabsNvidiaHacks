@@ -7,6 +7,7 @@ recorded `failed_stage` `marker` and the reason "the fan-out stopped before this
 result was stored". The missing path was dropped. A non-zero exit stays `run`;
 a missing shard folder is already `fetch`.
 """
+
 import json
 import sys
 

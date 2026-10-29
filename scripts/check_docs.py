@@ -9,6 +9,7 @@ and every task the demo site's "still to do" list names, as "(ID)" or "(ID, ID)"
 Exit 0 when clean, 1 when anything is wrong. Nothing is executed: commands are only parsed with the
 parser that arrival.cli.main() builds.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -88,7 +89,9 @@ def check_command(parser, cmd: str) -> str | None:
 def test_defs(root: Path) -> dict[str, set[str]]:
     defs = {}
     for f in (root / "tests").glob("test_*.py"):
-        defs[f"tests/{f.name}"] = set(re.findall(r"^\s*(?:async\s+)?def\s+(test\w*)", f.read_text(encoding="utf-8"), re.M))
+        defs[f"tests/{f.name}"] = set(
+            re.findall(r"^\s*(?:async\s+)?def\s+(test\w*)", f.read_text(encoding="utf-8"), re.M)
+        )
     return defs
 
 
@@ -180,8 +183,10 @@ def check_labels(doc: Path, root: Path, text: str, consts: dict[tuple[str, str],
             for label, val in LABEL_SENTENCE.findall(sentence):
                 want = consts.get((w, label))
                 if want and want != val.lower():
-                    probs.append(f"{doc.relative_to(root).as_posix()}:{n}: says {w} writes {label}={val.lower()}, "
-                                 f"but the writer sets {want}")
+                    probs.append(
+                        f"{doc.relative_to(root).as_posix()}:{n}: says {w} writes {label}={val.lower()}, "
+                        f"but the writer sets {want}"
+                    )
     return probs
 
 
@@ -193,8 +198,11 @@ def check_todo_counts(root: Path) -> list[str]:
     items = [it for g in todo["groups"] for it in g["items"]]
     want = {k: sum(it["status"] == k for it in items) for k in ("done", "review", "todo", "blocked")}
     want["total"] = len(items)
-    return [f"site/data/todo.json: counts.{k} is {todo['counts'].get(k)}, the items give {n}"
-            for k, n in want.items() if todo["counts"].get(k) != n]
+    return [
+        f"site/data/todo.json: counts.{k} is {todo['counts'].get(k)}, the items give {n}"
+        for k, n in want.items()
+        if todo["counts"].get(k) != n
+    ]
 
 
 def check_continuations(root: Path) -> list[str]:
@@ -209,8 +217,10 @@ def check_continuations(root: Path) -> list[str]:
             if FENCE.match(line):
                 inside = not inside
             elif inside and line.rstrip().endswith("\\\\"):
-                probs.append(f"{doc.relative_to(root).as_posix()}:{n}: line ends in two backslashes; "
-                             f"bash reads a literal backslash and ends the command there")
+                probs.append(
+                    f"{doc.relative_to(root).as_posix()}:{n}: line ends in two backslashes; "
+                    f"bash reads a literal backslash and ends the command there"
+                )
     return probs
 
 
@@ -221,7 +231,9 @@ def check_site_todo(root: Path) -> list[str]:
     js, path = root / "site" / "js" / "sections.js", root / "site" / "data" / "todo.json"
     if not js.exists() or not path.exists():
         return []
-    status = {it["id"]: it["status"] for g in json.loads(path.read_text(encoding="utf-8"))["groups"] for it in g["items"]}
+    status = {
+        it["id"]: it["status"] for g in json.loads(path.read_text(encoding="utf-8"))["groups"] for it in g["items"]
+    }
     probs = []
     for n, line in enumerate(js.read_text(encoding="utf-8").splitlines(), 1):
         for m in SITE_TODO.finditer(line):
@@ -229,7 +241,9 @@ def check_site_todo(root: Path) -> list[str]:
                 if tid not in status:
                     probs.append(f"site/js/sections.js:{n}: {tid} is not an item in site/data/todo.json")
                 elif status[tid] == "done":
-                    probs.append(f"site/js/sections.js:{n}: {tid} is done in site/data/todo.json but listed as still to do")
+                    probs.append(
+                        f"site/js/sections.js:{n}: {tid} is done in site/data/todo.json but listed as still to do"
+                    )
     return probs
 
 

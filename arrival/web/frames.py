@@ -161,7 +161,9 @@ def validate(root: Path) -> dict:
                 raise FramesError("bad_confidence", f"confidence {f.confidence.name} must be an 8-bit grayscale PNG")
             with Image.open(f.confidence) as im:
                 if np.asarray(im).max() > 2:
-                    raise FramesError("bad_confidence", f"confidence {f.confidence.name} must use ARKit levels 0, 1 or 2")
+                    raise FramesError(
+                        "bad_confidence", f"confidence {f.confidence.name} must use ARKit levels 0, 1 or 2"
+                    )
         if m.depth_unit == "m":
             try:
                 head = np.load(f.depth, mmap_mode="r", allow_pickle=False)
@@ -169,11 +171,15 @@ def validate(root: Path) -> dict:
                     head.close()
                     raise ValueError("expected a plain .npy array, not an archive")
             except Exception as e:  # noqa: BLE001
-                raise FramesError("bad_depth", f"depth {f.depth.name} is not a plain .npy array: {type(e).__name__}") from None
+                raise FramesError(
+                    "bad_depth", f"depth {f.depth.name} is not a plain .npy array: {type(e).__name__}"
+                ) from None
             shape, dtype = head.shape, head.dtype
             del head
             if shape != depth_hw or dtype != np.dtype("float32"):
-                raise FramesError("depth_shape", f"depth {f.depth.name} must be float32 {depth_hw}, got {dtype} {shape}")
+                raise FramesError(
+                    "depth_shape", f"depth {f.depth.name} must be float32 {depth_hw}, got {dtype} {shape}"
+                )
         else:
             mode = open_image(f.depth, m.depth_size, "depth")
             if mode not in ("I;16", "I"):

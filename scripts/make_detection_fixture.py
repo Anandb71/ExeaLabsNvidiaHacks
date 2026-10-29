@@ -42,8 +42,9 @@ def fixture_twin(with_mug: bool) -> dict:
     twin = compile_twin(load_room("hero_kitchen", ROOT / "scans"))
     twin["objects"] = []
     if with_mug:
-        twin["objects"].append({"id": "mug_1", "catalog_id": "mug", "label": "mug", "size": MUG_SIZE,
-                                "position": MUG_POSITION, "yaw": 0.0})
+        twin["objects"].append(
+            {"id": "mug_1", "catalog_id": "mug", "label": "mug", "size": MUG_SIZE, "position": MUG_POSITION, "yaw": 0.0}
+        )
     return twin
 
 
@@ -59,14 +60,28 @@ def write(name: str, twin: dict) -> list[dict]:
         fid = f"f{i:03d}"
         Image.fromarray(rgb).save(root / "rgb" / f"{fid}.png")
         Image.fromarray(np.round(depth * 1000).astype(np.uint16)).save(root / "depth" / f"{fid}.png")
-        frames.append({"id": fid, "timestamp": 1.0 + i, "rgb": f"rgb/{fid}.png", "depth": f"depth/{fid}.png",
-                       "intrinsics": {"fx": F, "fy": F, "cx": W / 2, "cy": H / 2},
-                       "camera_to_room": (pose @ _CV_TO_ARKIT).ravel().tolist(), "split": "train"})
+        frames.append(
+            {
+                "id": fid,
+                "timestamp": 1.0 + i,
+                "rgb": f"rgb/{fid}.png",
+                "depth": f"depth/{fid}.png",
+                "intrinsics": {"fx": F, "fy": F, "cx": W / 2, "cy": H / 2},
+                "camera_to_room": (pose @ _CV_TO_ARKIT).ravel().tolist(),
+                "split": "train",
+            }
+        )
         renders.append(depth)
-    manifest = {"schema_version": rgbd.SCHEMA_VERSION, "room_id": "hero_kitchen",
-                "axes": {"camera": rgbd.CAMERA_AXES, "room": rgbd.ROOM_AXES},
-                "arkit_world_to_room": np.eye(4).ravel().tolist(),
-                "rgb_size": [W, H], "depth_size": [W, H], "depth_unit": "mm", "frames": frames}
+    manifest = {
+        "schema_version": rgbd.SCHEMA_VERSION,
+        "room_id": "hero_kitchen",
+        "axes": {"camera": rgbd.CAMERA_AXES, "room": rgbd.ROOM_AXES},
+        "arkit_world_to_room": np.eye(4).ravel().tolist(),
+        "rgb_size": [W, H],
+        "depth_size": [W, H],
+        "depth_unit": "mm",
+        "frames": frames,
+    }
     (root / rgbd.MANIFEST_NAME).write_text(json.dumps(manifest, indent=1) + "\n", encoding="utf-8")
     return [{"frame": f, "depth": d} for f, d in zip(frames, renders)]
 
@@ -75,8 +90,18 @@ def main() -> int:
     empty = write("empty", fixture_twin(False))
     mug = write("mug", fixture_twin(True))
     K = np.array([[F, 0, W / 2], [0, F, H / 2], [0, 0, 1.0]])
-    corners = np.array([[MUG_POSITION[0] + sx * MUG_SIZE[0] / 2, MUG_POSITION[1] + sy * MUG_SIZE[1] / 2,
-                         MUG_POSITION[2] + sz * MUG_SIZE[2] / 2] for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1)])
+    corners = np.array(
+        [
+            [
+                MUG_POSITION[0] + sx * MUG_SIZE[0] / 2,
+                MUG_POSITION[1] + sy * MUG_SIZE[1] / 2,
+                MUG_POSITION[2] + sz * MUG_SIZE[2] / 2,
+            ]
+            for sx in (-1, 1)
+            for sy in (-1, 1)
+            for sz in (-1, 1)
+        ]
+    )
     for name, rows in (("empty", empty), ("mug", mug)):
         for r, e in zip(rows, empty):
             f = r["frame"]
@@ -85,10 +110,20 @@ def main() -> int:
             uv, _ = rgbd.project(corners, K, T)
             box = [float(uv[:, 0].min()), float(uv[:, 1].min()), float(uv[:, 0].max()), float(uv[:, 1].max())]
             diff = np.argwhere(np.abs(np.round(r["depth"] * 1000) - np.round(e["depth"] * 1000)) > 0)
-            seen = None if not len(diff) else [int(diff[:, 1].min()), int(diff[:, 0].min()),
-                                               int(diff[:, 1].max()) + 1, int(diff[:, 0].max()) + 1]
-            print(f"{name}/{f['id']} key={key} projected_box={[round(b, 1) for b in box]} rendered_px={seen} "
-                  f"({len(diff)} px)")
+            seen = (
+                None
+                if not len(diff)
+                else [
+                    int(diff[:, 1].min()),
+                    int(diff[:, 0].min()),
+                    int(diff[:, 1].max()) + 1,
+                    int(diff[:, 0].max()) + 1,
+                ]
+            )
+            print(
+                f"{name}/{f['id']} key={key} projected_box={[round(b, 1) for b in box]} rendered_px={seen} "
+                f"({len(diff)} px)"
+            )
     return 0
 
 

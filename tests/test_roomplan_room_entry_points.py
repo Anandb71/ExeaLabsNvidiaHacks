@@ -1,6 +1,7 @@
 """A phone capture lands as scans/<room>/roomplan.json only. #417 taught sim, eval and fanout to build such a room;
 teleop, both retarget generators and scripts/check_layout.py still read scan.json only and said "no scan for room".
 They now share arrival.twin.compile.room_twin, which builds the same twin `sim` does."""
+
 import importlib.util
 import json
 import shutil
@@ -48,8 +49,9 @@ def test_check_layout_checks_a_phone_capture(scans, capsys):
     assert report["ok"] and report["fixtures"] == 6
 
 
-@pytest.mark.parametrize("module, target", [("arrival.generate.se3_retarget", "generate"),
-                                            ("arrival.generate.retarget", "retarget")])
+@pytest.mark.parametrize(
+    "module, target", [("arrival.generate.se3_retarget", "generate"), ("arrival.generate.retarget", "retarget")]
+)
 def test_retarget_generators_take_a_phone_capture(scans, tmp_path, monkeypatch, module, target):
     mod = importlib.import_module(module)
     seen = {}
@@ -81,6 +83,19 @@ def test_teleop_takes_a_phone_capture(scans, tmp_path, monkeypatch):
 
     monkeypatch.setattr(teleop, "TeleopWindow", Window)
     monkeypatch.setattr(teleop, "run", fake_run)
-    assert teleop.main(["--room", "phone_kitchen", "--scans", str(scans), "--out", str(tmp_path / "out"),
-                        "--operator-usd-per-hour", "2"]) == 0
+    assert (
+        teleop.main(
+            [
+                "--room",
+                "phone_kitchen",
+                "--scans",
+                str(scans),
+                "--out",
+                str(tmp_path / "out"),
+                "--operator-usd-per-hour",
+                "2",
+            ]
+        )
+        == 0
+    )
     assert seen["room"] == "phone_kitchen"

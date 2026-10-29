@@ -20,8 +20,14 @@ def test_families_and_sources(hero_twin):
 
 def test_four_wordings_for_mug_sink(hero_twin):
     tasks = propose(hero_twin)["tasks"]
-    mug = [t for t in tasks if t["family"] == "counter_to_sink" and t["object_id"] == "mug_1"
-           and t["pose_index"] == 0 and t["lighting"] == "neutral"]
+    mug = [
+        t
+        for t in tasks
+        if t["family"] == "counter_to_sink"
+        and t["object_id"] == "mug_1"
+        and t["pose_index"] == 0
+        and t["lighting"] == "neutral"
+    ]
     assert [t["instruction"] for t in mug] == [
         "Pick up the mug from the counter and place it in the sink.",
         "Put the mug in the sink.",
@@ -50,8 +56,13 @@ def _apple_obj(ident, cat, dims, x, y_up, z, yaw_deg=0.0):
     if cat != "wall":  # a RoomPlan object's front is its local +Z (measured on a real scan, kitchen_real_01)
         yaw_deg += 180.0
     c, s = math.cos(math.radians(yaw_deg)), math.sin(math.radians(yaw_deg))
-    return {"identifier": ident, "category": {cat: {}}, "confidence": {"high": {}}, "dimensions": dims,
-            "transform": [c, 0, -s, 0, 0, 1, 0, 0, s, 0, c, 0, x, y_up, z, 1]}
+    return {
+        "identifier": ident,
+        "category": {cat: {}},
+        "confidence": {"high": {}},
+        "dimensions": dims,
+        "transform": [c, 0, -s, 0, 0, 1, 0, 0, s, 0, c, 0, x, y_up, z, 1],
+    }
 
 
 def test_real_format_kitchen_produces_tasks():
@@ -73,10 +84,15 @@ def test_real_format_kitchen_produces_tasks():
         walls.append({**_apple_obj(f"w{i}", "wall", [length, 2.5, 0], px, -0.15, pz, yaw + rot)})
     sx, sz = place(1.5, -0.35)
     tx, tz = place(3.0, -0.35)
-    rp = {"floors": [{"transform": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, -1.4, 0, 1]}], "walls": walls,
-          "objects": [_apple_obj("sink", "sink", [0.6, 0.25, 0.5], sx, -0.55, sz, rot),
-                      _apple_obj("stove", "stove", [0.7, 0.9, 0.65], tx, -0.95, tz, rot),
-                      _apple_obj("ghost", "dishwasher", [0.6, 0.8, 0.6], 1, -1, -1, rot) | {"confidence": {"low": {}}}]}
+    rp = {
+        "floors": [{"transform": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, -1.4, 0, 1]}],
+        "walls": walls,
+        "objects": [
+            _apple_obj("sink", "sink", [0.6, 0.25, 0.5], sx, -0.55, sz, rot),
+            _apple_obj("stove", "stove", [0.7, 0.9, 0.65], tx, -0.95, tz, rot),
+            _apple_obj("ghost", "dishwasher", [0.6, 0.8, 0.6], 1, -1, -1, rot) | {"confidence": {"low": {}}},
+        ],
+    }
     b = roomplan.to_bundle(rp, "k")
     assert {f["category"] for f in b["fixtures"]} == {"sink", "stove"}
     assert all(f["yaw"] == 0.0 for f in b["fixtures"])  # aligned + snapped

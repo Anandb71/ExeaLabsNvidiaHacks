@@ -12,8 +12,10 @@ from arrival.web import static_export
 from arrival.web.static_export import ExportError, export_site, link_check
 
 REPO = Path(__file__).resolve().parents[1]
-PNG = bytes.fromhex("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c6360000002000001"
-                    "e221bc330000000049454e44ae426082")
+PNG = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c6360000002000001"
+    "e221bc330000000049454e44ae426082"
+)
 
 
 @pytest.fixture
@@ -22,12 +24,23 @@ def out(tmp_path):
     o = tmp_path / "out"
     meta = o / "datasets" / "hero_kitchen_sim" / "meta"
     meta.mkdir(parents=True)
-    (meta / "info.json").write_text(json.dumps({"total_episodes": 3, "arrival_successes": 3, "arrival_attempts": 4,
-                                                "arrival_physically_valid": True, "arrival_generator": "mujoco_scripted_ik",
-                                                "fps": 20}))
+    (meta / "info.json").write_text(
+        json.dumps(
+            {
+                "total_episodes": 3,
+                "arrival_successes": 3,
+                "arrival_attempts": 4,
+                "arrival_physically_valid": True,
+                "arrival_generator": "mujoco_scripted_ik",
+                "fps": 20,
+            }
+        )
+    )
     (o / "datasets" / "hero_kitchen_sim" / "data.bin").write_bytes(b"x" * 100)
     (o / "reports").mkdir()
-    (o / "reports" / "hero_kitchen_sim.json").write_text(json.dumps({"attempts": 4, "successes": 3, "human_contacts": 0}))
+    (o / "reports" / "hero_kitchen_sim.json").write_text(
+        json.dumps({"attempts": 4, "successes": 3, "human_contacts": 0})
+    )
     (o / "previews").mkdir()
     (o / "previews" / "hero_kitchen_sim_contact.png").write_bytes(PNG)
     (o / "previews" / "hero_kitchen_sim_overview.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42")

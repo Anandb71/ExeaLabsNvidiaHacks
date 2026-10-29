@@ -1,4 +1,5 @@
 """Paired robot and external views must describe the same simulated observations."""
+
 import json
 
 import imageio.v2 as imageio
@@ -28,6 +29,7 @@ def test_observations_render_all_views_before_stepping(hero_twin):
 
     task = make_tasks(hero_twin, ["open_drawer"], 1, people=0)[0]
     from arrival.sim.tasks import finish_task
+
     finish_task(task)
     with SimEnv(hero_twin, task, res=32, cameras=CAMS) as env:
         before = env.data.qpos.copy()
@@ -48,8 +50,18 @@ def paired(tmp_path_factory):
 
     twin = compile_twin(load_room("hero_kitchen", "scans"))
     root = tmp_path_factory.mktemp("paired")
-    result = collect(twin, ["open_drawer"], 1, root, people=0, res=64, seed=3,
-                     exocentric=True, save_preview=True, log=lambda *_: None)
+    result = collect(
+        twin,
+        ["open_drawer"],
+        1,
+        root,
+        people=0,
+        res=64,
+        seed=3,
+        exocentric=True,
+        save_preview=True,
+        log=lambda *_: None,
+    )
     assert result["report_data"]["successes"] == 1
     return twin, root, result
 
@@ -89,8 +101,9 @@ def test_resume_cannot_mix_camera_sets(paired):
     twin, root, _ = paired
     with pytest.raises(ShardError, match="cameras"):
         collect(twin, ["open_drawer"], 1, root, people=0, res=64, seed=3, resume=True, log=lambda *_: None)
-    resumed = collect(twin, ["open_drawer"], 1, root, people=0, res=64, seed=3,
-                      exocentric=True, resume=True, log=lambda *_: None)
+    resumed = collect(
+        twin, ["open_drawer"], 1, root, people=0, res=64, seed=3, exocentric=True, resume=True, log=lambda *_: None
+    )
     assert resumed["report_data"]["resumed_tasks"] == 1 and validate(resumed["dataset"]) == []
 
 
@@ -109,8 +122,11 @@ def test_writer_rejects_desynchronized_video_before_writing(tmp_path):
     from arrival.sim.export import SimDatasetWriter
 
     writer = SimDatasetWriter(tmp_path / "ds", "room", 20, 32, CAMS)
-    ep = {"states": np.zeros((3, 11)), "actions": np.zeros((3, 11)),
-          "videos": {c: np.zeros((3 if c != "overview" else 2, 32, 32, 3), dtype=np.uint8) for c in CAMS}}
+    ep = {
+        "states": np.zeros((3, 11)),
+        "actions": np.zeros((3, 11)),
+        "videos": {c: np.zeros((3 if c != "overview" else 2, 32, 32, 3), dtype=np.uint8) for c in CAMS},
+    }
     with pytest.raises(ValueError, match="overview"):
         writer.add_episode(ep, {"instruction": "open", "family": "open_drawer"})
     assert not list(writer.root.glob("data/**/*.parquet")) and not writer.episodes and not writer.stats
@@ -121,6 +137,7 @@ def test_run_episode_preserves_same_number_of_frames_per_camera(hero_twin):
 
     task = make_tasks(hero_twin, ["open_drawer"], 1, people=0)[0]
     from arrival.sim.tasks import finish_task
+
     finish_task(task)
     ep = run_episode(SimEnv(hero_twin, task, res=32, cameras=CAMS), ScriptedExpert(), task)
     assert {v.shape[0] for v in ep["videos"].values()} == {len(ep["states"])}
@@ -129,8 +146,18 @@ def test_run_episode_preserves_same_number_of_frames_per_camera(hero_twin):
 
 def test_merge_keeps_exocentric_video_and_metadata(hero_twin, tmp_path):
     for i in range(2):
-        result = collect(hero_twin, ["open_drawer"], 2, tmp_path, people=0, res=32, seed=3,
-                         exocentric=True, shard=(i, 2), log=lambda *_: None)
+        result = collect(
+            hero_twin,
+            ["open_drawer"],
+            2,
+            tmp_path,
+            people=0,
+            res=32,
+            seed=3,
+            exocentric=True,
+            shard=(i, 2),
+            log=lambda *_: None,
+        )
         assert result["report_data"]["successes"] == 1
     merged = merge_shards([tmp_path / "shards"], tmp_path / "merged", log=lambda *_: None)
     assert validate(merged["dataset"]) == [] and merged["info"]["total_videos"] == 6
@@ -150,13 +177,16 @@ def test_writer_rejects_bad_camera_arrays_before_writing(tmp_path, fault):
     else:
         videos["overview"] = videos["overview"].astype(float)
     with pytest.raises(ValueError, match="overview"):
-        writer.add_episode({"states": np.zeros((3, 11)), "actions": np.zeros((3, 11)), "videos": videos},
-                           {"instruction": "open", "family": "open_drawer"})
+        writer.add_episode(
+            {"states": np.zeros((3, 11)), "actions": np.zeros((3, 11)), "videos": videos},
+            {"instruction": "open", "family": "open_drawer"},
+        )
     assert not list(writer.root.glob("data/**/*.parquet")) and not writer.stats and not writer.episodes
 
 
 def test_paired_preview_png_preserves_matching_frame_pixels(tmp_path):
     from PIL import Image
+
     from arrival.render.multiview import write_paired_preview
 
     ego = np.zeros((3, 32, 32, 3), dtype=np.uint8)

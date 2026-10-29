@@ -30,11 +30,14 @@ def test_unproject_known_pixel_roundtrips():
     assert np.allclose(uv[0], [52, 14], atol=1e-6) and abs(d[0] - 2.0) < 1e-6
 
 
-@pytest.mark.parametrize("eye,target,up,reason", [
-    ((1, 2, 3), (1, 2, 3), (0, 0, 1), "distinct"),
-    ((0, 0, 0), (0, 0, 1), (0, 0, 1), "parallel"),
-    ((float("nan"), 0, 0), (1, 0, 0), (0, 0, 1), "finite"),
-])
+@pytest.mark.parametrize(
+    "eye,target,up,reason",
+    [
+        ((1, 2, 3), (1, 2, 3), (0, 0, 1), "distinct"),
+        ((0, 0, 0), (0, 0, 1), (0, 0, 1), "parallel"),
+        ((float("nan"), 0, 0), (1, 0, 0), (0, 0, 1), "finite"),
+    ],
+)
 def test_look_at_rejects_degenerate_camera_poses(eye, target, up, reason):
     with pytest.raises(ValueError, match=reason):
         rgbd.look_at(eye, target, up)
@@ -52,20 +55,25 @@ def test_synthetic_bundle_points_land_on_floor_plane(tmp_path, unit):
         assert np.abs(floor[:, 2]).max() < 1e-3  # 1 mm, also covers the mm PNG quantisation
 
 
-@pytest.mark.parametrize("mutate,code", [
-    (lambda m: m.update(depth_unit="mm"), "depth_unit"),  # files are .npy
-    (lambda m: m["frames"][1].update(timestamp=0.5), "non_monotonic_timestamps"),
-    (lambda m: m["frames"][0].update(camera_to_room=[2, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
-     "non_orthonormal_rotation"),
-    (lambda m: m["frames"][0].update(rgb="rgb/nope.png"), "missing_file"),
-    (lambda m: m.update(splits={"train": ["f000"], "heldout": ["f000", "f001"]}), "frame_in_both_splits"),
-    (lambda m: m["axes"].update(camera="opencv"), "axis_convention"),
-    (lambda m: m["frames"][0].update(camera_to_room=[float("nan")] * 16), "nonfinite_transform"),
-    (lambda m: m.update(rgb_size=[True, 48]), "bad_size"),
-    (lambda m: m.update(depth_size=[64, True]), "bad_size"),
-    (lambda m: m["frames"][0]["intrinsics"].update(fx=True), "intrinsics"),
-    (lambda m: m["frames"][0]["intrinsics"].update(cx="32"), "intrinsics"),
-])
+@pytest.mark.parametrize(
+    "mutate,code",
+    [
+        (lambda m: m.update(depth_unit="mm"), "depth_unit"),  # files are .npy
+        (lambda m: m["frames"][1].update(timestamp=0.5), "non_monotonic_timestamps"),
+        (
+            lambda m: m["frames"][0].update(camera_to_room=[2, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
+            "non_orthonormal_rotation",
+        ),
+        (lambda m: m["frames"][0].update(rgb="rgb/nope.png"), "missing_file"),
+        (lambda m: m.update(splits={"train": ["f000"], "heldout": ["f000", "f001"]}), "frame_in_both_splits"),
+        (lambda m: m["axes"].update(camera="opencv"), "axis_convention"),
+        (lambda m: m["frames"][0].update(camera_to_room=[float("nan")] * 16), "nonfinite_transform"),
+        (lambda m: m.update(rgb_size=[True, 48]), "bad_size"),
+        (lambda m: m.update(depth_size=[64, True]), "bad_size"),
+        (lambda m: m["frames"][0]["intrinsics"].update(fx=True), "intrinsics"),
+        (lambda m: m["frames"][0]["intrinsics"].update(cx="32"), "intrinsics"),
+    ],
+)
 def test_malformed_manifest_rejected_with_distinct_code(tmp_path, mutate, code):
     root = rgbd.write_synthetic_bundle(tmp_path)
     _edit(root, mutate)
@@ -74,7 +82,7 @@ def test_malformed_manifest_rejected_with_distinct_code(tmp_path, mutate, code):
     assert e.value.code == code and str(e.value).startswith(code + ":")
 
 
-@pytest.mark.parametrize("body", ['[]', '{"schema_version": 1, "room_id": "a", "axes": [1]}'])
+@pytest.mark.parametrize("body", ["[]", '{"schema_version": 1, "room_id": "a", "axes": [1]}'])
 def test_non_object_manifest_raises_manifest_error(tmp_path, body):
     (tmp_path / rgbd.MANIFEST_NAME).write_text(body)
     with pytest.raises(rgbd.ManifestError):
@@ -126,12 +134,16 @@ def test_nul_in_a_frame_path_is_a_bad_path(tmp_path, key):
         rgbd.load_manifest(root)
     assert e.value.code == "bad_path"
 
-@pytest.mark.parametrize("splits", [
-    {"train": [], "heldout": ["f001"]},
-    {"train": ["f000", "unknown"], "heldout": ["f001"]},
-    {"train": ["f000", "f000"], "heldout": ["f001"]},
-    {"train": "f000", "heldout": ["f001"]},
-])
+
+@pytest.mark.parametrize(
+    "splits",
+    [
+        {"train": [], "heldout": ["f001"]},
+        {"train": ["f000", "unknown"], "heldout": ["f001"]},
+        {"train": ["f000", "f000"], "heldout": ["f001"]},
+        {"train": "f000", "heldout": ["f001"]},
+    ],
+)
 def test_explicit_split_lists_must_match_every_frame(tmp_path, splits):
     root = rgbd.write_synthetic_bundle(tmp_path)
     _edit(root, lambda m: m.update(splits=splits))
@@ -140,28 +152,37 @@ def test_explicit_split_lists_must_match_every_frame(tmp_path, splits):
     assert e.value.code == "split"
 
 
-@pytest.mark.parametrize(("field", "code"), [
-    ("timestamp", "timestamp"), ("fx", "intrinsics"), ("fy", "intrinsics"),
-    ("cx", "intrinsics"), ("world", "bad_matrix"), ("pose", "bad_matrix"),
-])
+@pytest.mark.parametrize(
+    ("field", "code"),
+    [
+        ("timestamp", "timestamp"),
+        ("fx", "intrinsics"),
+        ("fy", "intrinsics"),
+        ("cx", "intrinsics"),
+        ("world", "bad_matrix"),
+        ("pose", "bad_matrix"),
+    ],
+)
 def test_oversized_numbers_raise_manifest_error(tmp_path, field, code):
     root = rgbd.write_synthetic_bundle(tmp_path)
 
     def mutate(manifest):
         frame = manifest["frames"][0]
         if field == "timestamp":
-            frame[field] = 10 ** 400
+            frame[field] = 10**400
         elif field == "world":
-            manifest["arkit_world_to_room"][0] = 10 ** 400
+            manifest["arkit_world_to_room"][0] = 10**400
         elif field == "pose":
-            frame["camera_to_room"][0] = 10 ** 400
+            frame["camera_to_room"][0] = 10**400
         else:
-            frame["intrinsics"][field] = 10 ** 400
+            frame["intrinsics"][field] = 10**400
 
     _edit(root, mutate)
     with pytest.raises(rgbd.ManifestError) as error:
         rgbd.load_manifest(root)
     assert error.value.code == code
+
+
 @pytest.mark.parametrize("content", [b"\xff", b'{"room_id":"\xff"}'])
 def test_manifest_invalid_utf8_is_a_bad_json_error(tmp_path, content):
     (tmp_path / rgbd.MANIFEST_NAME).write_bytes(content)

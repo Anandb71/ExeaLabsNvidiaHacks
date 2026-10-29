@@ -22,13 +22,14 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from arrival.catalog.objects import OBJECT_SPECS  # noqa: E402
+from arrival.catalog.categories import OBJECT_SPECS  # noqa: E402
 from arrival.scan import bundle as scan_bundle  # noqa: E402
 from arrival.sim import robot  # noqa: E402
-from arrival.sim.collect import FPS, SUBSTEPS, SimEnv, run_episode  # noqa: E402
+from arrival.sim.collect import SimEnv, run_episode  # noqa: E402
 from arrival.sim.export import BASE_SLICE  # noqa: E402
 from arrival.sim.people import limb_segments  # noqa: E402
 from arrival.sim.policy import ScriptedExpert  # noqa: E402
+from arrival.sim.robot import FPS, SUBSTEPS  # noqa: E402
 from arrival.sim.scene import build_mjcf, part_names  # noqa: E402
 from arrival.sim.tasks import finish_task, make_tasks  # noqa: E402
 from arrival.twin.compile import compile_twin  # noqa: E402
@@ -44,8 +45,23 @@ VISIBLE_GROUPS = (0, 1, 2)  # group 3 holds the hidden collision geoms
 SCAN_POINTS = 20_000
 SCAN_STEP = 0.001  # quantisation of scan points, metres
 GEOM_SIZE_N = {"box": 3, "sphere": 1, "capsule": 2, "cylinder": 2, "plane": 3, "ellipsoid": 3}
-LIMBS = tuple(limb_segments({"hip_w": 0, "hip_z": 0, "thigh": 1, "shank": 1, "foot": 1, "shoulder_w": 0,
-                             "shoulder_z": 0, "upper_arm": 1, "forearm": 1}, 0.0, 0.0))
+LIMBS = tuple(
+    limb_segments(
+        {
+            "hip_w": 0,
+            "hip_z": 0,
+            "thigh": 1,
+            "shank": 1,
+            "foot": 1,
+            "shoulder_w": 0,
+            "shoulder_z": 0,
+            "upper_arm": 1,
+            "forearm": 1,
+        },
+        0.0,
+        0.0,
+    )
+)
 
 
 # ---------------------------------------------------------------- helpers
@@ -102,8 +118,11 @@ def geom_entry(m, g: int, identity: bool = False) -> dict:
 
 
 def visible_geoms(m, body: int) -> list[int]:
-    return [g for g in range(m.ngeom) if m.geom_bodyid[g] == body and m.geom_group[g] in VISIBLE_GROUPS
-            and m.geom_rgba[g][3] > 0]
+    return [
+        g
+        for g in range(m.ngeom)
+        if m.geom_bodyid[g] == body and m.geom_group[g] in VISIBLE_GROUPS and m.geom_rgba[g][3] > 0
+    ]
 
 
 def is_person(m, b: int) -> bool:
@@ -126,20 +145,35 @@ def export_geoms(m) -> tuple[dict, dict, dict]:
             persons[name] = {"parent": "world", "role": "person", "geoms": [geom_entry(m, g) for g in torso]}
             for g in gs:
                 if g not in torso:
-                    persons[m.geom(g).name] = {"parent": name, "role": "person_limb",
-                                               "geoms": [geom_entry(m, g, identity=True)]}
+                    persons[m.geom(g).name] = {
+                        "parent": name,
+                        "role": "person_limb",
+                        "geoms": [geom_entry(m, g, identity=True)],
+                    }
         else:
             bodies[name] = {"parent": parent, "geoms": [geom_entry(m, g) for g in gs]}
     for c in range(m.ncam):
-        cams[m.camera(c).name] = {"fovy": rnd(m.cam_fovy[c], 2), "body": m.body(int(m.cam_bodyid[c])).name
-                                  if m.cam_bodyid[c] else "world", "node": f"cam:{m.camera(c).name}"}
+        cams[m.camera(c).name] = {
+            "fovy": rnd(m.cam_fovy[c], 2),
+            "body": m.body(int(m.cam_bodyid[c])).name if m.cam_bodyid[c] else "world",
+            "node": f"cam:{m.camera(c).name}",
+        }
     return bodies, persons, cams
 
 
 def export_lights(m) -> list[dict]:
-    return [{"name": m.light(i).name, "directional": bool(m.light_type[i] == mujoco.mjtLightType.mjLIGHT_DIRECTIONAL), "pos": rnd(m.light_pos[i], 3),
-             "dir": rnd(m.light_dir[i], 3), "diffuse": rnd(m.light_diffuse[i], 3), "cutoff": rnd(m.light_cutoff[i], 1),
-             "castshadow": bool(m.light_castshadow[i])} for i in range(m.nlight)]
+    return [
+        {
+            "name": m.light(i).name,
+            "directional": bool(m.light_type[i] == mujoco.mjtLightType.mjLIGHT_DIRECTIONAL),
+            "pos": rnd(m.light_pos[i], 3),
+            "dir": rnd(m.light_dir[i], 3),
+            "diffuse": rnd(m.light_diffuse[i], 3),
+            "cutoff": rnd(m.light_cutoff[i], 1),
+            "castshadow": bool(m.light_castshadow[i]),
+        }
+        for i in range(m.nlight)
+    ]
 
 
 # ---------------------------------------------------------------- pose recording
@@ -158,8 +192,11 @@ class Recorder:
                 self.body_nodes.append((m.body(b).name, b))
         for b in range(1, m.nbody):
             if is_person(m, b):
-                self.limb_nodes += [(m.geom(g).name, g) for g in visible_geoms(m, b)
-                                    if any(m.geom(g).name.endswith("_" + k) for k in LIMBS)]
+                self.limb_nodes += [
+                    (m.geom(g).name, g)
+                    for g in visible_geoms(m, b)
+                    if any(m.geom(g).name.endswith("_" + k) for k in LIMBS)
+                ]
         self.cam_nodes = [(f"cam:{m.camera(c).name}", c) for c in range(m.ncam)]
         self.names = [n for n, _ in self.body_nodes] + [n for n, _ in self.limb_nodes] + [n for n, _ in self.cam_nodes]
         self.pos, self.quat, self.states, self.people_xy, self.joint_q = [], [], [], [], []
@@ -174,11 +211,16 @@ class Recorder:
             d2.mocap_quat[:] = d.mocap_quat
         mujoco.mj_kinematics(m, d2)
         mujoco.mj_camlight(m, d2)
-        p = [d2.xpos[b].copy() for _, b in self.body_nodes] + [d2.geom_xpos[g].copy() for _, g in self.limb_nodes] \
+        p = (
+            [d2.xpos[b].copy() for _, b in self.body_nodes]
+            + [d2.geom_xpos[g].copy() for _, g in self.limb_nodes]
             + [d2.cam_xpos[c].copy() for _, c in self.cam_nodes]
-        q = [d2.xquat[b].copy() for _, b in self.body_nodes] \
-            + [mat_to_quat(d2.geom_xmat[g]) for _, g in self.limb_nodes] \
+        )
+        q = (
+            [d2.xquat[b].copy() for _, b in self.body_nodes]
+            + [mat_to_quat(d2.geom_xmat[g]) for _, g in self.limb_nodes]
             + [mat_to_quat(d2.cam_xmat[c]) for _, c in self.cam_nodes]
+        )
         self.pos.append(p)
         self.quat.append(q)
         self.states.append(env.state().astype(np.float64))
@@ -231,16 +273,18 @@ def pack_episode(rec: Recorder, fps: int) -> dict:
     static = {rec.names[i]: rnd(list(P[0, i]) + list(Q[0, i]), 4) for i in range(len(rec.names)) if not moves[i]}
     frames = np.concatenate([P[:, dyn], Q[:, dyn]], axis=-1).reshape(P.shape[0], -1)  # per node: x y z qw qx qy qz
     # arm joints and gripper only: the site reads 8 values per frame; the sim state also carries the base pose
-    states = np.round(resample(np.array(rec.states)[:, :BASE_SLICE["start"]], FPS, fps), 4)
+    states = np.round(resample(np.array(rec.states)[:, : BASE_SLICE["start"]], FPS, fps), 4)
     return {
         "n_frames": int(P.shape[0]),
         "nodes": {"dynamic": [rec.names[i] for i in dyn], "static": static},
         "frames": rnd(frames, 4),
         "joint_states": rnd(states, 4),
         "people_xy": rnd(np.round(resample(np.array(rec.people_xy, dtype=np.float64), FPS, fps), 3), 3)
-        if PEOPLE else [],
+        if PEOPLE
+        else [],
         "task_joint_q": rnd(np.round(resample(np.array(rec.joint_q)[:, None], FPS, fps)[:, 0], 4), 4)
-        if rec.joint_q else None,
+        if rec.joint_q
+        else None,
     }
 
 
@@ -252,8 +296,10 @@ def simulate_scan(twin: dict, seed: int = 7) -> tuple[bytes, dict]:
     xml = build_mjcf(twin, (2.0, 1.5, 0.75), 0.0, None, "neutral", 0)
     m = mujoco.MjModel.from_xml_string(xml)
     d = mujoco.MjData(m)
-    robot_bodies = {m.body(n).id for n in ("robot_base",) + tuple(f"link{i}" for i in range(1, 8))
-                    + ("hand", "finger_l", "finger_r")}
+    robot_bodies = {
+        m.body(n).id
+        for n in ("robot_base",) + tuple(f"link{i}" for i in range(1, 8)) + ("hand", "finger_l", "finger_r")
+    }
     for g in range(m.ngeom):
         if int(m.geom_bodyid[g]) in robot_bodies:
             m.geom_group[g] = 5  # excluded by the ray mask below
@@ -266,7 +312,7 @@ def simulate_scan(twin: dict, seed: int = 7) -> tuple[bytes, dict]:
     n_rays = 14_000
     i = np.arange(n_rays) + 0.5
     phi = np.arccos(1 - 2 * i / n_rays)
-    theta = math.pi * (1 + 5 ** 0.5) * i
+    theta = math.pi * (1 + 5**0.5) * i
     dirs = np.stack([np.cos(theta) * np.sin(phi), np.sin(theta) * np.sin(phi), np.cos(phi)], 1)
     dirs = dirs[dirs[:, 2] < 0.6]  # the twin has no ceiling; a scanner would not aim far above the horizon
     pts, cols = [], []
@@ -292,15 +338,25 @@ def simulate_scan(twin: dict, seed: int = 7) -> tuple[bytes, dict]:
     rgb8 = np.round(cols * 255).astype(np.uint8)
     rec = np.zeros(len(q), dtype=[("xyz", "<u2", 3), ("rgb", "u1", 3)])
     rec["xyz"], rec["rgb"] = q, rgb8
-    meta = {"file": "scan_points.bin", "count": int(len(q)), "bytes_per_point": 9,
-            "record": "uint16 x, uint16 y, uint16 z (little endian), uint8 r, uint8 g, uint8 b",
-            "decode": "position_m = origin + uint16 * scale", "origin": rnd(origin, 4), "scale": SCAN_STEP,
-            "bounds_min": rnd(pts.min(0), 3), "bounds_max": rnd(pts.max(0), 3),
-            "stations": rnd([list(s) for s in stations], 3), "rays_per_station": int(len(dirs)),
-            "noise": {"range_sigma_m": "0.003 + 0.0025 * range", "lateral_sigma_m": 0.002, "colour_jitter": 0.04},
-            "max_range_m": 7.0, "seed": seed, "frame": "MuJoCo z-up, metres, same as rooms.json",
-            "note": "Simulated from the compiled twin (not a real iPhone capture): ray hits on visible geoms, robot and "
-                    "people excluded."}
+    meta = {
+        "file": "scan_points.bin",
+        "count": int(len(q)),
+        "bytes_per_point": 9,
+        "record": "uint16 x, uint16 y, uint16 z (little endian), uint8 r, uint8 g, uint8 b",
+        "decode": "position_m = origin + uint16 * scale",
+        "origin": rnd(origin, 4),
+        "scale": SCAN_STEP,
+        "bounds_min": rnd(pts.min(0), 3),
+        "bounds_max": rnd(pts.max(0), 3),
+        "stations": rnd([list(s) for s in stations], 3),
+        "rays_per_station": int(len(dirs)),
+        "noise": {"range_sigma_m": "0.003 + 0.0025 * range", "lateral_sigma_m": 0.002, "colour_jitter": 0.04},
+        "max_range_m": 7.0,
+        "seed": seed,
+        "frame": "MuJoCo z-up, metres, same as rooms.json",
+        "note": "Simulated from the compiled twin (not a real iPhone capture): ray hits on visible geoms, robot and "
+        "people excluded.",
+    }
     return rec.tobytes(), meta
 
 
@@ -315,7 +371,9 @@ def rooms_json(twin: dict, bodies: dict) -> dict:
 
     fixtures = []
     for f in twin["fixtures"]:
-        main = next((geom_rgba(f"{f['id']}_{s}") for s in ("carcass", "box", "bottom") if geom_rgba(f"{f['id']}_{s}")), None)
+        main = next(
+            (geom_rgba(f"{f['id']}_{s}") for s in ("carcass", "box", "bottom") if geom_rgba(f"{f['id']}_{s}")), None
+        )
         top = geom_rgba(f"{f['id']}_top") or geom_rgba(f"{f['id']}_top_l")
         e = {k: f[k] for k in ("id", "type", "source_category", "size", "position", "yaw") if k in f}
         e["island"] = bool(f.get("island", False))
@@ -327,14 +385,31 @@ def rooms_json(twin: dict, bodies: dict) -> dict:
     parts = part_names(twin)
     xs = [p for w in twin["walls"] for p in (w["start"][0], w["end"][0])]
     ys = [p for w in twin["walls"] for p in (w["start"][1], w["end"][1])]
-    catalogue = {k: {"shape": v[0], "nominal_size": v[1], "mass_kg": v[2], "friction": v[3], "rgba": v[4],
-                     "colour": hexcolour([float(c) for c in v[4].split()])} for k, v in OBJECT_SPECS.items()}
+    catalogue = {
+        k: {
+            "shape": v[0],
+            "nominal_size": v[1],
+            "mass_kg": v[2],
+            "friction": v[3],
+            "rgba": v[4],
+            "colour": hexcolour([float(c) for c in v[4].split()]),
+        }
+        for k, v in OBJECT_SPECS.items()
+    }
     return {
-        "room_id": twin["room_id"], "geometry_source": twin["geometry_source"], "frame": "z_up", "units": "meters",
+        "room_id": twin["room_id"],
+        "geometry_source": twin["geometry_source"],
+        "frame": "z_up",
+        "units": "meters",
         "bounds": {"min": [min(xs), min(ys), 0.0], "max": [max(xs), max(ys), max(w["height"] for w in twin["walls"])]},
-        "wall_colour": hexcolour([0.93, 0.91, 0.86]), "floor_colour": "#ad9c87",
-        "walls": twin["walls"], "fixtures": fixtures, "parts": parts,
-        "objects": [{**o, "colour": catalogue.get(o["catalog_id"], {}).get("colour", "#8080e6")} for o in twin["objects"]],
+        "wall_colour": hexcolour([0.93, 0.91, 0.86]),
+        "floor_colour": "#ad9c87",
+        "walls": twin["walls"],
+        "fixtures": fixtures,
+        "parts": parts,
+        "objects": [
+            {**o, "colour": catalogue.get(o["catalog_id"], {}).get("colour", "#8080e6")} for o in twin["objects"]
+        ],
         "object_catalogue": catalogue,
     }
 
@@ -351,6 +426,7 @@ def run_one(twin: dict, task: dict, out: Path, previews: Path) -> dict:
     packed = pack_episode(rec, OUT_FPS)
     # preview PNGs: ego_view and wrist at mid-episode and at the end
     from PIL import Image
+
     n = len(rec.pos)
     for label, frac in (("mid", 0.35), ("end", 1.0)):
         want = int(round(frac * (n - 1)))
@@ -359,20 +435,31 @@ def run_one(twin: dict, task: dict, out: Path, previews: Path) -> dict:
         Image.fromarray(wr).save(previews / f"{task['family']}_wrist_{label}.png", optimize=True)
     s = ep["safety"]
     doc = {
-        "family": task["family"], "task_id": task["task_id"], "instruction": task["instruction"],
-        "seed": task["seed"], "lighting": task["lighting"], "people": task.get("people", 0),
-        "success": bool(ep["success"]), "human_contact": bool(s["human_contact"]),
-        "physics_detail": ep["detail"], "min_human_distance_m": s["min_human_distance_m"], "safety": s,
-        "ik_error": ep["ik_error"], "fridge_visit": ep["fridge_visit"],
-        "fps": OUT_FPS, "source_control_hz": FPS, "physics_hz": round(FPS * SUBSTEPS),
+        "family": task["family"],
+        "task_id": task["task_id"],
+        "instruction": task["instruction"],
+        "seed": task["seed"],
+        "lighting": task["lighting"],
+        "people": task.get("people", 0),
+        "success": bool(ep["success"]),
+        "human_contact": bool(s["human_contact"]),
+        "physics_detail": ep["detail"],
+        "min_human_distance_m": s["min_human_distance_m"],
+        "safety": s,
+        "ik_error": ep["ik_error"],
+        "fridge_visit": ep["fridge_visit"],
+        "fps": OUT_FPS,
+        "source_control_hz": FPS,
+        "physics_hz": round(FPS * SUBSTEPS),
         "duration_s": round((packed["n_frames"] - 1) / OUT_FPS, 3),
         "frame_layout": "frames[t] = [x,y,z,qw,qx,qy,qz] for each name in nodes.dynamic, concatenated per node "
-                        "(positions are 3 numbers followed by 4 quaternion numbers: 7 numbers per node)",
+        "(positions are 3 numbers followed by 4 quaternion numbers: 7 numbers per node)",
         "frame": "MuJoCo z-up, metres, quaternion order w,x,y,z, world poses of body frames",
         **packed,
         "joint_names": robot.ARM_JOINTS + ["gripper_opening_m"],
-        "task": {k: task[k] for k in ("fixture", "object_id", "source", "target", "start", "joint", "handle")
-                 if k in task},
+        "task": {
+            k: task[k] for k in ("fixture", "object_id", "source", "target", "start", "joint", "handle") if k in task
+        },
         "lights": lights,
         "person_geoms": geoms[1],
     }
@@ -498,7 +585,9 @@ def main(argv=None) -> int:
     ap.add_argument("--room", default="hero_kitchen")
     ap.add_argument("--scans", default="scans")
     ap.add_argument("--seed", type=int, default=5)
-    ap.add_argument("--scratch", default="out/demo_export", help="scratch dir for the dataset, eval and reports (git-ignored)")
+    ap.add_argument(
+        "--scratch", default="out/demo_export", help="scratch dir for the dataset, eval and reports (git-ignored)"
+    )
     ap.add_argument("--families", default=",".join(FAMILIES))
     ap.add_argument("--skip-dataset", action="store_true")
     a = ap.parse_args(argv)
@@ -534,7 +623,7 @@ def main(argv=None) -> int:
             skipped[fam] = "no reachable variation in this room for the fixed-base arm"
     tasks = [finish_task(t) for t in make_tasks(twin, reachable, len(reachable), seed=a.seed, people=PEOPLE, log=log)]
 
-    fam_stats, all_bodies, bytes_by_file, attempted, exported = {}, [], {}, 0, 0
+    fam_stats, all_bodies, attempted, exported = {}, [], 0, 0
     for task in tasks:
         fam = task["family"]
         attempted += 1
@@ -545,9 +634,11 @@ def main(argv=None) -> int:
             log(f"[export] {fam}: ERROR {skipped[fam]}")
             continue
         d = r["doc"]
-        log(f"[export] {fam}: success={d['success']} contact={d['human_contact']} frames={d['n_frames']} "
+        log(
+            f"[export] {fam}: success={d['success']} contact={d['human_contact']} frames={d['n_frames']} "
             f"nodes={len(d['nodes']['dynamic'])} dyn/{len(d['nodes']['static'])} static {d['physics_detail']} "
-            f"min_human_d={d['min_human_distance_m']} {r['bytes'] / 1e3:.0f} kB")
+            f"min_human_d={d['min_human_distance_m']} {r['bytes'] / 1e3:.0f} kB"
+        )
         if not d["success"] or d["human_contact"]:
             (out / "episodes" / f"{fam}.json").unlink()
             for pth in (out / "frames").glob(f"{fam}_*"):
@@ -556,11 +647,20 @@ def main(argv=None) -> int:
             continue
         exported += 1
         all_bodies.append(r["geoms"])
-        fam_stats[fam] = {"exported": True, "success": d["success"], "human_contact": d["human_contact"],
-                          "frames": d["n_frames"], "duration_s": d["duration_s"],
-                          "min_human_distance_m": d["min_human_distance_m"], "physics_detail": d["physics_detail"],
-                          "episode_file": f"episodes/{fam}.json", "instruction": d["instruction"],
-                          "task_id": d["task_id"], "seed": d["seed"], "lighting": d["lighting"]}
+        fam_stats[fam] = {
+            "exported": True,
+            "success": d["success"],
+            "human_contact": d["human_contact"],
+            "frames": d["n_frames"],
+            "duration_s": d["duration_s"],
+            "min_human_distance_m": d["min_human_distance_m"],
+            "physics_detail": d["physics_detail"],
+            "episode_file": f"episodes/{fam}.json",
+            "instruction": d["instruction"],
+            "task_id": d["task_id"],
+            "seed": d["seed"],
+            "lighting": d["lighting"],
+        }
     if not all_bodies:
         log("no episode exported")
         return 1
@@ -571,11 +671,20 @@ def main(argv=None) -> int:
         for name, v in b[0].items():
             assert bodies0.get(name) == v, f"body {name} differs between episodes"
     cams = all_bodies[0][2]
-    geoms = {"frame": "MuJoCo z-up, metres", "quaternion_order": "w,x,y,z",
-             "size_convention": "MuJoCo: box half extents; sphere [r]; capsule/cylinder [r, half length]; plane [hx, hy, grid]",
-             "bodies": bodies0, "cameras": cams,
-             "materials": {"wood": "plank-grain cabinet fronts", "stone": "speckled counter tops",
-                           "panel": "backsplash boards", "paint": "wall paint", "floor": "grouted floor tile"}}
+    geoms = {
+        "frame": "MuJoCo z-up, metres",
+        "quaternion_order": "w,x,y,z",
+        "size_convention": "MuJoCo: box half extents; sphere [r]; capsule/cylinder [r, half length]; plane [hx, hy, grid]",
+        "bodies": bodies0,
+        "cameras": cams,
+        "materials": {
+            "wood": "plank-grain cabinet fronts",
+            "stone": "speckled counter tops",
+            "panel": "backsplash boards",
+            "paint": "wall paint",
+            "floor": "grouted floor tile",
+        },
+    }
     dump(out / "geoms.json", rnd(geoms, 5))
     dump(out / "rooms.json", rnd(rooms_json(twin, bodies0), 4), indent=1)
 
@@ -586,12 +695,24 @@ def main(argv=None) -> int:
     log(f"scan: {meta['count']} points, {len(blob) / 1e3:.0f} kB")
 
     # dataset facts: the same tasks through arrival.sim.collect, written to scratch (mp4s stay out of site/)
-    stats = {"room_id": twin["room_id"], "seed": a.seed, "people": PEOPLE, "out_fps": OUT_FPS,
-             "episodes": {"attempted": attempted, "successful": exported, "exported": exported},
-             "families": fam_stats, "skipped": skipped, "other_rooms_found": others,
-             "sim": {"engine": f"mujoco {mujoco.__version__}", "physics_hz": round(FPS * SUBSTEPS), "control_hz": FPS,
-                     "arm": "procedural 7-DoF Panda-style arm, friction grasp", "success_check": "physics",
-                     "people_model": "kinematic capsule walkers, seeded waypoint loops, safety metric per step"}}
+    stats = {
+        "room_id": twin["room_id"],
+        "seed": a.seed,
+        "people": PEOPLE,
+        "out_fps": OUT_FPS,
+        "episodes": {"attempted": attempted, "successful": exported, "exported": exported},
+        "families": fam_stats,
+        "skipped": skipped,
+        "other_rooms_found": others,
+        "sim": {
+            "engine": f"mujoco {mujoco.__version__}",
+            "physics_hz": round(FPS * SUBSTEPS),
+            "control_hz": FPS,
+            "arm": "procedural 7-DoF Panda-style arm, friction grasp",
+            "success_check": "physics",
+            "people_model": "kinematic capsule walkers, seeded waypoint loops, safety metric per step",
+        },
+    }
     if not a.skip_dataset:
         from arrival.eval import cost as cost_mod
         from arrival.eval.harness import evaluate
@@ -603,16 +724,28 @@ def main(argv=None) -> int:
         lc = check_loader(res["dataset"])
         rd = res["report_data"]
         stats["dataset"] = {
-            "physically_valid": info["arrival_physically_valid"], "generator": info["arrival_generator"],
-            "frames": info["total_frames"], "episodes": info["total_episodes"], "attempts": info["arrival_attempts"],
-            "successes": info["arrival_successes"], "fps": info["fps"], "families": info["arrival_families"],
-            "cameras": [k.removeprefix("observation.images.") for k in info["features"] if k.startswith("observation.images.")],
-            "resolution": [128, 128], "state_dim": info["features"]["observation.state"]["shape"][0],
-            "action_dim": info["features"]["action"]["shape"][0], "format": f"LeRobot {info['codebase_version']} (GR00T layout)",
-            "success_check": info["arrival_success_check"], "grasp": info["arrival_grasp"],
+            "physically_valid": info["arrival_physically_valid"],
+            "generator": info["arrival_generator"],
+            "frames": info["total_frames"],
+            "episodes": info["total_episodes"],
+            "attempts": info["arrival_attempts"],
+            "successes": info["arrival_successes"],
+            "fps": info["fps"],
+            "families": info["arrival_families"],
+            "cameras": [
+                k.removeprefix("observation.images.") for k in info["features"] if k.startswith("observation.images.")
+            ],
+            "resolution": [128, 128],
+            "state_dim": info["features"]["observation.state"]["shape"][0],
+            "action_dim": info["features"]["action"]["shape"][0],
+            "format": f"LeRobot {info['codebase_version']} (GR00T layout)",
+            "success_check": info["arrival_success_check"],
+            "grasp": info["arrival_grasp"],
             "loader_check": {"ok": lc["ok"], "errors": lc["errors"], "warnings": lc["warnings"], "info": lc["info"]},
-            "report": {k: rd[k] for k in ("attempts", "successes", "dropped", "seconds", "demos_per_hour",
-                                          "human_contacts", "families")},
+            "report": {
+                k: rd[k]
+                for k in ("attempts", "successes", "dropped", "seconds", "demos_per_hour", "human_contacts", "families")
+            },
             "matches_exported_episodes": all(rd["families"].get(f, {}).get("successes") == 1 for f in fam_stats),
         }
         log(f"loader_check ok={lc['ok']} frames={info['total_frames']}")

@@ -20,7 +20,7 @@ import json
 import sys
 import tempfile
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -43,8 +43,14 @@ def planner(tmp: Path) -> dict:
     logs: list[str] = []
     p = VLMPlanner(log=logs.append, cache_path=tmp / "nemotron.json")
     plan, s = _timed(lambda: p.plan(INSTRUCTION, OBJECTS, FIXTURES))
-    return {"ok": p.source == "token_factory", "model": config()["models"]["super"], "seconds": s,
-            "source": p.source, "plan": plan, "log": logs}
+    return {
+        "ok": p.source == "token_factory",
+        "model": config()["models"]["super"],
+        "seconds": s,
+        "source": p.source,
+        "plan": plan,
+        "log": logs,
+    }
 
 
 def wordings(tmp: Path) -> dict:
@@ -52,9 +58,15 @@ def wordings(tmp: Path) -> dict:
     from arrival.tasks.instructions import generate_instructions
 
     res, s = _timed(lambda: generate_instructions("counter_to_sink", "mug", n=4, cache_path=tmp / "instr.json"))
-    return {"ok": res.get("source") == "token_factory", "model": config()["models"]["lightning"], "seconds": s,
-            "source": res.get("source"), "train": res.get("train"), "eval": res.get("eval"),
-            **({"error": res["error"]} if res.get("error") else {})}
+    return {
+        "ok": res.get("source") == "token_factory",
+        "model": config()["models"]["lightning"],
+        "seconds": s,
+        "source": res.get("source"),
+        "train": res.get("train"),
+        "eval": res.get("eval"),
+        **({"error": res["error"]} if res.get("error") else {}),
+    }
 
 
 DETECT_FIXTURES = REPO / "tests" / "fixtures" / "detection"
@@ -72,21 +84,37 @@ def detection(tmp: Path) -> dict:
     twin["objects"] = []
     logs: list[str] = []
     clients = {name: detect.DetectionClient(tmp / f"detect-{name}.json", log=logs.append) for name in ("mug", "empty")}
-    runs, s = _timed(lambda: {name: detect.detect_objects(DETECT_FIXTURES / name, twin, bundle, client=c,
-                                                          log=logs.append) for name, c in clients.items()})
+    runs, s = _timed(
+        lambda: {
+            name: detect.detect_objects(DETECT_FIXTURES / name, twin, bundle, client=c, log=logs.append)
+            for name, c in clients.items()
+        }
+    )
     replies = {f"{name}/{e['frame']}": e["reply"]["objects"] for name, c in clients.items() for e in c.entries.values()}
     mug, empty = runs["mug"], runs["empty"]
     placed = [o for o in mug["objects"] if o["catalog_id"] == "mug"]
     err = round(sum((a - b) ** 2 for a, b in zip(placed[0]["position"], MUG)) ** 0.5, 4) if placed else None
-    sources = {k: mug["reply_sources"].get(k, 0) + empty["reply_sources"].get(k, 0)
-               for k in {*mug["reply_sources"], *empty["reply_sources"]}}
-    return {"ok": sources == {"token_factory": 6} and len(placed) == 1 and not empty["objects"],
-            "model": clients["mug"].model, "seconds": s, "source": "token_factory" if "token_factory" in sources else None,
-            "reply_sources": sources, "replies": replies,
-            "mug": {"state": mug["state"], "objects": mug["objects"], "rejected": mug["rejected"],
-                    "truth": MUG, "position_error_m": err},
-            "empty": {"state": empty["state"], "objects": empty["objects"], "rejected": empty["rejected"]},
-            "log": logs}
+    sources = {
+        k: mug["reply_sources"].get(k, 0) + empty["reply_sources"].get(k, 0)
+        for k in {*mug["reply_sources"], *empty["reply_sources"]}
+    }
+    return {
+        "ok": sources == {"token_factory": 6} and len(placed) == 1 and not empty["objects"],
+        "model": clients["mug"].model,
+        "seconds": s,
+        "source": "token_factory" if "token_factory" in sources else None,
+        "reply_sources": sources,
+        "replies": replies,
+        "mug": {
+            "state": mug["state"],
+            "objects": mug["objects"],
+            "rejected": mug["rejected"],
+            "truth": MUG,
+            "position_error_m": err,
+        },
+        "empty": {"state": empty["state"], "objects": empty["objects"], "rejected": empty["rejected"]},
+        "log": logs,
+    }
 
 
 def tavily(tmp: Path) -> dict:
@@ -95,8 +123,14 @@ def tavily(tmp: Path) -> dict:
     logs: list[str] = []
     agent = TavilyResearchAgent(log=logs.append, cache_path=tmp / "tavily.json")
     res, s = _timed(lambda: agent.research_appliance("fridge"))
-    return {"ok": res.get("source") == "tavily_api", "seconds": s, "source": res.get("source"),
-            "summary": (res.get("summary") or "")[:300], "sources": res.get("sources", [])[:5], "log": logs}
+    return {
+        "ok": res.get("source") == "tavily_api",
+        "seconds": s,
+        "source": res.get("source"),
+        "summary": (res.get("summary") or "")[:300],
+        "sources": res.get("sources", [])[:5],
+        "log": logs,
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -117,11 +151,13 @@ def main(argv: list[str] | None = None) -> int:
     if a.only:
         checks = [c for c in checks if c[0] in a.only]
     if not checks:
-        print("no key set: put TOKEN_FACTORY_API_KEY (and the NEMOTRON_*_MODEL ids) or TAVILY_API_KEY in .env",
-              file=sys.stderr)
+        print(
+            "no key set: put TOKEN_FACTORY_API_KEY (and the NEMOTRON_*_MODEL ids) or TAVILY_API_KEY in .env",
+            file=sys.stderr,
+        )
         return 2
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     report = {"run_at": now.isoformat(timespec="seconds"), "checks": {}}
     with tempfile.TemporaryDirectory() as d:
         for name, fn in checks:
@@ -130,8 +166,10 @@ def main(argv: list[str] | None = None) -> int:
             except Exception as e:  # a missing model id raises before any request; record it like a failed call
                 report["checks"][name] = {"ok": False, "error": f"{type(e).__name__}: {e}"}
             r = report["checks"][name]
-            print(f"{'ok  ' if r['ok'] else 'FAIL'} {name}: source={r.get('source')} {r.get('seconds', '-')} s"
-                  + (f" ({r['error']})" if r.get("error") else ""))
+            print(
+                f"{'ok  ' if r['ok'] else 'FAIL'} {name}: source={r.get('source')} {r.get('seconds', '-')} s"
+                + (f" ({r['error']})" if r.get("error") else "")
+            )
 
     out = a.out or REPO / "docs" / "results" / f"live-apis-{now:%Y-%m-%d}.json"
     out.parent.mkdir(parents=True, exist_ok=True)

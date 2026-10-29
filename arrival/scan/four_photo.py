@@ -13,8 +13,12 @@ from PIL import Image
 from arrival.scan.bundle import load_room, validate
 
 
-def bundle_from_photos(paths: list, room_id: str, scans_dir: str | Path = "scans",
-                       template_room: str = "hero_kitchen") -> dict:
+def bundle_from_photos(
+    paths: list, room_id: str, scans_dir: str | Path = "scans", template_room: str = "hero_kitchen"
+) -> dict:
+    """A ScanBundle for a room given only four photos: the photos are copied under scans/<room_id>/photos and the
+    geometry is the template room's, flagged four_photo_unmeasured with geometry and realism claims blocked, since
+    nothing was measured. Raises ValueError on a bad room id or photo."""
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", room_id or "") or ".." in room_id:
         raise ValueError(f"invalid room_id: {room_id!r}")
     paths = [Path(p) for p in paths]

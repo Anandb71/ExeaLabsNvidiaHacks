@@ -2,6 +2,7 @@
 wordings and episodes as --split train, with "split": "eval" in the dataset's provenance. Only the generated wordings
 (--instructions nemotron) have an eval split; the template ones are held out by eval --holdout and never go into a sim
 dataset. sim now refuses the combination before anything runs."""
+
 import pytest
 
 from arrival import cli
@@ -31,12 +32,15 @@ def test_eval_split_with_template_wordings_is_a_usage_error(tmp_path, capsys, mo
     assert collect_calls == [] and not (tmp_path / "datasets").exists()
 
 
-@pytest.mark.parametrize("extra,split,generated", [
-    ([], "train", False),
-    (["--split", "train"], "train", False),
-    (["--instructions", "nemotron"], "train", True),
-    (["--instructions", "nemotron", "--split", "eval"], "eval", True),
-])
+@pytest.mark.parametrize(
+    "extra,split,generated",
+    [
+        ([], "train", False),
+        (["--split", "train"], "train", False),
+        (["--instructions", "nemotron"], "train", True),
+        (["--instructions", "nemotron", "--split", "eval"], "eval", True),
+    ],
+)
 def test_other_split_and_wording_choices_still_run(extra, split, generated, tmp_path, monkeypatch, collect_calls):
     monkeypatch.chdir(tmp_path)
     with pytest.raises(RuntimeError, match="collect ran"):

@@ -7,6 +7,8 @@ import importlib.util
 
 
 def probe() -> dict:
+    """Whether MimicGen generation could run here. It never does yet: the result always has skipped=True, with the
+    reason (RoboCasa missing, or the wiring not written)."""
     # TODO: Implement MimicGen trajectory generation.
     # Required: RoboCasa imports + wiring to arrival.generate.scripted.
     if importlib.util.find_spec("robocasa") is None:

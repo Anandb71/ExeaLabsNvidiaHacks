@@ -12,16 +12,16 @@ against fakes and has never run against Nebius. `NebiusBackendStub` below is the
 from __future__ import annotations
 
 import json
-import re
-
 import math
+import re
 import shutil
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Protocol
 
 from arrival.jobs.shards import ShardError, merge_shards
 
@@ -31,6 +31,7 @@ RUNNING, SUCCEEDED, FAILED = "running", "succeeded", "failed"
 @dataclass(frozen=True)
 class FanoutConfig:
     """What every shard runs: the `arrival sim` settings (identical across shards) and the shard count."""
+
     run_id: str
     shards: int
     room: str = "hero_kitchen"
@@ -47,7 +48,9 @@ class FanoutConfig:
     def __post_init__(self) -> None:
         # The run id becomes both a scratch-directory component and an object-storage prefix.
         if not isinstance(self.run_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", self.run_id):
-            raise ShardError("run_id must be 1-64 letters, digits, underscores or hyphens, starting with a letter or digit")
+            raise ShardError(
+                "run_id must be 1-64 letters, digits, underscores or hyphens, starting with a letter or digit"
+            )
         for name, minimum in (("shards", 1), ("episodes", 1), ("people", 0), ("res", 1), ("seed", 0)):
             value = getattr(self, name)
             if type(value) is not int or value < minimum:
@@ -56,8 +59,11 @@ class FanoutConfig:
             raise ShardError(f"res must be a multiple of 16, got {self.res}")
         if not isinstance(self.room, str) or not self.room.strip():
             raise ShardError("room must be a non-empty name")
-        if (not isinstance(self.families, str) or not self.families.strip() or
-                any(not part.strip() for part in self.families.split(","))):
+        if (
+            not isinstance(self.families, str)
+            or not self.families.strip()
+            or any(not part.strip() for part in self.families.split(","))
+        ):
             raise ShardError("families must be comma-separated non-empty names")
         if not isinstance(self.scans, str) or not self.scans.strip():
             raise ShardError("scans must be a non-empty path")
@@ -69,9 +75,27 @@ class FanoutConfig:
             raise ShardError("exocentric must be true or false")
 
     def sim_args(self, i: int) -> list[str]:
-        args = ["sim", "--room", self.room, "--families", self.families, "--episodes", str(self.episodes),
-                "--people", str(self.people), "--res", str(self.res), "--seed", str(self.seed),
-                "--scans", str(self.scans), "--shard", f"{i}/{self.shards}", "--resume"]
+        """The `arrival sim` arguments that run shard i of this fan-out, resumable."""
+        args = [
+            "sim",
+            "--room",
+            self.room,
+            "--families",
+            self.families,
+            "--episodes",
+            str(self.episodes),
+            "--people",
+            str(self.people),
+            "--res",
+            str(self.res),
+            "--seed",
+            str(self.seed),
+            "--scans",
+            str(self.scans),
+            "--shard",
+            f"{i}/{self.shards}",
+            "--resume",
+        ]
         if self.dart:
             args += ["--dart", str(self.dart)]
         if self.base != "fixed":
@@ -82,6 +106,10 @@ class FanoutConfig:
 
 
 class Backend(Protocol):
+    """What `run_fanout` needs from a job backend: start a shard, poll it, copy its output into object storage, and read
+    and write that storage. LocalBackend runs subprocesses over a folder; NebiusBackend runs Serverless AI Jobs over
+    a bucket."""
+
     def submit(self, cfg: FanoutConfig, i: int) -> str:
         """Start shard i; return a job id."""
 
@@ -172,16 +200,20 @@ class LocalBackend:
 
     def list_objects(self, prefix: str) -> list[str]:
         base, root = self._path(prefix), self.store.resolve()  # _path resolves symlinks (an --out that is a link)
-        return sorted(p.relative_to(root).as_posix() for p in base.rglob("*")
-                      if p.is_file() and not p.name.endswith(".part"))
+        return sorted(
+            p.relative_to(root).as_posix() for p in base.rglob("*") if p.is_file() and not p.name.endswith(".part")
+        )
 
     def describe(self, job_id: str) -> dict:
         """What the status record keeps for a job. A local subprocess has no resource preset."""
         proc, _, out, _ = self._jobs[job_id]
         code = proc.poll()
         log = out / f"attempt{job_id.rsplit('-', 1)[-1]}.log"
-        return {"state": "running" if code is None else f"exited {code}",
-                "reason": f"exit code {code}, log {log}" if code else None, "resources": None}
+        return {
+            "state": "running" if code is None else f"exited {code}",
+            "reason": f"exit code {code}, log {log}" if code else None,
+            "resources": None,
+        }
 
     def cancel_open(self) -> list[str]:
         """Stop every shard process still running (run_fanout stops nothing when a shard fails its last attempt, and a
@@ -210,11 +242,14 @@ class NebiusBackendStub:
 
     def __getattr__(self, name):
         # TODO: Implement real Nebius backend. See docs/09-later.md.
-        raise NotImplementedError(f"NebiusBackendStub.{name}: Nebius backend is not yet implemented. "
-                                  f"This stub is for local-only testing of the fanout orchestrator.")
+        raise NotImplementedError(
+            f"NebiusBackendStub.{name}: Nebius backend is not yet implemented. "
+            f"This stub is for local-only testing of the fanout orchestrator."
+        )
 
 
 # ---- orchestration ----
+
 
 def marker_key(cfg: FanoutConfig, i: int) -> str:
     return f"{cfg.run_id}/done/{i}of{cfg.shards}.json"
@@ -225,14 +260,25 @@ def shard_prefix(cfg: FanoutConfig, i: int) -> str:
 
 
 def require_shard_artifacts(backend: Backend, cfg: FanoutConfig, i: int) -> None:
+    """Raise ShardError unless the shard's copied output has its dataset's info.json and episodes.jsonl: a done marker
+    is only written for a shard whose files are really there."""
     base = f"{shard_prefix(cfg, i)}/datasets/{cfg.room}_sim/meta"
     for name in ("info.json", "episodes.jsonl"):
         if not backend.exists(f"{base}/{name}"):
             raise ShardError(f"shard {i}/{cfg.shards} is missing {base}/{name}; done marker is not trustworthy")
 
 
-def run_fanout(backend: Backend, cfg: FanoutConfig, out_dir: str | Path, *, parallel: int = 2, max_attempts: int = 3,
-               poll_seconds: float = 0.2, on_shard_done: Callable[[int], None] | None = None, log=print) -> dict:
+def run_fanout(
+    backend: Backend,
+    cfg: FanoutConfig,
+    out_dir: str | Path,
+    *,
+    parallel: int = 2,
+    max_attempts: int = 3,
+    poll_seconds: float = 0.2,
+    on_shard_done: Callable[[int], None] | None = None,
+    log=print,
+) -> dict:
     """Run every shard without a done-marker, retry failures up to `max_attempts` submissions each, then download and
     merge. Returns merge_shards' {"dataset", "report", "info"} plus "ran" and "skipped" shard lists. Raises ShardError
     when a shard fails every attempt (finished shards keep their markers, so a rerun resumes)."""
@@ -265,8 +311,13 @@ def run_fanout(backend: Backend, cfg: FanoutConfig, out_dir: str | Path, *, para
             marker = json.loads(backend.get_object(key))
         except (ValueError, UnicodeDecodeError) as e:
             raise ShardError(f"invalid done marker {key}: {e}") from e
-        if (not isinstance(marker, dict) or type(marker.get("shard")) is not int or marker["shard"] != i or
-                type(marker.get("attempts")) is not int or marker["attempts"] < 1):
+        if (
+            not isinstance(marker, dict)
+            or type(marker.get("shard")) is not int
+            or marker["shard"] != i
+            or type(marker.get("attempts")) is not int
+            or marker["attempts"] < 1
+        ):
             raise ShardError(f"invalid done marker {key}: shard or attempts do not match")
         require_shard_artifacts(backend, cfg, i)
     skipped = [i for i in range(cfg.shards) if i not in todo]
@@ -299,15 +350,16 @@ def run_fanout(backend: Backend, cfg: FanoutConfig, out_dir: str | Path, *, para
                 log(f"fanout: shard {i}/{cfg.shards} failed (attempt {attempts[i]}), retrying")
                 pending.append(i)
             else:
-                raise ShardError(f"shard {i}/{cfg.shards} failed {attempts[i]} times; finished shards are kept, "
-                                 f"rerun to resume")
+                raise ShardError(
+                    f"shard {i}/{cfg.shards} failed {attempts[i]} times; finished shards are kept, rerun to resume"
+                )
     collected = Path(out_dir) / "collected"
     if collected.exists():
         shutil.rmtree(collected)
     for i in range(cfg.shards):
         prefix = shard_prefix(cfg, i)
         for key in backend.list_objects(prefix):
-            dest = collected / "shards" / f"{i}of{cfg.shards}" / key[len(prefix) + 1:]
+            dest = collected / "shards" / f"{i}of{cfg.shards}" / key[len(prefix) + 1 :]
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(backend.get_object(key))
     res = merge_shards([collected / "shards"], out_dir, log=log)

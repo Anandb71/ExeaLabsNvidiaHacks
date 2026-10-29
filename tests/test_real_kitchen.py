@@ -2,6 +2,7 @@
 coreModel blob and every frame were left out). It was the first real kitchen through the pipeline, and it showed
 that RoomPlan objects face their local +Z: before the fix every cabinet, appliance and fridge faced its wall, the
 robot's stand spots fell outside the room and the job ended 'unsupported layout'."""
+
 import copy
 from pathlib import Path
 
@@ -25,7 +26,7 @@ def _bounds(twin):
 
 
 def test_every_fixture_faces_into_the_room(twin):
-    from arrival.sim.preflight import front
+    from arrival.sim.stand import front
 
     lo, hi = _bounds(twin)
     fixtures = [f for f in twin["fixtures"] if f["type"] != "sink"]
@@ -45,7 +46,7 @@ def _cabinet(twin, prefix):
 def test_corner_cabinet_door_stays_out_of_the_blind_corner(twin):
     # F9337652 runs along the east wall into the corner; 11793D80, on the north wall, stands against the last 0.64 m
     # of its front. The door used to be drawn there, hinged beside the neighbour, and it stopped at 0.8 deg
-    from arrival.sim.scene import DRAWER_W, door_hinge_x, door_w, drawer_x, drawers_at_right, front_span, has_drawers
+    from arrival.sim.geometry import DRAWER_W, door_hinge_x, door_w, drawer_x, drawers_at_right, front_span, has_drawers
 
     c, fx = _cabinet(twin, "F9337652"), twin["fixtures"]
     x0, x1 = front_span(c, fx)
@@ -59,17 +60,18 @@ def test_corner_cabinet_door_stays_out_of_the_blind_corner(twin):
 
 def test_narrow_cabinet_is_one_door(twin):
     # CC64C90B is 0.43 m wide: the 0.5 m drawer stack stuck into the dishwasher and the door was -0.07 m wide
-    from arrival.sim.scene import door_w, has_door, has_drawers, part_names
+    from arrival.sim.geometry import door_w, has_door, has_drawers
+    from arrival.sim.scene import part_names
 
     c, fx = _cabinet(twin, "CC64C90B"), twin["fixtures"]
     assert not has_drawers(c, fx) and has_door(c, fx)
     assert door_w(c, fx) == pytest.approx(c["size"][0] - 0.04)
     joints = {p["joint"] for p in part_names(twin) if p["fixture"] == c["id"] and "upper_door" not in p["joint"]}
-    assert joints == {f'{c["id"]}_door'}  # the base cabinet's own parts; the wall cabinet above keeps its door
+    assert joints == {f"{c['id']}_door"}  # the base cabinet's own parts; the wall cabinet above keeps its door
 
 
 def test_cabinets_away_from_corners_keep_their_layout(twin):
-    from arrival.sim.scene import door_hinge_x, door_w, drawers_at_right, front_span, has_drawers
+    from arrival.sim.geometry import door_hinge_x, door_w, drawers_at_right, front_span, has_drawers
 
     c, fx = _cabinet(twin, "11793D80"), twin["fixtures"]
     assert front_span(c, fx) == pytest.approx((-c["size"][0] / 2, c["size"][0] / 2))
@@ -85,8 +87,9 @@ def test_expert_works_every_cabinet_door_and_drawer(twin, tmp_path, people, seed
     from arrival.sim.collect import collect
 
     for fam in ("open_door", "close_door", "open_drawer", "close_drawer"):
-        r = collect(twin, [fam], 4, tmp_path / fam, people=people, res=32, seed=seed,
-                    log=lambda *a, **k: None)["report_data"]
+        r = collect(twin, [fam], 4, tmp_path / fam, people=people, res=32, seed=seed, log=lambda *a, **k: None)[
+            "report_data"
+        ]
         assert (r["attempts"], r["successes"], r["skipped_unreachable"]) == (4, 4, 0), (fam, r)
         assert r["human_contacts"] == 0, (fam, r)
 
@@ -96,8 +99,9 @@ def test_tasks_get_stand_spots_inside_the_room(twin):
     from arrival.sim.tasks import make_tasks
 
     log, pre = [], {}
-    tasks = make_tasks(twin, ["open_drawer", "open_door", "close_drawer", "close_door"], 8, seed=0,
-                       log=log.append, preflight=pre)
+    tasks = make_tasks(
+        twin, ["open_drawer", "open_door", "close_drawer", "close_door"], 8, seed=0, log=log.append, preflight=pre
+    )
     assert tasks, log
     assert not any("outside the room" in str(r) for r in pre.get("reasons", [])), pre.get("reasons")
 
@@ -113,11 +117,24 @@ def test_cup_stays_in_the_pads_on_the_way_to_the_dishwasher(twin):
     twin = copy.deepcopy(twin)
     place_default_objects(twin, seed=0)  # what eval does for a scan with no objects
     dw = _cabinet(twin, "F8CDA831")["id"]
-    task = {"family": "load_dishwasher", "fixture": dw, "handle": f"{dw}_door_handle", "joint": f"{dw}_door",
-            "source": "11793D80-8BE3-45F9-AF2F-34068D45F7C2", "object_id": "cup_1", "object_label": "cup",
-            "instruction": "Put the cup in the dishwasher.", "wording_index": 0, "lighting": "dim", "holdout": False,
-            "people": 2, "seed": 10006000, "split": "train", "start": [2.362921, 2.0457010000328166, 0.971950395],
-            "task_id": "sim_load_dishwasher_0000"}
+    task = {
+        "family": "load_dishwasher",
+        "fixture": dw,
+        "handle": f"{dw}_door_handle",
+        "joint": f"{dw}_door",
+        "source": "11793D80-8BE3-45F9-AF2F-34068D45F7C2",
+        "object_id": "cup_1",
+        "object_label": "cup",
+        "instruction": "Put the cup in the dishwasher.",
+        "wording_index": 0,
+        "lighting": "dim",
+        "holdout": False,
+        "people": 2,
+        "seed": 10006000,
+        "split": "train",
+        "start": [2.362921, 2.0457010000328166, 0.971950395],
+        "task_id": "sim_load_dishwasher_0000",
+    }
     with SimEnv(twin, task, res=32, cameras=()) as env:
         ep = run_episode(env, ScriptedExpert(), task)
     assert ep["success"], ep["detail"]
@@ -136,12 +153,24 @@ def test_plate_stays_in_the_rim_pinch_on_a_mobile_carry(twin, arm):
 
     twin = copy.deepcopy(twin)
     place_default_objects(twin, seed=0)
-    task = {"family": "counter_to_counter", "source": "11793D80-8BE3-45F9-AF2F-34068D45F7C2",
-            "target": "CC64C90B-5AD3-4C42-8E56-3D8B4FE9C9B9", "target_x": 0.948737, "target_y": 2.203715,
-            "object_id": "plate_1", "object_label": "plate",
-            "instruction": "Pick up the plate from the counter and place it onto the other counter.",
-            "wording_index": 0, "lighting": "neutral", "holdout": False, "people": 2, "seed": 10006003,
-            "split": "train", "start": [2.658621, 2.224057, 0.97195], "task_id": "sim_counter_to_counter_0003"}
+    task = {
+        "family": "counter_to_counter",
+        "source": "11793D80-8BE3-45F9-AF2F-34068D45F7C2",
+        "target": "CC64C90B-5AD3-4C42-8E56-3D8B4FE9C9B9",
+        "target_x": 0.948737,
+        "target_y": 2.203715,
+        "object_id": "plate_1",
+        "object_label": "plate",
+        "instruction": "Pick up the plate from the counter and place it onto the other counter.",
+        "wording_index": 0,
+        "lighting": "neutral",
+        "holdout": False,
+        "people": 2,
+        "seed": 10006003,
+        "split": "train",
+        "start": [2.658621, 2.224057, 0.97195],
+        "task_id": "sim_counter_to_counter_0003",
+    }
     if arm == "menagerie" and not menagerie.available():
         pytest.skip("run python scripts/fetch_menagerie.py")
     with SimEnv(twin, task, res=32, cameras=(), base="mobile", arm=arm) as env:

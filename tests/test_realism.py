@@ -62,7 +62,11 @@ def test_self_render_scores_zero(twin, pose, ref):
     rgb2, depth2 = render_twin(twin, K, pose, SIZE)
     s = score(rgb, depth, rgb2, depth2, depth > 0)
     assert s["depth_l1_m"] < 1e-3 and s["rgb_mae"] == 0 and s["rgb_one_minus_ssim"] < 1e-9
-    assert s["rgb_psnr_db"] is None and s["n_depth"] == int((depth > 0).sum()) and s["n_rgb"] == rgb.shape[0] * rgb.shape[1]
+    assert (
+        s["rgb_psnr_db"] is None
+        and s["n_depth"] == int((depth > 0).sum())
+        and s["n_rgb"] == rgb.shape[0] * rgb.shape[1]
+    )
 
 
 def test_shifted_and_rotated_camera_scores_worse(twin, pose, ref):

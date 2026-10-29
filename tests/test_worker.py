@@ -101,13 +101,25 @@ def test_scan_json_job_becomes_dataset_zip(tmp_path):
     from arrival.jobs.limits import Limits
 
     # in a child process under a wall-clock limit, the way `arrival work` runs it
-    st = run_once(out, limits=Limits(max_job_seconds=600), isolate=True, episodes=2, families=["counter_to_sink"],
-                  people=1, res=64, log=QUIET)
+    st = run_once(
+        out,
+        limits=Limits(max_job_seconds=600),
+        isolate=True,
+        episodes=2,
+        families=["counter_to_sink"],
+        people=1,
+        res=64,
+        log=QUIET,
+    )
     assert st["status"] == "done", st
     info = json.loads((Path(st["dataset_dir"]) / "meta" / "info.json").read_text())
     u = st["usage"]  # metering: measured units, no price
     assert u["frames"] == info["total_frames"] > 0 and u["episodes_attempted"] == 2
-    assert u["episodes_succeeded"] == st["successes"] and u["wall_seconds"] > 0 and set(u["stage_seconds"]) >= {"sim", "zip"}
+    assert (
+        u["episodes_succeeded"] == st["successes"]
+        and u["wall_seconds"] > 0
+        and set(u["stage_seconds"]) >= {"sim", "zip"}
+    )
     assert u["zip_bytes"] == (out / "jobs" / job["id"] / "dataset.zip").stat().st_size and u["dataset_bytes"] > 0
     assert len((out / "usage" / "jobs.jsonl").read_text().splitlines()) == 1
     assert st["room_id"] == f"hero_kitchen_{job['id']}"

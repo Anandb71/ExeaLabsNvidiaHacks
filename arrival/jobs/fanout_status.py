@@ -29,6 +29,9 @@ def status_key(cfg: FanoutConfig, i: int) -> str:
 
 
 class StatusRecorder:
+    """A Backend that passes every call to `backend` and keeps a per-shard status record (attempts, states, timing,
+    outcome, failure stage) in the backend's own storage; see the module docstring for the record's fields."""
+
     def __init__(self, backend):
         self.backend = backend
         self._records: dict[str, dict] = {}  # status key -> record
@@ -46,9 +49,14 @@ class StatusRecorder:
                     raise ShardError(f"unreadable status record {key}: {e}") from e
             else:
                 rec = {"run_id": cfg.run_id, "shard": i, "shards": cfg.shards, "attempts": []}
-            if (not isinstance(rec, dict) or rec.get("run_id") != cfg.run_id or rec.get("shard") != i
-                    or rec.get("shards") != cfg.shards or not isinstance(rec.get("attempts"), list)
-                    or any(not isinstance(a, dict) or "outcome" not in a for a in rec["attempts"])):
+            if (
+                not isinstance(rec, dict)
+                or rec.get("run_id") != cfg.run_id
+                or rec.get("shard") != i
+                or rec.get("shards") != cfg.shards
+                or not isinstance(rec.get("attempts"), list)
+                or any(not isinstance(a, dict) or "outcome" not in a for a in rec["attempts"])
+            ):
                 raise ShardError(f"invalid status record {key}: identity or attempts do not match this shard")
             for a in rec["attempts"]:
                 if a["outcome"] == "running":
@@ -71,17 +79,32 @@ class StatusRecorder:
     def _end(self, job_id: str, outcome: str, stage: str | None = None, reason: str | None = None) -> None:
         self._close(*self._open.pop(job_id), outcome, stage, reason)
 
-    def _close(self, cfg: FanoutConfig, i: int, a: dict, t0: float, outcome: str, stage: str | None,
-               reason: str | None) -> None:
-        a.update(outcome=outcome, failed_stage=stage, reason=settings.redact(reason) if reason else None,
-                 finished_at=int(time.time()), wall_seconds=round(time.monotonic() - t0, 3))
+    def _close(
+        self, cfg: FanoutConfig, i: int, a: dict, t0: float, outcome: str, stage: str | None, reason: str | None
+    ) -> None:
+        a.update(
+            outcome=outcome,
+            failed_stage=stage,
+            reason=settings.redact(reason) if reason else None,
+            finished_at=int(time.time()),
+            wall_seconds=round(time.monotonic() - t0, 3),
+        )
         self._save(cfg, i)
 
     def submit(self, cfg: FanoutConfig, i: int) -> str:
         rec = self._record(cfg, i)
-        a = {"attempt": len(rec["attempts"]) + 1, "job_id": None, "submitted_at": int(time.time()),
-             "finished_at": None, "wall_seconds": None, "resources": None, "states": [], "outcome": "running",
-             "failed_stage": None, "reason": None}
+        a = {
+            "attempt": len(rec["attempts"]) + 1,
+            "job_id": None,
+            "submitted_at": int(time.time()),
+            "finished_at": None,
+            "wall_seconds": None,
+            "resources": None,
+            "states": [],
+            "outcome": "running",
+            "failed_stage": None,
+            "reason": None,
+        }
         rec["attempts"].append(a)
         t0 = time.monotonic()
         try:

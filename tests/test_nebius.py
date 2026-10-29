@@ -8,14 +8,14 @@ import json
 import sys
 
 import pytest
+from conftest import REPO, SCANS
+from fake_nebius import FakeJobs, FakeS3
 
 from arrival import config
 from arrival.jobs.fanout import FAILED, FanoutConfig, LocalBackend, run_fanout
 from arrival.jobs.fanout_status import StatusRecorder, status_key
 from arrival.jobs.nebius import NebiusBackend, NebiusNotConfigured, ObjectStore, sigv4
 from arrival.jobs.shards import ShardError
-from conftest import REPO, SCANS
-from fake_nebius import FakeJobs, FakeS3
 
 needs_sim = pytest.mark.skipif(importlib.util.find_spec("mujoco") is None, reason="needs mujoco")
 CFG = FanoutConfig("r1", 2, "hero_kitchen", "counter_to_sink,open_drawer", 4, 0, 32, 3, str(SCANS))
@@ -43,10 +43,16 @@ def nebius(monkeypatch, tmp_path):
         monkeypatch.setenv("NEBIUS_API_URL", fakes["jobs"].url)
         return fakes["jobs"]
 
-    for name, value in {"NEBIUS_IAM_TOKEN": TOKEN, "NEBIUS_PROJECT_ID": "project-test",
-                        "NEBIUS_JOB_IMAGE": "cr.example/arrival:test", "NEBIUS_JOB_S3_SECRET_ID": "mbsec-test",
-                        "NEBIUS_BUCKET": "arrival-test", "NEBIUS_ACCESS_KEY_ID": KEY_ID,
-                        "NEBIUS_SECRET_ACCESS_KEY": SECRET, "NEBIUS_S3_ENDPOINT": s3.url}.items():
+    for name, value in {
+        "NEBIUS_IAM_TOKEN": TOKEN,
+        "NEBIUS_PROJECT_ID": "project-test",
+        "NEBIUS_JOB_IMAGE": "cr.example/arrival:test",
+        "NEBIUS_JOB_S3_SECRET_ID": "mbsec-test",
+        "NEBIUS_BUCKET": "arrival-test",
+        "NEBIUS_ACCESS_KEY_ID": KEY_ID,
+        "NEBIUS_SECRET_ACCESS_KEY": SECRET,
+        "NEBIUS_S3_ENDPOINT": s3.url,
+    }.items():
         monkeypatch.setenv(name, value)
     fakes["make"] = make
     make()
@@ -87,19 +93,49 @@ def test_sigv4_matches_the_aws_signing_test_suite():
     # awslabs/aws-c-auth tests/aws-signing-test-suite/v4: get-vanilla-query-order-key-case, post-x-www-form-urlencoded
     key, secret, when = "AKIDEXAMPLE", "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY", "20150830T123600Z"
     empty = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-    auth, canonical = sigv4("GET", "/", [("Param2", "value2"), ("Param1", "value1")],
-                            {"Host": "example.amazonaws.com", "X-Amz-Date": when}, empty, key, secret, "us-east-1",
-                            "service", when)
-    assert canonical == ("GET\n/\nParam1=value1&Param2=value2\nhost:example.amazonaws.com\nx-amz-date:" + when
-                         + "\n\nhost;x-amz-date\n" + empty)
+    auth, canonical = sigv4(
+        "GET",
+        "/",
+        [("Param2", "value2"), ("Param1", "value1")],
+        {"Host": "example.amazonaws.com", "X-Amz-Date": when},
+        empty,
+        key,
+        secret,
+        "us-east-1",
+        "service",
+        when,
+    )
+    assert canonical == (
+        "GET\n/\nParam1=value1&Param2=value2\nhost:example.amazonaws.com\nx-amz-date:"
+        + when
+        + "\n\nhost;x-amz-date\n"
+        + empty
+    )
     assert auth.endswith("Signature=b97d918cfa904a5beff61c982a1b6f458b799221646efd99d3219ec94cdf2500")
     body = "9095672bbd1f56dfc5b65f3e153adc8731a4a654192329106275f4c7b24d0b6e"
-    auth, _ = sigv4("POST", "/", [], {"Content-Type": "application/x-www-form-urlencoded", "Content-Length": "13",
-                                      "Host": "example.amazonaws.com", "x-amz-content-sha256": body,
-                                      "X-Amz-Date": when}, body, key, secret, "us-east-1", "service", when)
-    assert auth == ("AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20150830/us-east-1/service/aws4_request, SignedHeaders="
-                    "content-length;content-type;host;x-amz-content-sha256;x-amz-date, "
-                    "Signature=d3875051da38690788ef43de4db0d8f280229d82040bfac253562e56c3f20e0b")
+    auth, _ = sigv4(
+        "POST",
+        "/",
+        [],
+        {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Content-Length": "13",
+            "Host": "example.amazonaws.com",
+            "x-amz-content-sha256": body,
+            "X-Amz-Date": when,
+        },
+        body,
+        key,
+        secret,
+        "us-east-1",
+        "service",
+        when,
+    )
+    assert auth == (
+        "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20150830/us-east-1/service/aws4_request, SignedHeaders="
+        "content-length;content-type;host;x-amz-content-sha256;x-amz-date, "
+        "Signature=d3875051da38690788ef43de4db0d8f280229d82040bfac253562e56c3f20e0b"
+    )
 
 
 def test_missing_settings_are_named_without_values(monkeypatch):
@@ -110,8 +146,14 @@ def test_missing_settings_are_named_without_values(monkeypatch):
     with pytest.raises(NebiusNotConfigured) as e:
         NebiusBackend()
     msg = str(e.value)
-    for name in ("NEBIUS_IAM_TOKEN", "NEBIUS_PROJECT_ID", "NEBIUS_JOB_IMAGE", "NEBIUS_JOB_S3_SECRET_ID",
-                 "NEBIUS_BUCKET", "NEBIUS_ACCESS_KEY_ID"):
+    for name in (
+        "NEBIUS_IAM_TOKEN",
+        "NEBIUS_PROJECT_ID",
+        "NEBIUS_JOB_IMAGE",
+        "NEBIUS_JOB_S3_SECRET_ID",
+        "NEBIUS_BUCKET",
+        "NEBIUS_ACCESS_KEY_ID",
+    ):
         assert name in msg
     assert "NEBIUS_SECRET_ACCESS_KEY" not in msg and "do-not-print-me" not in msg
     assert config.redact("token do-not-print-me-123") == "token [redacted]"
@@ -120,11 +162,25 @@ def test_missing_settings_are_named_without_values(monkeypatch):
 def test_object_store_pages_signs_and_keeps_prefixes_apart(nebius):
     s3 = nebius["s3"]
     store = ObjectStore(s3.url, "eu-north1", "arrival-test", KEY_ID, SECRET)
-    for k in ["r/shards/1of2/a b.json", "r/shards/1of2/x/y.parquet", "r/shards/1of20/z", "r/done/1of2.json",
-              "r/shards/1of2/c+d", "r/shards/1of2/e", "r/shards/1of2/f"]:
+    for k in [
+        "r/shards/1of2/a b.json",
+        "r/shards/1of2/x/y.parquet",
+        "r/shards/1of20/z",
+        "r/done/1of2.json",
+        "r/shards/1of2/c+d",
+        "r/shards/1of2/e",
+        "r/shards/1of2/f",
+    ]:
         store.put(k, k.encode())
-    assert store.list("r/shards/1of2/") == sorted(["r/shards/1of2/a b.json", "r/shards/1of2/x/y.parquet",
-                                                   "r/shards/1of2/c+d", "r/shards/1of2/e", "r/shards/1of2/f"])
+    assert store.list("r/shards/1of2/") == sorted(
+        [
+            "r/shards/1of2/a b.json",
+            "r/shards/1of2/x/y.parquet",
+            "r/shards/1of2/c+d",
+            "r/shards/1of2/e",
+            "r/shards/1of2/f",
+        ]
+    )
     assert store.get("r/shards/1of2/a b.json") == b"r/shards/1of2/a b.json"
     assert store.exists("r/done/1of2.json") and not store.exists("r/done/0of2.json")
     assert s3.rejected == []
@@ -251,17 +307,26 @@ def test_staging_prefix_is_new_for_every_attempt_and_every_process(nebius):
     be = NebiusBackend()
     be.submit(CFG, 0), be.submit(CFG, 0)
     NebiusBackend().submit(CFG, 0)  # a rerun after a kill counts its attempts from 1 again
-    dests = [json.loads(body)["spec"]["args"].split()[4] for method, path, body in jobs.requests
-             if (method, path) == ("POST", "/ai/v1/jobs")]
+    dests = [
+        json.loads(body)["spec"]["args"].split()[4]
+        for method, path, body in jobs.requests
+        if (method, path) == ("POST", "/ai/v1/jobs")
+    ]
     assert len(dests) == len(set(dests)) == 3
     assert all(d.startswith("r1/attempts/0of2/") for d in dests)
 
 
-@pytest.mark.parametrize("fake, states, reason", [
-    ({"hold": {0}}, ["PROVISIONING", "IMAGE_PULLING", "RUNNING", "CANCELLING"],
-     "not finished 7200 s after it was created"),
-    ({"silent": {0}}, ["STATE_UNSPECIFIED", "CANCELLING"], "reported no state for 1800 s"),
-])
+@pytest.mark.parametrize(
+    "fake, states, reason",
+    [
+        (
+            {"hold": {0}},
+            ["PROVISIONING", "IMAGE_PULLING", "RUNNING", "CANCELLING"],
+            "not finished 7200 s after it was created",
+        ),
+        ({"silent": {0}}, ["STATE_UNSPECIFIED", "CANCELLING"], "reported no state for 1800 s"),
+    ],
+)
 def test_stuck_or_stateless_job_is_cancelled_and_retried_up_to_max_attempts(nebius, tmp_path, fake, states, reason):
     jobs = nebius["make"](**fake)
     be = NebiusBackend(clock=_ticks())
@@ -274,7 +339,8 @@ def test_stuck_or_stateless_job_is_cancelled_and_retried_up_to_max_attempts(nebi
     assert be.cancel_open() == [] and jobs.cancelled == created
     attempts = _status(nebius["s3"], CFG1, 0)["attempts"]
     assert [(a["job_id"], a["outcome"], a["failed_stage"], a["reason"]) for a in attempts] == [
-        (j, "failed", "run", f"{reason}; cancelled") for j in created]
+        (j, "failed", "run", f"{reason}; cancelled") for j in created
+    ]
     assert all([s["state"] for s in a["states"]] == states for a in attempts)
 
 
@@ -287,8 +353,11 @@ def test_limits_leave_a_job_alone_until_they_are_passed(nebius):
 
 
 def test_limit_settings_are_checked_against_the_job_timeout(nebius, monkeypatch):
-    for value, match in [("3600", "longer than the job timeout"), ("abc", "NEBIUS_MAX_JOB_SECONDS must be"),
-                         ("0", "NEBIUS_MAX_JOB_SECONDS must be")]:
+    for value, match in [
+        ("3600", "longer than the job timeout"),
+        ("abc", "NEBIUS_MAX_JOB_SECONDS must be"),
+        ("0", "NEBIUS_MAX_JOB_SECONDS must be"),
+    ]:
         monkeypatch.setenv("NEBIUS_MAX_JOB_SECONDS", value)
         with pytest.raises(NebiusNotConfigured, match=match):
             NebiusBackend()
@@ -306,8 +375,12 @@ def test_status_record_names_the_failure_stage(nebius, monkeypatch, tmp_path):
     [run] = _status(s3, CFG1, 0)["attempts"]
     assert (run["outcome"], run["failed_stage"], run["reason"]) == ("failed", "run", "ERROR")
     assert [s["state"] for s in run["states"]] == ["PROVISIONING", "IMAGE_PULLING", "ERROR"]
-    assert run["resources"] == {"platform": "cpu-d3", "preset": "4vcpu-16gb", "disk_bytes": 64 * 1024**3,
-                                "timeout": "3600s"}
+    assert run["resources"] == {
+        "platform": "cpu-d3",
+        "preset": "4vcpu-16gb",
+        "disk_bytes": 64 * 1024**3,
+        "timeout": "3600s",
+    }
     assert run["job_id"] and run["wall_seconds"] >= 0 and run["finished_at"] >= run["submitted_at"]
 
     nebius["make"](hold={0}, states={0: "COMPLETED"})
@@ -329,9 +402,13 @@ def test_status_record_names_the_failure_stage(nebius, monkeypatch, tmp_path):
 
 def test_local_backend_records_attempts_and_a_failed_marker(tmp_path, monkeypatch):
     def command(cfg, i, out):
-        return [sys.executable, "-c", f"import pathlib; p = pathlib.Path(r'{out}') / 'shards' / '{i}of{cfg.shards}'; "
-                                      "m = p / 'datasets' / 'hero_kitchen_sim' / 'meta'; m.mkdir(parents=True, exist_ok=True); "
-                                      "(m / 'info.json').write_text('{}'); (m / 'episodes.jsonl').write_text('')"]
+        return [
+            sys.executable,
+            "-c",
+            f"import pathlib; p = pathlib.Path(r'{out}') / 'shards' / '{i}of{cfg.shards}'; "
+            "m = p / 'datasets' / 'hero_kitchen_sim' / 'meta'; m.mkdir(parents=True, exist_ok=True); "
+            "(m / 'info.json').write_text('{}'); (m / 'episodes.jsonl').write_text('')",
+        ]
 
     def kill(i):
         raise KeyboardInterrupt  # stop before the merge, which these stand-in shards cannot pass
@@ -344,7 +421,11 @@ def test_local_backend_records_attempts_and_a_failed_marker(tmp_path, monkeypatc
     assert (first["job_id"], first["outcome"], first["failed_stage"]) == ("r2-0-1", "failed", "run")
     assert first["reason"].startswith("exit code 3, log ") and first["states"][-1]["state"] == "exited 3"
     assert (second["job_id"], second["outcome"], second["failed_stage"], second["reason"]) == (
-        "r2-0-2", "succeeded", None, None)
+        "r2-0-2",
+        "succeeded",
+        None,
+        None,
+    )
     assert second["states"][-1]["state"] == "exited 0" and second["resources"] is None and second["wall_seconds"] > 0
 
     class MarkerFails(LocalBackend):
@@ -360,7 +441,10 @@ def test_local_backend_records_attempts_and_a_failed_marker(tmp_path, monkeypatc
         run_fanout(StatusRecorder(be), cfg, tmp_path / "out", poll_seconds=0, log=quiet)
     [marker] = json.loads(be.get_object(status_key(cfg, 0)))["attempts"]
     assert (marker["outcome"], marker["failed_stage"], marker["reason"]) == (
-        "failed", "marker", "disk full, key [redacted]")
+        "failed",
+        "marker",
+        "disk full, key [redacted]",
+    )
 
 
 def test_stopping_after_a_job_succeeded_is_not_recorded_as_a_cancel(nebius, tmp_path):
@@ -403,5 +487,7 @@ def test_status_record_survives_a_kill_and_rerun(nebius, reference, tmp_path):
     assert _status(s3, CFG, 0) == done
     after = _status(s3, CFG, 1)["attempts"]
     assert [(b["attempt"], b["job_id"], b["outcome"]) for b in after] == [
-        (1, first[1], "abandoned"), (2, dict(jobs.created)[1], "succeeded")]
+        (1, first[1], "abandoned"),
+        (2, dict(jobs.created)[1], "succeeded"),
+    ]
     _same_episodes(res, reference)

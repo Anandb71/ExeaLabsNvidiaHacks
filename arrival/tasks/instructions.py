@@ -14,7 +14,9 @@ from pathlib import Path
 
 from arrival.tasks.propose import WORDINGS
 
-DEFAULT_CACHE = Path("out") / "cache" / "instruction_cache.json"  # under the run's out/, never in the package: a cache there
+DEFAULT_CACHE = (
+    Path("out") / "cache" / "instruction_cache.json"
+)  # under the run's out/, never in the package: a cache there
 # answered later runs without calling Token Factory and dirtied the checkout
 
 FALLBACK_TEMPLATES = {
@@ -164,9 +166,15 @@ def _style_templates(templates: list[str], style: str, name: str) -> list[str]:
     return styled
 
 
-def _cache_key(family: str, object_name: str | None, fixture_name: str | None,
-               n: int = 8, role: str = "lightning", eval_ratio: float = 0.25,
-               style: str = "mixed") -> str:
+def _cache_key(
+    family: str,
+    object_name: str | None,
+    fixture_name: str | None,
+    n: int = 8,
+    role: str = "lightning",
+    eval_ratio: float = 0.25,
+    style: str = "mixed",
+) -> str:
     key = f"{family}::obj={object_name or 'none'}::fx={fixture_name or 'none'}"
     if (n, role, eval_ratio) != (8, "lightning", 0.25):  # defaults keep the plain key
         key += f"::n={n}::role={role}::ev={eval_ratio}"
@@ -176,6 +184,7 @@ def _cache_key(family: str, object_name: str | None, fixture_name: str | None,
 
 
 def load_cache(cache_path: Path | str | None = None) -> dict:
+    """The instruction cache, or {} when the file is missing or unreadable (the generator then falls back to templates)."""
     p = Path(cache_path) if cache_path else DEFAULT_CACHE
     if p.is_file():
         try:
@@ -187,6 +196,7 @@ def load_cache(cache_path: Path | str | None = None) -> dict:
 
 
 def save_cache(cache: dict, cache_path: Path | str | None = None) -> None:
+    """Write the instruction cache. A failed write is ignored: the cache only saves API calls."""
     p = Path(cache_path) if cache_path else DEFAULT_CACHE
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -195,11 +205,16 @@ def save_cache(cache: dict, cache_path: Path | str | None = None) -> None:
         pass
 
 
-def generate_instructions(family: str, object_name: str | None = None,
-                          fixture_name: str | None = None, n: int = 8,
-                          role: str = "lightning", eval_ratio: float = 0.25,
-                          style: str = "mixed",
-                          cache_path: Path | str | None = None) -> dict[str, list[str]]:
+def generate_instructions(
+    family: str,
+    object_name: str | None = None,
+    fixture_name: str | None = None,
+    n: int = 8,
+    role: str = "lightning",
+    eval_ratio: float = 0.25,
+    style: str = "mixed",
+    cache_path: Path | str | None = None,
+) -> dict[str, list[str]]:
     """Generate diverse instructions split into 'train' and 'eval' sets with stylistic variation.
 
     Uses Nemotron Lightning via Nebius Token Factory if available, with offline
@@ -231,13 +246,16 @@ def generate_instructions(family: str, object_name: str | None = None,
         f"Task family: {family}\n"
         f"Target/object: {name}\n"
         f"Style: {style_guidance}\n\n"
-        f"Output ONLY a valid JSON array of {n} strings, e.g. [\"Do X\", \"Please do Y\"]."
+        f'Output ONLY a valid JSON array of {n} strings, e.g. ["Do X", "Please do Y"].'
     )
 
     try:
         raw = complete(
             messages=[
-                {"role": "system", "content": "You are an AI generating diverse robot instructions. Return only a JSON list of strings."},
+                {
+                    "role": "system",
+                    "content": "You are an AI generating diverse robot instructions. Return only a JSON list of strings.",
+                },
                 {"role": "user", "content": prompt},
             ],
             role=role,
@@ -264,8 +282,8 @@ def generate_instructions(family: str, object_name: str | None = None,
     split = {
         "source": source,
         "style": style,
-        "train": instructions[:len(instructions) - eval_count],
-        "eval": instructions[len(instructions) - eval_count:],
+        "train": instructions[: len(instructions) - eval_count],
+        "eval": instructions[len(instructions) - eval_count :],
         **({"error": error} if source == "template_fallback" and error else {}),
     }
 

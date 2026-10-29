@@ -8,13 +8,18 @@ import numpy as np
 import pytest
 
 from arrival.policy_server import gr00t_shim
-from arrival.policy_server.protocol import (ProtocolError, decode_image, decode_request, decode_response,
-                                            encode_request, encode_response)
+from arrival.policy_server.protocol import (
+    ProtocolError,
+    decode_image,
+    decode_request,
+    decode_response,
+    encode_request,
+    encode_response,
+)
 
 GOLDEN = json.loads((Path(__file__).parent / "golden" / "policy_wire.json").read_text())
 STATE11 = np.array([0.1, -0.2, 0.3, -1.5, 0.0, 1.2, 0.4, 0.04, 1.5, 0.8, 0.25])
-REQ_KEYS = {"video.ego_view", "video.wrist", "state.single_arm", "state.gripper",
-            "annotation.human.task_description"}
+REQ_KEYS = {"video.ego_view", "video.wrist", "state.single_arm", "state.gripper", "annotation.human.task_description"}
 
 
 def _obs(state=STATE11):
@@ -87,11 +92,11 @@ def test_bad_frame_shape_refused():
         encode_request({"state": STATE11, "ego_view": np.zeros((4, 4), np.uint8)}, "x")
 
 
-@pytest.mark.parametrize("chunk", [np.zeros((0, 8)), np.full((1, 8), np.nan),
-                                   np.full((1, 11), np.inf), [["bad"] * 8]])
+@pytest.mark.parametrize("chunk", [np.zeros((0, 8)), np.full((1, 8), np.nan), np.full((1, 11), np.inf), [["bad"] * 8]])
 def test_encoder_refuses_chunks_the_decoder_cannot_accept(chunk):
     with pytest.raises(ProtocolError):
         encode_response(chunk)
+
 
 @pytest.mark.parametrize("instruction", [None, "", "  ", 3])
 def test_policy_requests_require_a_named_task(instruction):
@@ -102,14 +107,16 @@ def test_policy_requests_require_a_named_task(instruction):
     with pytest.raises(ProtocolError, match="non-empty string"):
         decode_request(body)
 
-@pytest.mark.parametrize("frame", [np.full((2, 2, 3), 300, np.int16),
-                                   np.full((2, 2, 3), np.nan, np.float32),
-                                   np.zeros((2, 2, 3), bool)])
+
+@pytest.mark.parametrize(
+    "frame", [np.full((2, 2, 3), 300, np.int16), np.full((2, 2, 3), np.nan, np.float32), np.zeros((2, 2, 3), bool)]
+)
 def test_camera_encoder_does_not_coerce_bad_pixel_types(frame):
     obs = _obs()
     obs["ego_view"] = frame
     with pytest.raises(ProtocolError, match="uint8"):
         encode_request(obs, "x")
+
 
 def test_image_decoder_rejects_trailing_non_base64_data():
     valid = GOLDEN["arm"]["request"]["video.ego_view"]
@@ -117,6 +124,7 @@ def test_image_decoder_rejects_trailing_non_base64_data():
         decode_image(valid + "!not-an-image")
     with pytest.raises(ProtocolError, match="base64 string"):
         decode_image(123)
+
 
 def test_inbound_policy_vectors_reject_json_booleans():
     body = GOLDEN["arm"]["request"].copy()
@@ -130,7 +138,7 @@ def test_inbound_policy_vectors_reject_json_booleans():
 
 
 def test_integers_too_large_for_a_float_are_protocol_errors():
-    huge = 10 ** 400
+    huge = 10**400
     body = GOLDEN["arm"]["request"].copy()
     body["state.gripper"] = [huge]
     with pytest.raises(ProtocolError, match="not numeric"):
@@ -147,6 +155,7 @@ def test_shim_maps_base_key():
     req = decode_request(GOLDEN["mobile"]["request"])
     obs = gr00t_shim.to_observation(req)
     assert obs["state"]["base"].shape == (1, 1, 3) and obs["state"]["gripper"].shape == (1, 1, 1)
-    chunk = gr00t_shim.to_chunk({"single_arm": np.zeros((1, 4, 7)), "gripper": np.zeros((1, 4, 1)),
-                                 "base": np.ones((1, 4, 3))})
+    chunk = gr00t_shim.to_chunk(
+        {"single_arm": np.zeros((1, 4, 7)), "gripper": np.zeros((1, 4, 1)), "base": np.ones((1, 4, 3))}
+    )
     assert chunk.shape == (4, 11) and chunk[0, 10] == 1.0

@@ -3,7 +3,6 @@ import json
 import shutil
 
 import pytest
-
 from conftest import REPO
 
 _spec = importlib.util.spec_from_file_location("check_docs", REPO / "scripts" / "check_docs.py")
@@ -14,7 +13,9 @@ _spec.loader.exec_module(check_docs)
 @pytest.fixture
 def repo_copy(tmp_path):
     dst = tmp_path / "repo"
-    shutil.copytree(REPO, dst, ignore=shutil.ignore_patterns(".git", ".venv", "out", "__pycache__", "*.egg-info", "menagerie"))
+    shutil.copytree(
+        REPO, dst, ignore=shutil.ignore_patterns(".git", ".venv", "out", "__pycache__", "*.egg-info", "menagerie")
+    )
     return dst
 
 
@@ -32,10 +33,15 @@ def test_exit_codes(repo_copy, capsys):
 
 def test_reports_invented_flag_broken_link_and_missing_test(repo_copy, capsys):
     readme = repo_copy / "README.md"
-    readme.write_text(readme.read_text(encoding="utf-8") + (
-        "\n```bash\npython -m arrival sim --episodes 2 --warp-speed 9\n```\n"
-        "\nSee [the guide](docs/NO-SUCH-GUIDE.md).\n"
-        "\nRun `tests/test_cli.py::test_no_such_thing_exists`.\n"), encoding="utf-8")
+    readme.write_text(
+        readme.read_text(encoding="utf-8")
+        + (
+            "\n```bash\npython -m arrival sim --episodes 2 --warp-speed 9\n```\n"
+            "\nSee [the guide](docs/NO-SUCH-GUIDE.md).\n"
+            "\nRun `tests/test_cli.py::test_no_such_thing_exists`.\n"
+        ),
+        encoding="utf-8",
+    )
     assert check_docs.main(["--root", str(repo_copy)]) == 1
     lines = capsys.readouterr().out.strip().splitlines()
     assert len(lines) == 3
@@ -60,16 +66,17 @@ def test_double_backslash_line_end_in_a_fenced_block(tmp_path):
     # markdown does not unescape code blocks: a pasted "\\" is a literal backslash, and the command ends there
     (tmp_path / "docs" / "ref").mkdir(parents=True)
     (tmp_path / "docs" / "ref" / "RUN.md").write_text(
-        "Prose may end in \\\\\n```bash\npython a.py --x 1 \\\\\n    --y 2 \\\n    --z 3\n```\n", encoding="utf-8")
+        "Prose may end in \\\\\n```bash\npython a.py --x 1 \\\\\n    --y 2 \\\n    --z 3\n```\n", encoding="utf-8"
+    )
     assert check_docs.check_continuations(tmp_path) == [
-        "docs/ref/RUN.md:3: line ends in two backslashes; bash reads a literal backslash and ends the command there"]
+        "docs/ref/RUN.md:3: line ends in two backslashes; bash reads a literal backslash and ends the command there"
+    ]
 
 
 def test_task_listed_done_and_open(tmp_path):
     doc = tmp_path / "README.md"
     text = "**Done:** CAP-1, MAN-2. **Open:** MAN-2, SIM-5."
-    assert check_docs.check_status_lists(doc, tmp_path, text) == [
-        "README.md:1: MAN-2 is listed as both Done and Open"]
+    assert check_docs.check_status_lists(doc, tmp_path, text) == ["README.md:1: MAN-2 is listed as both Done and Open"]
     assert check_docs.check_status_lists(doc, tmp_path, "**Done:** A-1. **Partial:** CAP-1. **Open:** SIM-5.") == []
 
 
@@ -86,8 +93,10 @@ def test_label_sentence_must_match_writer_constants(tmp_path):
 
 @pytest.mark.parametrize("heading", ["## Status", "# Status", "##\tStatus"])
 def test_planned_paths_are_allowed_but_links_still_resolve(tmp_path, heading):
-    text = ("## Code to-do before submission\n\nAdd `arrival/jobs/shards.py` later.\n"
-            f"[guide](missing.md)\n{heading}\n\nSee `arrival/jobs/shards.py` now.\n")
+    text = (
+        "## Code to-do before submission\n\nAdd `arrival/jobs/shards.py` later.\n"
+        f"[guide](missing.md)\n{heading}\n\nSee `arrival/jobs/shards.py` now.\n"
+    )
     assert check_docs.check_paths(tmp_path, tmp_path / "README.md", text, {}) == [
         "README.md:4: broken link missing.md",
         "README.md:7: path does not exist `arrival/jobs/shards.py`",
@@ -122,7 +131,8 @@ def test_todo_counts_must_match_item_statuses(tmp_path):
     path.write_text(json.dumps(todo), encoding="utf-8")
     assert check_docs.check_todo_counts(tmp_path) == [
         "site/data/todo.json: counts.done is 1, the items give 2",
-        "site/data/todo.json: counts.review is 2, the items give 1"]
+        "site/data/todo.json: counts.review is 2, the items give 1",
+    ]
     todo["counts"].update(done=2, review=1)
     path.write_text(json.dumps(todo), encoding="utf-8")
     assert check_docs.check_todo_counts(tmp_path) == []
@@ -134,16 +144,18 @@ def test_site_todo_names_only_open_items(tmp_path):
     items = [{"id": "G1", "status": "done"}, {"id": "G2", "status": "blocked"}, {"id": "P1", "status": "todo"}]
     (tmp_path / "site" / "data" / "todo.json").write_text(json.dumps({"groups": [{"items": items}]}), encoding="utf-8")
     js = tmp_path / "site" / "js" / "sections.js"
-    js.write_text("    `<b>Fine-tune (G1).</b> Not run.`,\n    `<b>Server (G2, DAT-3).</b> Not run.`,\n", encoding="utf-8")
+    js.write_text(
+        "    `<b>Fine-tune (G1).</b> Not run.`,\n    `<b>Server (G2, DAT-3).</b> Not run.`,\n", encoding="utf-8"
+    )
     assert check_docs.check_site_todo(tmp_path) == [
         "site/js/sections.js:1: G1 is done in site/data/todo.json but listed as still to do",
-        "site/js/sections.js:2: DAT-3 is not an item in site/data/todo.json"]
+        "site/js/sections.js:2: DAT-3 is not an item in site/data/todo.json",
+    ]
     js.write_text("    `<b>Server (G2).</b> Not run.`,\n    `<b>Scans (P1, G2).</b> Not run.`,\n", encoding="utf-8")
     assert check_docs.check_site_todo(tmp_path) == []
 
 
 def test_readme_quick_start_opens_previews_on_windows_too():
     """README says the quick start runs as is on Windows, where `open` is not a command (PowerShell or cmd)."""
-    lines = [line for line in (REPO / "README.md").read_text(encoding="utf-8").splitlines()
-             if line.startswith("open ")]
+    lines = [line for line in (REPO / "README.md").read_text(encoding="utf-8").splitlines() if line.startswith("open ")]
     assert lines and all("start " in line and "xdg-open" in line for line in lines)

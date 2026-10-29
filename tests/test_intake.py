@@ -6,12 +6,11 @@ import re
 from pathlib import Path
 
 import pytest
+from conftest import REPO
 from PIL import Image
 
 from arrival.scan import intake as it
 from arrival.twin.accuracy import load_measurements
-
-from conftest import REPO
 
 OFFICE = REPO / "tests" / "fixtures" / "roomplan" / "office.json"
 KITCHEN = REPO / "tests" / "fixtures" / "roomplan" / "kitchen_real_01.json"
@@ -86,7 +85,10 @@ def test_intake_lands_a_valid_folder_without_exif(tmp_path, photos, clean_plan):
     with Image.open(d / "reference_2.jpg") as im:
         assert im.size == (800, 600)  # never upscaled
     assert load_measurements(d / "measurements.json") == {
-        "counter_length_m": 3.2, "counter_height_m": 0.92, "sink_width_m": 0.55}
+        "counter_length_m": 3.2,
+        "counter_height_m": 0.92,
+        "sink_width_m": 0.55,
+    }
     assert not list((tmp_path / "scans").glob(".*"))
 
 
@@ -130,8 +132,18 @@ def test_heic_photo_refused_with_how_to_get_jpeg(tmp_path, photos, name):
     assert not (tmp_path / "scans" / "kitchen_01").exists()
 
 
-@pytest.mark.parametrize("spec", ["counter_length=abc", "counter_length=3.2,sink_width=", "counter_height=92cm",
-                                  "counter_length=-1", "counter_length=320", "counter_length=nan", "desk=1.0"])
+@pytest.mark.parametrize(
+    "spec",
+    [
+        "counter_length=abc",
+        "counter_length=3.2,sink_width=",
+        "counter_height=92cm",
+        "counter_length=-1",
+        "counter_length=320",
+        "counter_length=nan",
+        "desk=1.0",
+    ],
+)
 def test_bad_measurement_refused(tmp_path, photos, spec):
     with pytest.raises(it.IntakeError, match="measurement|unknown"):
         _run(tmp_path, photos, measures=spec)
@@ -193,9 +205,27 @@ def test_cli_go_and_refusal(tmp_path, photos, clean_plan, capsys):
     spec = importlib.util.spec_from_file_location("intake_scan", REPO / "scripts" / "intake_scan.py")
     cli = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(cli)
-    base = ["kitchen_01", "--roomplan", str(clean_plan), "--scans", str(tmp_path / "scans"), "--out", str(tmp_path / "r"),
-            "--location-type", "kitchen", "--phone", "iPhone 15 Pro", "--ios", "18.1", "--lighting", "daylight",
-            "--clutter", "low", "--measure", MEASURE]
+    base = [
+        "kitchen_01",
+        "--roomplan",
+        str(clean_plan),
+        "--scans",
+        str(tmp_path / "scans"),
+        "--out",
+        str(tmp_path / "r"),
+        "--location-type",
+        "kitchen",
+        "--phone",
+        "iPhone 15 Pro",
+        "--ios",
+        "18.1",
+        "--lighting",
+        "daylight",
+        "--clutter",
+        "low",
+        "--measure",
+        MEASURE,
+    ]
     assert cli.main(base + ["--photos", *map(str, photos)]) == 0
     assert "GO" in capsys.readouterr().out
     assert cli.main(base + ["--photos", *map(str, photos)]) == 2
@@ -209,10 +239,12 @@ def test_check_reruns_every_check_on_an_existing_folder(tmp_path, photos, clean_
     before = it.check("kitchen_01", scans=tmp_path / "scans")
     assert not before["go"] and "notes.md: 'Sink width (m)' is missing or blank" in before["problems"]
     notes = d / "notes.md"
-    notes.write_text(re.sub(r"(Sink width \(m\)[^\n]*?)TODO", r"\g<1>0.55", notes.read_text(encoding="utf-8")),
-                     encoding="utf-8")
-    (d / "measurements.json").write_text(json.dumps(
-        {"counter_length_m": 3.2, "counter_height_m": 0.92, "sink_width_m": 0.55}))
+    notes.write_text(
+        re.sub(r"(Sink width \(m\)[^\n]*?)TODO", r"\g<1>0.55", notes.read_text(encoding="utf-8")), encoding="utf-8"
+    )
+    (d / "measurements.json").write_text(
+        json.dumps({"counter_length_m": 3.2, "counter_height_m": 0.92, "sink_width_m": 0.55})
+    )
     after = it.check("kitchen_01", scans=tmp_path / "scans")
     assert after["go"], after["problems"]
     with pytest.raises(it.IntakeError, match="does not exist"):
@@ -224,8 +256,21 @@ def test_cli_no_go_points_at_check(tmp_path, photos, clean_plan, capsys):
     cli = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(cli)
     scans = ["--scans", str(tmp_path / "scans")]
-    assert cli.main(["kitchen_01", "--roomplan", str(clean_plan), "--out", str(tmp_path / "r"), *scans,
-                     "--photos", *map(str, photos)]) == 1
+    assert (
+        cli.main(
+            [
+                "kitchen_01",
+                "--roomplan",
+                str(clean_plan),
+                "--out",
+                str(tmp_path / "r"),
+                *scans,
+                "--photos",
+                *map(str, photos),
+            ]
+        )
+        == 1
+    )
     out = capsys.readouterr().out
     assert f"intake_scan.py kitchen_01 --check --scans {tmp_path / 'scans'}" in out
     assert cli.main(["kitchen_01", "--check", *scans]) == 1
@@ -242,6 +287,8 @@ def test_reference_photo_pixels_must_decode(tmp_path):
     assert it._photo_problems(photo) == []
     photo.write_bytes(photo.read_bytes()[:-20])
     assert any("not a readable image" in problem for problem in it._photo_problems(photo))
+
+
 @pytest.mark.parametrize("failure", ["encoding", "io"])
 def test_scan_validation_collects_unreadable_notes_problem(tmp_path, monkeypatch, failure):
     notes = tmp_path / "notes.md"
@@ -261,7 +308,8 @@ def test_scan_validation_collects_unreadable_notes_problem(tmp_path, monkeypatch
 
 
 def test_huge_integer_in_measurements_json_is_a_problem_not_a_crash(tmp_path):
-    (tmp_path / "measurements.json").write_text(json.dumps({
-        "counter_length_m": 10 ** 400, "counter_height_m": 0.9, "sink_width_m": 0.5}), encoding="utf-8")
+    (tmp_path / "measurements.json").write_text(
+        json.dumps({"counter_length_m": 10**400, "counter_height_m": 0.9, "sink_width_m": 0.5}), encoding="utf-8"
+    )
     problems = it.validate_scan_dir(tmp_path)
     assert any("measurements.json is invalid" in problem and "positive number" in problem for problem in problems)

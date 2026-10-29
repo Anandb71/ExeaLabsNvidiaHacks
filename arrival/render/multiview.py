@@ -1,4 +1,5 @@
 """Human preview of synchronized views; labels never enter the training videos."""
+
 from pathlib import Path
 
 import numpy as np
@@ -8,6 +9,8 @@ from arrival.export.lerobot import write_video
 
 
 def write_paired_preview(stem: Path, ego: np.ndarray, exo: np.ndarray, fps: int) -> None:
+    """Write <stem>.mp4 with the ego and exo views side by side, each frame labelled with its index and time, and
+    <stem>.png of the middle frame. For people only: the labels never enter the training videos."""
     if ego.shape != exo.shape or ego.ndim != 4 or len(ego) == 0:
         raise ValueError("paired preview needs equally shaped, nonempty video arrays")
     n, h, w, _ = ego.shape

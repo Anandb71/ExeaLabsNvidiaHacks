@@ -14,7 +14,6 @@ def test_delete_job_returns_none_when_job_folder_disappears(tmp_path: Path, monk
     job_dir = out_dir / "jobs" / job_id
     job_dir.mkdir(parents=True)
 
-    status = {"id": job_id, "status": "done", "room_id": "test_room"}
     (job_dir / "status.json").write_text('{"id": "job_abc123def456789012345678abcdef00", "status": "done"}')
 
     def mock_job_paths(out_dir_arg, job_id_arg, status_arg):

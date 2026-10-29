@@ -7,7 +7,8 @@ import math
 import re
 from pathlib import Path
 
-from arrival.catalog.fixtures import default_size
+from arrival.catalog.categories import default_size
+from arrival.provenance import sha256_file
 from arrival.scan.bundle import MAX_COORD_M, MAX_DIM_M, ScanBundleError, is_finite_number, numbers, validate
 
 SNAP_TOL = math.radians(5.0)
@@ -127,12 +128,24 @@ def _walls(w: dict) -> list[dict]:
     if isinstance(center, (list, tuple)) and len(center) >= 2:
         if all(is_finite_number(v) for v in center[:2]):
             cx, cz = float(center[0]), float(center[1])
-    pts = [_apply(m, [cx + radius * math.cos(start + sweep * i / n), 0.0,
-                      cz + radius * math.sin(start + sweep * i / n)])[:2] for i in range(n + 1)]
+    pts = [
+        _apply(m, [cx + radius * math.cos(start + sweep * i / n), 0.0, cz + radius * math.sin(start + sweep * i / n)])[
+            :2
+        ]
+        for i in range(n + 1)
+    ]
     thickness = float(min(dim[0], dim[2]))
     ident = _ident(w, "wall")
-    return [{"id": ident, "start": pts[i], "end": pts[i + 1], "height": float(dim[1]),
-             "thickness": thickness if thickness > 0 else MIN_WALL_THICKNESS} for i in range(n)]
+    return [
+        {
+            "id": ident,
+            "start": pts[i],
+            "end": pts[i + 1],
+            "height": float(dim[1]),
+            "thickness": thickness if thickness > 0 else MIN_WALL_THICKNESS,
+        }
+        for i in range(n)
+    ]
 
 
 def _object(o: dict, i: int) -> dict:
@@ -151,7 +164,8 @@ def _object(o: dict, i: int) -> dict:
     }
 
 
-def _seg_dist(p: list[float], w: dict) -> float:
+def segment_distance(p: list[float], w: dict) -> float:
+    """Horizontal distance from point p to a wall's start-end segment."""
     (x0, y0), (x1, y1) = w["start"], w["end"]
     dx, dy = x1 - x0, y1 - y0
     n = dx * dx + dy * dy
@@ -169,7 +183,7 @@ def _portal(s: dict, i: int, kind: str, segments: dict[str, list[dict]]) -> dict
     chords = segments.get(parent) if parent else None
     entry = {
         "id": _ident(s, f"{kind}_{i}"),
-        "wall_id": min(chords, key=lambda w: _seg_dist(position, w))["id"] if chords else None,
+        "wall_id": min(chords, key=lambda w: segment_distance(position, w))["id"] if chords else None,
         "size": _size(s["dimensions"]),
         "position": position,
         "yaw": _yaw(m),
@@ -234,7 +248,9 @@ def _snap(yaw: float) -> float:
     return 0.0 if abs(yaw) < 1e-9 else round(yaw, 9)
 
 
-def _align(walls: list[dict], posed: list[dict], polygons: list[list[list[float]]]) -> tuple[float, float, float, float]:
+def _align(
+    walls: list[dict], posed: list[dict], polygons: list[list[list[float]]]
+) -> tuple[float, float, float, float]:
     """Rotate about z so the longest wall runs along +X, then translate the walls' min corner to (0, 0).
     `posed` entries carry position and yaw; `polygons` are bare [x, y] lists."""
     if not walls:
@@ -389,8 +405,9 @@ def to_bundle(roomplan: dict, room_id: str, story: int | None = None) -> dict:
     _unique(walls)
     fixtures = [_object(o, i) for i, o in enumerate(roomplan.get("objects", [])) if _kept(o)]
     _unique(fixtures)
-    portals = {key: [_portal(s, i, kind, segments) for i, s in enumerate(roomplan.get(key, []))]
-               for key, kind in PORTALS}
+    portals = {
+        key: [_portal(s, i, kind, segments) for i, s in enumerate(roomplan.get(key, []))] for key, kind in PORTALS
+    }
     for ps in portals.values():
         _unique(ps)
     floors = [fl for fl in (_floor(f, i, z0) for i, f in enumerate(roomplan.get("floors", []))) if fl]
@@ -404,8 +421,7 @@ def to_bundle(roomplan: dict, room_id: str, story: int | None = None) -> dict:
         "units": "meters",
         "frame": "z_up",
         "geometry_source": "roomplan",
-        "arkit_world_to_room": [[c, 0.0, s, -mx], [s, 0.0, -c, -my],
-                                [0.0, 1.0, 0.0, -z0], [0.0, 0.0, 0.0, 1.0]],
+        "arkit_world_to_room": [[c, 0.0, s, -mx], [s, 0.0, -c, -my], [0.0, 1.0, 0.0, -z0], [0.0, 0.0, 0.0, 1.0]],
         "blocks_claims": [],
         "walls": walls,
         "fixtures": fixtures,
@@ -422,8 +438,6 @@ def to_bundle(roomplan: dict, room_id: str, story: int | None = None) -> dict:
 
 def load(path: str | Path, room_id: str, story: int | None = None) -> dict:
     """Normalize a RoomPlan JSON file. The bundle carries `input_sha256`, the sha256 of the export's bytes."""
-    from arrival.export.provenance import sha256_file
-
     with open(path, encoding="utf-8") as f:
         bundle = to_bundle(json.load(f), room_id, story)
     bundle["input_sha256"] = sha256_file(path)

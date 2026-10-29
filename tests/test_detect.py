@@ -13,11 +13,11 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from conftest import REPO, SCANS
 from PIL import Image
 
 from arrival.scan import rgbd
 from arrival.twin import detect
-from conftest import REPO, SCANS
 
 FIXTURES = REPO / "tests" / "fixtures" / "detection"
 REPLIES = FIXTURES / "replies.json"
@@ -36,8 +36,9 @@ def room(hero_bundle):
 
 def run(name, room, client=None):
     bundle, twin = room
-    return detect.detect_objects(FIXTURES / name, twin, bundle, client=client or detect.DetectionClient(REPLIES),
-                                 log=lambda *_: None)
+    return detect.detect_objects(
+        FIXTURES / name, twin, bundle, client=client or detect.DetectionClient(REPLIES), log=lambda *_: None
+    )
 
 
 class FakeClient:
@@ -77,8 +78,16 @@ def test_loose_boxes_place_the_same_mug(room, pad):
     # a model's box is looser than the rendered extent and takes in the counter, the backsplash and the wall
     doc = json.loads(REPLIES.read_text(encoding="utf-8"))["entries"]
     boxes = {e["frame"].split("/")[1]: e["reply"]["objects"][0]["box"] for e in doc.values() if e["reply"]["objects"]}
-    fake = FakeClient({f: {"objects": [{"label": "mug", "box": [b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad],
-                                        "confidence": 0.9}]} for f, b in boxes.items()})
+    fake = FakeClient(
+        {
+            f: {
+                "objects": [
+                    {"label": "mug", "box": [b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad], "confidence": 0.9}
+                ]
+            }
+            for f, b in boxes.items()
+        }
+    )
     res = run("mug", room, client=fake)
     (obj,) = res["objects"]
     assert math.dist(obj["position"][:2], MUG[:2]) < XY_TOL and abs(obj["position"][2] - MUG[2]) < Z_TOL
@@ -92,23 +101,37 @@ def _boxes_of(name, lo, hi):
     out = {}
     for f in m.frames:
         uv, _ = rgbd.project(corners, f.K, f.camera_to_room)
-        out[f.id] = [math.floor(uv[:, 0].min()), math.floor(uv[:, 1].min()),
-                     math.ceil(uv[:, 0].max()), math.ceil(uv[:, 1].max())]
+        out[f.id] = [
+            math.floor(uv[:, 0].min()),
+            math.floor(uv[:, 1].min()),
+            math.ceil(uv[:, 0].max()),
+            math.ceil(uv[:, 1].max()),
+        ]
     return out
 
 
 @pytest.mark.parametrize("label", ["mug", "cup", "bottle", "book"])
 def test_empty_room_places_nothing_for_loose_backsplash_or_wall_boxes(room, label):
     # nothing stands on the counter, so no box, however loose or wherever it is drawn, may become an object
-    regions = {"backsplash": ((3.16, 0.0, 0.93), (3.24, 0.10, 1.03)),
-               "wall": ((3.10, -0.02, 1.0), (3.30, 0.08, 1.3)),
-               "bare_front": ((3.1, 0.5, 0.92), (3.3, 0.7, 0.95)),
-               "mug_spot": ((3.16, 0.41, 0.92), (3.24, 0.49, 1.02))}
+    regions = {
+        "backsplash": ((3.16, 0.0, 0.93), (3.24, 0.10, 1.03)),
+        "wall": ((3.10, -0.02, 1.0), (3.30, 0.08, 1.3)),
+        "bare_front": ((3.1, 0.5, 0.92), (3.3, 0.7, 0.95)),
+        "mug_spot": ((3.16, 0.41, 0.92), (3.24, 0.49, 1.02)),
+    }
     for name, (lo, hi) in regions.items():
         for pad in (0, 8, 20):
             boxes = _boxes_of("empty", lo, hi)
-            fake = FakeClient({f: {"objects": [{"label": label, "box": [b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad],
-                                                "confidence": 0.9}]} for f, b in boxes.items()})
+            fake = FakeClient(
+                {
+                    f: {
+                        "objects": [
+                            {"label": label, "box": [b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad], "confidence": 0.9}
+                        ]
+                    }
+                    for f, b in boxes.items()
+                }
+            )
             res = run("empty", room, client=fake)
             assert res["objects"] == [], (name, pad, res["objects"])
             assert len(res["rejected"]) == 3
@@ -208,19 +231,31 @@ def test_model_reply_is_parsed_and_cached(room, tmp_path, monkeypatch):
 
 def test_unsupported_uncertain_and_unplaceable_detections_stay_explicit(room):
     good = {"label": "mug", "box": [57, 38, 69, 54], "confidence": 0.9}
-    fake = FakeClient({"f000": {"objects": [
-        good,
-        {"label": "other:toaster", "box": [10, 10, 30, 30], "confidence": 0.9},
-        {"label": "mug", "box": [57, 38, 69, 54], "confidence": 0.2},
-        {"label": "bowl", "box": [500, 500, 600, 600], "confidence": 0.9},
-        {"label": "cup", "box": [10, 80, 20, 90], "confidence": 0.9},  # the cabinet front, under the top
-        {"label": "plate", "box": [20, 40, 35, 55], "confidence": 0.9},  # bare counter top
-        {"label": "apple", "box": "left", "confidence": 0.9}]}})
+    fake = FakeClient(
+        {
+            "f000": {
+                "objects": [
+                    good,
+                    {"label": "other:toaster", "box": [10, 10, 30, 30], "confidence": 0.9},
+                    {"label": "mug", "box": [57, 38, 69, 54], "confidence": 0.2},
+                    {"label": "bowl", "box": [500, 500, 600, 600], "confidence": 0.9},
+                    {"label": "cup", "box": [10, 80, 20, 90], "confidence": 0.9},  # the cabinet front, under the top
+                    {"label": "plate", "box": [20, 40, 35, 55], "confidence": 0.9},  # bare counter top
+                    {"label": "apple", "box": "left", "confidence": 0.9},
+                ]
+            }
+        }
+    )
     res = run("mug", room, client=fake)
     assert [o["label"] for o in res["objects"]] == ["mug"]
     assert [(r["label"], r["reason"]) for r in res["rejected"]] == [
-        ("other:toaster", "unsupported_label"), ("mug", "low_confidence"), ("bowl", "bad_box"),
-        ("cup", "no_support"), ("plate", "nothing_above_top"), ("apple", "bad_box")]
+        ("other:toaster", "unsupported_label"),
+        ("mug", "low_confidence"),
+        ("bowl", "bad_box"),
+        ("cup", "no_support"),
+        ("plate", "nothing_above_top"),
+        ("apple", "bad_box"),
+    ]
     assert all(r["frame"] == "f000" for r in res["rejected"])
 
 
@@ -240,13 +275,15 @@ def test_held_out_frames_and_other_rooms_are_not_read(room, tmp_path):
 
 def test_two_loosely_boxed_mugs_stay_two(room, tmp_path):
     # each mug's 20 px box also holds the other mug; neither may turn into a second copy of its neighbour
-    from arrival.eval.realism import look_at, render_twin
+    from arrival.eval.realism import render_twin
 
     bundle, twin = room
     mugs = [[3.12, 0.45, 0.97], [3.28, 0.45, 0.97]]
     scene = json.loads(json.dumps(twin))
-    scene["objects"] = [{"id": f"mug_{i}", "catalog_id": "mug", "label": "mug", "size": [0.08, 0.08, 0.10],
-                         "position": p, "yaw": 0.0} for i, p in enumerate(mugs, 1)]
+    scene["objects"] = [
+        {"id": f"mug_{i}", "catalog_id": "mug", "label": "mug", "size": [0.08, 0.08, 0.10], "position": p, "yaw": 0.0}
+        for i, p in enumerate(mugs, 1)
+    ]
     manifest = json.loads((FIXTURES / "mug" / rgbd.MANIFEST_NAME).read_text(encoding="utf-8"))
     (tmp_path / "rgb").mkdir()
     (tmp_path / "depth").mkdir()
@@ -259,11 +296,22 @@ def test_two_loosely_boxed_mugs_stay_two(room, tmp_path):
         Image.fromarray(np.round(depth * 1000).astype(np.uint16)).save(tmp_path / fr["depth"])
         boxes = []
         for p in mugs:
-            c = np.array([[p[0] + sx * 0.04, p[1] + sy * 0.04, p[2] + sz * 0.05]
-                          for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1)])
+            c = np.array(
+                [
+                    [p[0] + sx * 0.04, p[1] + sy * 0.04, p[2] + sz * 0.05]
+                    for sx in (-1, 1)
+                    for sy in (-1, 1)
+                    for sz in (-1, 1)
+                ]
+            )
             uv, _ = rgbd.project(c, K, T)
-            boxes.append({"label": "mug", "confidence": 0.9, "box": [uv[:, 0].min() - 20, uv[:, 1].min() - 20,
-                                                                     uv[:, 0].max() + 20, uv[:, 1].max() + 20]})
+            boxes.append(
+                {
+                    "label": "mug",
+                    "confidence": 0.9,
+                    "box": [uv[:, 0].min() - 20, uv[:, 1].min() - 20, uv[:, 0].max() + 20, uv[:, 1].max() + 20],
+                }
+            )
         replies[fr["id"]] = {"objects": boxes}
     (tmp_path / rgbd.MANIFEST_NAME).write_text(json.dumps(manifest), encoding="utf-8")
     res = detect.detect_objects(tmp_path, twin, bundle, client=FakeClient(replies), log=lambda *_: None)
@@ -273,17 +321,27 @@ def test_two_loosely_boxed_mugs_stay_two(room, tmp_path):
         assert math.dist(got, want[:2]) < XY_TOL
 
 
-CORNER_TABLE = {"id": "table_c", "type": "counter", "source_category": "table", "default_config_name": "dining",
-                "position": [3.55, 2.55, 0.375], "size": [0.9, 0.9, 0.75], "yaw": 0.0}  # in the east-south corner
+CORNER_TABLE = {
+    "id": "table_c",
+    "type": "counter",
+    "source_category": "table",
+    "default_config_name": "dining",
+    "position": [3.55, 2.55, 0.375],
+    "size": [0.9, 0.9, 0.75],
+    "yaw": 0.0,
+}  # in the east-south corner
 
 
-@pytest.mark.parametrize("region,lo,hi", [
-    ("faucet_column", (1.585, 0.10, 0.92), (1.615, 0.13, 1.13)),
-    ("faucet_base", (1.575, 0.09, 0.92), (1.625, 0.14, 0.96)),
-    ("east_wall_backsplash_corner", (3.92, 0.07, 0.92), (4.0, 0.15, 1.06)),
-    ("fridge_backsplash_corner", (0.75, 0.07, 0.92), (0.83, 0.15, 1.06)),
-    ("table_wall_corner", (3.92, 2.92, 0.75), (4.0, 3.0, 0.9)),
-])
+@pytest.mark.parametrize(
+    "region,lo,hi",
+    [
+        ("faucet_column", (1.585, 0.10, 0.92), (1.615, 0.13, 1.13)),
+        ("faucet_base", (1.575, 0.09, 0.92), (1.625, 0.14, 0.96)),
+        ("east_wall_backsplash_corner", (3.92, 0.07, 0.92), (4.0, 0.15, 1.06)),
+        ("fridge_backsplash_corner", (0.75, 0.07, 0.92), (0.83, 0.15, 1.06)),
+        ("table_wall_corner", (3.92, 2.92, 0.75), (4.0, 3.0, 0.9)),
+    ],
+)
 def test_corners_and_the_faucet_place_nothing(room, tmp_path, region, lo, hi):
     # where two faces meet, or at the faucet, a box finds a narrow, standing, deep group of points that is no object
     from arrival.eval.realism import look_at, render_twin
@@ -294,8 +352,11 @@ def test_corners_and_the_faucet_place_nothing(room, tmp_path, region, lo, hi):
         eyes = [(3.5, 2.3, 1.3), (3.3, 2.5, 1.25), (3.6, 2.1, 1.3)]
     else:
         c = [(a + b) / 2 for a, b in zip(lo, hi)]
-        eyes = [(c[0], c[1] + 0.75, c[2] + 0.5), (c[0] - 0.45, c[1] + 0.64, c[2] + 0.45),
-                (c[0] + 0.45, c[1] + 0.64, c[2] + 0.45)]
+        eyes = [
+            (c[0], c[1] + 0.75, c[2] + 0.5),
+            (c[0] - 0.45, c[1] + 0.64, c[2] + 0.45),
+            (c[0] + 0.45, c[1] + 0.64, c[2] + 0.45),
+        ]
     target = [(a + b) / 2 for a, b in zip(lo, hi)]
     manifest = json.loads((FIXTURES / "empty" / rgbd.MANIFEST_NAME).read_text(encoding="utf-8"))
     (tmp_path / "rgb").mkdir()
@@ -314,8 +375,16 @@ def test_corners_and_the_faucet_place_nothing(room, tmp_path, region, lo, hi):
     (tmp_path / rgbd.MANIFEST_NAME).write_text(json.dumps(manifest), encoding="utf-8")
     for label in ("mug", "cup", "bottle", "book", "apple", "remote", "bowl"):
         for pad in (0, 4, 10):
-            fake = FakeClient({f: {"objects": [{"label": label, "box": [b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad],
-                                                "confidence": 0.9}]} for f, b in boxes.items()})
+            fake = FakeClient(
+                {
+                    f: {
+                        "objects": [
+                            {"label": label, "box": [b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad], "confidence": 0.9}
+                        ]
+                    }
+                    for f, b in boxes.items()
+                }
+            )
             res = detect.detect_objects(tmp_path, twin, bundle, client=fake, log=lambda *_: None)
             assert res["objects"] == [], (region, label, pad, res["objects"])
 
@@ -382,8 +451,14 @@ def _render(tmp_path, twin, objects, eyes, target, blocks=None):
         boxes[fr["id"]] = []
         for o in objects if blocks is None else blocks:
             h = np.asarray(o["size"]) / 2
-            c = np.array([[o["position"][0] + sx * h[0], o["position"][1] + sy * h[1], o["position"][2] + sz * h[2]]
-                          for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1)])
+            c = np.array(
+                [
+                    [o["position"][0] + sx * h[0], o["position"][1] + sy * h[1], o["position"][2] + sz * h[2]]
+                    for sx in (-1, 1)
+                    for sy in (-1, 1)
+                    for sz in (-1, 1)
+                ]
+            )
             uv, _ = rgbd.project(c, K, np.asarray(fr["camera_to_room"]).reshape(4, 4))
             boxes[fr["id"]].append([uv[:, 0].min(), uv[:, 1].min(), uv[:, 0].max(), uv[:, 1].max()])
     (tmp_path / rgbd.MANIFEST_NAME).write_text(json.dumps(manifest), encoding="utf-8")
@@ -393,8 +468,11 @@ def _render(tmp_path, twin, objects, eyes, target, blocks=None):
 def _eyes(x, y, z, front):
     """Three viewpoints in front of x, y, z: straight on and from either side, looking down at it."""
     fx, fy = front
-    return [(x + fx * 0.7, y + fy * 0.7, z + 0.5), (x + fx * 0.6 + fy * 0.5, y + fy * 0.6 - fx * 0.5, z + 0.45),
-            (x + fx * 0.65 - fy * 0.55, y + fy * 0.65 + fx * 0.55, z + 0.45)]
+    return [
+        (x + fx * 0.7, y + fy * 0.7, z + 0.5),
+        (x + fx * 0.6 + fy * 0.5, y + fy * 0.6 - fx * 0.5, z + 0.45),
+        (x + fx * 0.65 - fy * 0.55, y + fy * 0.65 + fx * 0.55, z + 0.45),
+    ]
 
 
 @pytest.fixture
@@ -417,8 +495,12 @@ def _against(spot, r, gap):
     counter_b (back at y 0.075, east end at the wall x 4.0), or from the backsplash of u_kitchen_42's storage_b
     (a RoomPlan storage cabinet facing -y, back at y 3.72)."""
     back, east = 0.075 + SPLASH_FACE + r + gap, 4.0 - WALL_FACE - r - gap
-    return {"splash": (3.4, back), "wall": (east, 0.4), "corner": (east, back),
-            "storage_splash": (6.9, 3.72 - SPLASH_FACE - r - gap)}[spot]
+    return {
+        "splash": (3.4, back),
+        "wall": (east, 0.4),
+        "corner": (east, back),
+        "storage_splash": (6.9, 3.72 - SPLASH_FACE - r - gap),
+    }[spot]
 
 
 @pytest.mark.parametrize("gap", [0.01, 0.03])
@@ -435,19 +517,30 @@ def test_objects_just_in_front_of_a_backsplash_or_wall_are_placed(room, u_room, 
         o = {"id": f"{label}_1", "catalog_id": label, "label": label, "size": size, "position": want, "yaw": 0.0}
         boxes = _render(tmp_path / label, twin, [o], _eyes(x, y, top + 0.03, front), (x, y, top + 0.03))
         for pad in (0, 6):
-            fake = FakeClient({f: {"objects": [{"label": label, "box": [b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad],
-                                                "confidence": 0.9}]} for f, (b,) in boxes.items()})
+            fake = FakeClient(
+                {
+                    f: {
+                        "objects": [
+                            {"label": label, "box": [b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad], "confidence": 0.9}
+                        ]
+                    }
+                    for f, (b,) in boxes.items()
+                }
+            )
             res = detect.detect_objects(tmp_path / label, twin, bundle, client=fake, log=lambda *_: None)
             assert len(res["objects"]) == 1, (label, pad, res["rejected"])
             got = res["objects"][0]["position"]
             assert math.dist(got[:2], want[:2]) < XY_TOL and abs(got[2] - want[2]) < Z_TOL, (label, pad, got, want)
 
 
-@pytest.mark.parametrize("region,lo,hi", [
-    ("splash_mid", (6.85, 3.66, 0.9), (6.95, 3.74, 1.06)),
-    ("splash_end", (7.36, 3.64, 0.9), (7.46, 3.74, 1.06)),
-    ("splash_long", (6.6, 3.62, 0.9), (7.2, 3.74, 1.2)),
-])
+@pytest.mark.parametrize(
+    "region,lo,hi",
+    [
+        ("splash_mid", (6.85, 3.66, 0.9), (6.95, 3.74, 1.06)),
+        ("splash_end", (7.36, 3.64, 0.9), (7.46, 3.74, 1.06)),
+        ("splash_long", (6.6, 3.62, 0.9), (7.2, 3.74, 1.2)),
+    ],
+)
 def test_storage_worktop_backsplash_places_nothing(u_room, tmp_path, region, lo, hi):
     # u_kitchen_42's worktops are RoomPlan storage cabinets, which the scene builds with a backsplash like a counter
     bundle, twin = u_room
@@ -457,8 +550,15 @@ def test_storage_worktop_backsplash_places_nothing(u_room, tmp_path, region, lo,
     boxes = {f: b for f, (b,) in _render(tmp_path, twin, [], _eyes(*c, (0, -1)), c, [block]).items()}
     for label in ("mug", "cup", "bottle", "book", "apple", "remote", "bowl"):
         for pad in (0, 4, 10):
-            fake = FakeClient({f: {"objects": [{"label": label, "box": [b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad],
-                                                "confidence": 0.9}]} for f, b in boxes.items()})
+            fake = FakeClient(
+                {
+                    f: {
+                        "objects": [
+                            {"label": label, "box": [b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad], "confidence": 0.9}
+                        ]
+                    }
+                    for f, b in boxes.items()
+                }
+            )
             res = detect.detect_objects(tmp_path, twin, bundle, client=fake, log=lambda *_: None)
             assert res["objects"] == [], (region, label, pad, res["objects"])
-

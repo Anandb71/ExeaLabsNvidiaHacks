@@ -20,18 +20,31 @@ REPO = Path(__file__).resolve().parents[1]
 SCAN = b'{"a": 1}'
 
 
-@pytest.mark.parametrize("raw,expected", [
-    ("Кухня.json", "upload.json"), ("厨房.json", "upload.json"), ("キッチン.JSON", "upload.JSON"),
-    ("مطبخ.json", "upload.json"), ("кадры.zip", "upload.zip"), (".json", "upload.json"),
-])
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("Кухня.json", "upload.json"),
+        ("厨房.json", "upload.json"),
+        ("キッチン.JSON", "upload.JSON"),
+        ("مطبخ.json", "upload.json"),
+        ("кадры.zip", "upload.zip"),
+        (".json", "upload.json"),
+    ],
+)
 def test_name_without_latin_letters_keeps_its_extension(raw, expected):
     assert hd.safe_filename(raw) == expected
-    assert hd.safe_filename(raw, "job_0123abcd") == "job_0123abcd" + expected[len("upload"):]
+    assert hd.safe_filename(raw, "job_0123abcd") == "job_0123abcd" + expected[len("upload") :]
 
 
-@pytest.mark.parametrize("raw,expected", [
-    ("Küche.json", "K_che.json"), ("....", "upload.bin"), ("Кухня", "upload.bin"), ("..hidden.json", "hidden.json"),
-])
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("Küche.json", "K_che.json"),
+        ("....", "upload.bin"),
+        ("Кухня", "upload.bin"),
+        ("..hidden.json", "hidden.json"),
+    ],
+)
 def test_names_with_latin_letters_are_unchanged(raw, expected):
     assert hd.safe_filename(raw) == expected
 
@@ -53,8 +66,11 @@ def server(tmp_path):
 def _post(srv, parts):
     body = b""
     for name, filename, payload in parts:
-        body += (f'--bnd7\r\nContent-Disposition: form-data; name="{name}"; filename="{filename}"\r\n\r\n'
-                 ).encode() + payload + b"\r\n"
+        body += (
+            (f'--bnd7\r\nContent-Disposition: form-data; name="{name}"; filename="{filename}"\r\n\r\n').encode()
+            + payload
+            + b"\r\n"
+        )
     body += b"--bnd7--\r\n"
     conn = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=10)
     conn.request("POST", "/jobs", body=body, headers={"Content-Type": "multipart/form-data; boundary=bnd7"})

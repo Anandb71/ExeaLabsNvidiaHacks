@@ -61,7 +61,7 @@ def find_part(buf, boundary: bytes, field: str, optional: bool = False):
     pos = buf.find(delim)
     while pos >= 0:
         start = pos + len(delim)
-        if buf[start:start + 2] == b"--":
+        if buf[start : start + 2] == b"--":
             break
         head_end = buf.find(b"\r\n\r\n", start)
         if head_end < 0:
@@ -78,6 +78,7 @@ def find_part(buf, boundary: bytes, field: str, optional: bool = False):
     if optional:
         return None
     raise UploadError(f"missing file field {field!r}")
+
 
 CSS = """
 :root { color-scheme: light dark;
@@ -282,7 +283,8 @@ def _stage_bar(status: dict) -> str:
             cls = ""
         segs.append(f"<i class='{cls}' title='{name}'></i>")
     label = {"done": "complete", "queued": "waiting for worker", "failed": f"failed at {stage or 'start'}"}.get(
-        st, f"{stage or 'starting'} ({idx + 1}/{len(STAGES)})" if idx >= 0 else "starting")
+        st, f"{stage or 'starting'} ({idx + 1}/{len(STAGES)})" if idx >= 0 else "starting"
+    )
     prog = status.get("progress")
     if st == "running" and stage == "sim" and isinstance(prog, dict) and prog.get("total"):
         label = f"sim: {prog.get('done', 0)}/{prog['total']} episodes ({idx + 1}/{len(STAGES)})"
@@ -294,7 +296,9 @@ def _chip(text: str, kind: str = "") -> str:
 
 
 def _pct(num, den) -> str:
-    return f"{100 * num / den:.0f}%" if isinstance(num, (int, float)) and isinstance(den, (int, float)) and den else "n/a"
+    return (
+        f"{100 * num / den:.0f}%" if isinstance(num, (int, float)) and isinstance(den, (int, float)) and den else "n/a"
+    )
 
 
 def _fmt_list(values) -> str:
@@ -304,6 +308,9 @@ def _fmt_list(values) -> str:
 
 
 class ArrivalServer(ThreadingHTTPServer):
+    """The threaded HTTP server and the settings and shared state every request reads: folders, upload and queue limits,
+    public mode, proxy trust, the rate limiter and the locks that serialise job creation and cap concurrent uploads."""
+
     daemon_threads = True
     # On Windows SO_REUSEADDR lets a second server bind a port that is already being served; ask for exclusive use.
     allow_reuse_address = sys.platform != "win32"
@@ -327,9 +334,12 @@ def _csp(inline: bool) -> str:
     """Pages inline one stylesheet and one script, allowed by hash (no 'unsafe-inline'); JSON gets the empty policy."""
     if not inline:
         return "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
-    return ("default-src 'none'; " f"style-src {hd.csp_hash(CSS)}; script-src {hd.csp_hash(JS)}; "
-            "img-src 'self' data:; media-src 'self'; connect-src 'self'; form-action 'self'; "
-            "base-uri 'none'; frame-ancestors 'none'")
+    return (
+        "default-src 'none'; "
+        f"style-src {hd.csp_hash(CSS)}; script-src {hd.csp_hash(JS)}; "
+        "img-src 'self' data:; media-src 'self'; connect-src 'self'; form-action 'self'; "
+        "base-uri 'none'; frame-ancestors 'none'"
+    )
 
 
 def _status_phrase(code: int) -> str:
@@ -340,6 +350,9 @@ def _status_phrase(code: int) -> str:
 
 
 class Handler(BaseHTTPRequestHandler):
+    """Every route of the local page: the room list and room pages, job status and deletion, dataset downloads, previews
+    and the upload endpoint. Every reply carries the security headers."""
+
     server: ArrivalServer
     server_version = "Arrival"
     sys_version = ""  # no Python version in the Server header
@@ -369,11 +382,19 @@ class Handler(BaseHTTPRequestHandler):
     @property
     def https(self) -> bool:
         headers = getattr(self, "headers", None)  # absent when the request line itself was malformed
-        return bool(self.server.behind_proxy and headers is not None
-                    and headers.get("X-Forwarded-Proto", "").lower() == "https")
+        return bool(
+            self.server.behind_proxy and headers is not None and headers.get("X-Forwarded-Proto", "").lower() == "https"
+        )
 
-    def _start(self, code: int, ctype: str, length: int, extra: dict | None = None, inline: bool = False,
-               cache: str = "no-store"):
+    def _start(
+        self,
+        code: int,
+        ctype: str,
+        length: int,
+        extra: dict | None = None,
+        inline: bool = False,
+        cache: str = "no-store",
+    ):
         """Status line plus the headers every response carries; the caller ends the headers."""
         self.send_response(code)
         self.send_header("Content-Type", ctype)
@@ -407,17 +428,23 @@ class Handler(BaseHTTPRequestHandler):
         path = (getattr(self, "path", None) or "").split("?", 1)[0]
         headers = getattr(self, "headers", None)
         accept = headers.get("Accept", "") if headers is not None else ""
-        return (getattr(self, "command", None) == "POST" or path.startswith("/jobs")
-                or ("application/json" in accept and "text/html" not in accept))
+        return (
+            getattr(self, "command", None) == "POST"
+            or path.startswith("/jobs")
+            or ("application/json" in accept and "text/html" not in accept)
+        )
 
     def _error(self, code: int, msg: str | None = None, extra: dict | None = None):
         """A generic error page (HTML for browsers, JSON for the API and the capture app). Never a traceback."""
         msg = msg or _status_phrase(code)
         if self._wants_json():
             return self._json(code, {"error": msg}, extra)
-        self._html(code, _status_phrase(code),
-                   f"<div class='card empty'><b>{code}</b>{esc(msg)}<p><a class='btn' href='/'>Back to rooms</a></p></div>",
-                   extra)
+        self._html(
+            code,
+            _status_phrase(code),
+            f"<div class='card empty'><b>{code}</b>{esc(msg)}<p><a class='btn' href='/'>Back to rooms</a></p></div>",
+            extra,
+        )
 
     def send_error(self, code, message=None, explain=None):  # protocol-level errors from http.server
         self.close_connection = True
@@ -435,7 +462,9 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError, TimeoutError):
             self.close_connection = True
         except Exception as e:  # noqa: BLE001
-            self.log_error("unhandled %s in %s %s", type(e).__name__, self.command, (self.path or "").split("?", 1)[0][:80])
+            self.log_error(
+                "unhandled %s in %s %s", type(e).__name__, self.command, (self.path or "").split("?", 1)[0][:80]
+            )
             self.close_connection = True
             try:
                 self._error(500, "Internal server error")
@@ -455,7 +484,8 @@ class Handler(BaseHTTPRequestHandler):
         if not self.scans_dir.is_dir():
             return []
         return sorted(
-            p.name for p in self.scans_dir.iterdir()
+            p.name
+            for p in self.scans_dir.iterdir()
             if p.is_dir() and any((p / f).is_file() for f in SCAN_FILES) and ID_RE.match(p.name)
         )
 
@@ -503,6 +533,7 @@ class Handler(BaseHTTPRequestHandler):
             if path != "/jobs":
                 return self._not_found()
             return self._post_job()
+
         self._guard(route)
 
     def _method_not_allowed(self):
@@ -514,6 +545,7 @@ class Handler(BaseHTTPRequestHandler):
             if len(parts) != 2 or parts[0] != "jobs" or not JOB_ID_RE.match(parts[1]):
                 return self._not_found()
             return self._delete_job(parts[1])
+
         self._guard(route)
 
     do_PUT = do_PATCH = do_OPTIONS = _method_not_allowed
@@ -537,13 +569,26 @@ class Handler(BaseHTTPRequestHandler):
         succ = info.get("arrival_successes", rep.get("successes"))
         att = info.get("arrival_attempts", rep.get("attempts"))
         contacts = rep.get("human_contacts")
-        if contacts is None and isinstance(rep.get("families"), dict) and all(
-                isinstance(f, dict) and "human_contacts" in f for f in rep["families"].values()) and rep["families"]:
+        if (
+            contacts is None
+            and isinstance(rep.get("families"), dict)
+            and all(isinstance(f, dict) and "human_contacts" in f for f in rep["families"].values())
+            and rep["families"]
+        ):
             contacts = sum(f["human_contacts"] for f in rep["families"].values())
-        return {"info": bool(info), "episodes": info.get("total_episodes"), "successes": succ, "attempts": att,
-                "rate": _pct(succ, att), "valid": info.get("arrival_physically_valid") if info else None,
-                "generator": info.get("arrival_generator"), "contacts": contacts, "fps": info.get("fps"),
-                "families": info.get("arrival_families") or [], "report": rep}
+        return {
+            "info": bool(info),
+            "episodes": info.get("total_episodes"),
+            "successes": succ,
+            "attempts": att,
+            "rate": _pct(succ, att),
+            "valid": info.get("arrival_physically_valid") if info else None,
+            "generator": info.get("arrival_generator"),
+            "contacts": contacts,
+            "fps": info.get("fps"),
+            "families": info.get("arrival_families") or [],
+            "report": rep,
+        }
 
     def _preview(self, name: str, ext: str) -> str | None:
         f = f"{name}_{ext}"
@@ -554,8 +599,9 @@ class Handler(BaseHTTPRequestHandler):
         sim, base = self._ds_stats(f"{room}_sim"), self._ds_stats(room)
         st = sim or base
         png = self._preview(f"{room}_sim", "contact.png")
-        thumb = (f"<img src='{esc(png)}' alt='{esc(room)} simulation preview' loading='lazy'>" if png
-                 else "no preview yet")
+        thumb = (
+            f"<img src='{esc(png)}' alt='{esc(room)} simulation preview' loading='lazy'>" if png else "no preview yet"
+        )
         chips = [_chip(scan.get("geometry_source", "unknown"))]
         if st is None:
             chips.append(_chip("not generated", "run"))
@@ -568,26 +614,37 @@ class Handler(BaseHTTPRequestHandler):
         if st:
             eps = "n/a" if st["episodes"] is None else st["episodes"]
             contacts = "n/a" if st["contacts"] is None else st["contacts"]
-            stats = (f"<div class='stats'><div class='stat'><b>{esc(eps)}</b><span>episodes</span></div>"
-                     f"<div class='stat'><b>{esc(st['rate'])}</b><span>success</span></div>"
-                     f"<div class='stat'><b>{esc(contacts)}</b><span>human contacts</span></div></div>")
+            stats = (
+                f"<div class='stats'><div class='stat'><b>{esc(eps)}</b><span>episodes</span></div>"
+                f"<div class='stat'><b>{esc(st['rate'])}</b><span>success</span></div>"
+                f"<div class='stat'><b>{esc(contacts)}</b><span>human contacts</span></div></div>"
+            )
         else:
-            stats = ("<p class='muted'>No dataset yet. Run <code>python -m arrival demo</code> "
-                     "or <code>python -m arrival sim</code>.</p>")
+            stats = (
+                "<p class='muted'>No dataset yet. Run <code>python -m arrival demo</code> "
+                "or <code>python -m arrival sim</code>.</p>"
+            )
         acts = [f"<a class='btn primary' href='/rooms/{esc(room)}'>Open</a>"]
         if sim:
             acts.append(f"<a class='btn' href='/download/{esc(room)}_sim'>Sim zip</a>")
         if base:
             acts.append(f"<a class='btn' href='/download/{esc(room)}'>Placeholder zip</a>")
-        return (f"<div class='card room'><div class='thumb'>{thumb}</div><div class='body'>"
-                f"<h3><a href='/rooms/{esc(room)}'>{esc(room)}</a></h3><div class='chips'>{''.join(chips)}</div>"
-                f"{stats}<div class='actions'>{''.join(acts)}</div></div></div>")
+        return (
+            f"<div class='card room'><div class='thumb'>{thumb}</div><div class='body'>"
+            f"<h3><a href='/rooms/{esc(room)}'>{esc(room)}</a></h3><div class='chips'>{''.join(chips)}</div>"
+            f"{stats}<div class='actions'>{''.join(acts)}</div></div></div>"
+        )
 
     def _index(self):
         rooms = self._rooms()
-        cards = ("<div class='grid'>" + "".join(self._room_card(r) for r in rooms) + "</div>") if rooms else (
-            "<div class='card empty'><b>No rooms yet</b>Put a scan under <code>scans/&lt;room&gt;/scan.json</code> (or <code>roomplan.json</code>) "
-            "or upload one below.</div>")
+        cards = (
+            ("<div class='grid'>" + "".join(self._room_card(r) for r in rooms) + "</div>")
+            if rooms
+            else (
+                "<div class='card empty'><b>No rooms yet</b>Put a scan under <code>scans/&lt;room&gt;/scan.json</code> (or <code>roomplan.json</code>) "
+                "or upload one below.</div>"
+            )
+        )
         mb = self.server.max_upload_bytes / (1024 * 1024)
         upload = (
             "<form id='upload' method='post' action='/jobs' enctype='multipart/form-data'>"
@@ -610,10 +667,17 @@ class Handler(BaseHTTPRequestHandler):
             "<h1>Rooms to robot demos</h1><p class='muted'>Pre-scanned rooms become GR00T LeRobot v2 "
             "datasets, generated locally.</p>"
             "<ol class='flow'><li>Scan</li><li>Digital twin</li><li>MuJoCo sim</li><li>LeRobot dataset</li></ol>"
-            + note +
-            "<h2>Rooms</h2>" + cards
-            + "<h2>Upload a scan</h2><div class='card'>" + upload + "</div>"
-            + "<h2>Jobs</h2>" + self._retention_note() + "<div id='jobs'>" + self._jobs_table() + "</div>"
+            + note
+            + "<h2>Rooms</h2>"
+            + cards
+            + "<h2>Upload a scan</h2><div class='card'>"
+            + upload
+            + "</div>"
+            + "<h2>Jobs</h2>"
+            + self._retention_note()
+            + "<div id='jobs'>"
+            + self._jobs_table()
+            + "</div>"
         )
         self._html(200, "Arrival", body)
 
@@ -623,16 +687,25 @@ class Handler(BaseHTTPRequestHandler):
             hours = Limits.from_env().retention_hours
         except ValueError:
             hours = None
-        keep = (f"Finished jobs and their datasets are deleted {hours:g} hours after they finish."
-                if hours else "Finished jobs are kept until the person who uploaded them deletes them.")
-        return (f"<p class='muted'>{keep} Download a dataset before then. The Cancel and Delete buttons "
-                "appear only for jobs uploaded from this browser.</p>")
+        keep = (
+            f"Finished jobs and their datasets are deleted {hours:g} hours after they finish."
+            if hours
+            else "Finished jobs are kept until the person who uploaded them deletes them."
+        )
+        return (
+            f"<p class='muted'>{keep} Download a dataset before then. The Cancel and Delete buttons "
+            "appear only for jobs uploaded from this browser.</p>"
+        )
 
     def _jobs(self) -> list[dict]:
         root = self.out_dir / "jobs"
         if not root.is_dir():
             return []
-        jobs = [s for d in root.iterdir() if JOB_ID_RE.match(d.name) and isinstance(s := _read_json(d / "status.json"), dict) and s]
+        jobs = [
+            s
+            for d in root.iterdir()
+            if JOB_ID_RE.match(d.name) and isinstance(s := _read_json(d / "status.json"), dict) and s
+        ]
         if self.server.public:  # a public page never lists other visitors' uploads
             owner = self._owner()
             jobs = [s for s in jobs if owner is not None and s.get("owner") == owner]
@@ -645,9 +718,14 @@ class Handler(BaseHTTPRequestHandler):
             return ""
         measurement = s.get("realism") or {}
         state = measurement.get("state", "pending")
-        label = {"pending": "comparison pending", "measured": "comparison ready", "invalid": "control failed",
-                 "not_measured": "not measured", "error": "comparison unavailable"}.get(state, "not measured")
-        link = (f" <a href='/jobs/{esc(s['id'])}/realism'>View comparison</a>" if measurement else "")
+        label = {
+            "pending": "comparison pending",
+            "measured": "comparison ready",
+            "invalid": "control failed",
+            "not_measured": "not measured",
+            "error": "comparison unavailable",
+        }.get(state, "not measured")
+        link = f" <a href='/jobs/{esc(s['id'])}/realism'>View comparison</a>" if measurement else ""
         return f"<div class='chips mt'>{_chip('RGB-D ' + str(fr.get('count', '?')) + ' frames, ' + label)}{link}</div>"
 
     @staticmethod
@@ -673,12 +751,11 @@ class Handler(BaseHTTPRequestHandler):
                 result = f"<span class='chip bad' title='{esc(s.get('error'))}'>{esc(s.get('error') or 'failed')[:90]}</span>"
             else:
                 result = ""
-            eps = ("" if s.get("attempts") is None
-                   else f"{esc(s.get('successes'))}/{esc(s.get('attempts'))}")
+            eps = "" if s.get("attempts") is None else f"{esc(s.get('successes'))}/{esc(s.get('attempts'))}"
             mine = self._owner() is not None and s.get("owner") == self._owner()
             if mine:
-                verb, label = (("delete", "Delete") if st in ("done", "failed", "cancelled") else ("cancel", "Cancel"))
-                result += (f" <button type='button' data-job-action='{verb}' data-job-id='{esc(jid)}'>{label}</button>")
+                verb, label = ("delete", "Delete") if st in ("done", "failed", "cancelled") else ("cancel", "Cancel")
+                result += f" <button type='button' data-job-action='{verb}' data-job-id='{esc(jid)}'>{label}</button>"
             kind = {"done": "ok", "failed": "bad", "running": "run"}.get(st, "")
             active = " data-active" if st in ("queued", "running") else ""
             rows.append(
@@ -687,20 +764,17 @@ class Handler(BaseHTTPRequestHandler):
                 f"<td><code>{esc(s.get('room_id') or '')}</code></td><td>{eps}</td><td>{result}</td></tr>"
             )
         if not rows:
-            return ("<div class='card empty'><b>No uploads yet</b>Queued scans and their pipeline stages "
-                    "show up here.</div>")
+            return (
+                "<div class='card empty'><b>No uploads yet</b>Queued scans and their pipeline stages "
+                "show up here.</div>"
+            )
         return (
             "<div class='scroll'><table><tr><th>Job</th><th>Upload</th><th>Status</th><th>Progress</th><th>Room</th>"
             "<th>Episodes ok</th><th>Result</th></tr>" + "".join(rows) + "</table></div>"
         )
 
-    def _room(self, room: str):
-        found = self._scan(room)
-        if found is None:
-            return self._not_found(f"No room {room}")
-        scan, scan_file = found
-        twin = _read_json(self.out_dir / "twins" / room / "twin.json")
-        src = twin if twin else scan
+    def _fixtures_section(self, src: dict, twin: dict | None, scan_file) -> str:
+        """The room page's fixture table, from the compiled twin when there is one, else the scan."""
         fixtures = src.get("fixtures", []) or []
         fx_rows = "".join(
             "<tr>"
@@ -710,7 +784,8 @@ class Handler(BaseHTTPRequestHandler):
             f"<td class='mono'>{esc(_fmt_list(f.get('position', '')))}</td>"
             f"<td class='mono'>{esc(f.get('yaw', ''))}</td>"
             "</tr>"
-            for f in fixtures if isinstance(f, dict)
+            for f in fixtures
+            if isinstance(f, dict)
         )
         fx_table = (
             f"<p class='muted'>Source: {'compiled twin.json' if twin else esc(scan_file) + ' (twin not compiled)'}</p>"
@@ -719,12 +794,14 @@ class Handler(BaseHTTPRequestHandler):
             + (fx_rows or "<tr><td colspan='5' class='muted'>No fixtures</td></tr>")
             + "</table></div>"
         )
+        return fx_table
 
+    def _tasks_section(self, room: str) -> str:
+        """The room page's task summary: counts per family and instruction, or how to generate them."""
         tasks = _read_json(self.out_dir / "twins" / room / "tasks.json")
         if tasks and tasks.get("tasks"):
             grouped = Counter(
-                (t.get("family", "?"), t.get("object_id", "?"), t.get("instruction", ""))
-                for t in tasks["tasks"]
+                (t.get("family", "?"), t.get("object_id", "?"), t.get("instruction", "")) for t in tasks["tasks"]
             )
             fam_counts = Counter(t.get("family", "?") for t in tasks["tasks"])
             summary = " · ".join(f"<code>{esc(f)}</code>: {n}" for f, n in sorted(fam_counts.items()))
@@ -743,21 +820,10 @@ class Handler(BaseHTTPRequestHandler):
                 "<code>counter_to_counter</code>. Not generated, run "
                 "<code>python -m arrival demo</code>.</p>"
             )
+        return tasks_html
 
-        info = _read_json(self.out_dir / "datasets" / room / "meta" / "info.json") or {}
-        valid = info.get("arrival_physically_valid", False)
-        valid_text = "true" if valid is True else "false"
-        info_bits = ""
-        if info:
-            info_bits = "".join(
-                f"<tr><th>{esc(k)}</th><td><code>{esc(info.get(k))}</code></td></tr>"
-                for k in ("arrival_generator", "arrival_appearance", "arrival_video_policy",
-                          "total_episodes", "total_frames", "arrival_successes",
-                          "arrival_attempts", "robot_type", "fps")
-                if k in info
-            )
-            info_bits = f"<div class='scroll'><table class='kv'>{info_bits}</table></div>"
-
+    def _report_section(self, room: str) -> str:
+        """The room page's speed and cost report for the placeholder dataset, if one was written."""
         report = _read_json(self.out_dir / "reports" / f"{room}.json")
         if report:
             rep_rows = "".join(
@@ -776,14 +842,11 @@ class Handler(BaseHTTPRequestHandler):
                 f"<th>status</th></tr>{d_rows}</table></div>"
             )
         else:
-            report_html = (f"<p class='muted'>No report at <code>out/reports/{esc(room)}.json</code> "
-                           "yet.</p>")
+            report_html = f"<p class='muted'>No report at <code>out/reports/{esc(room)}.json</code> yet.</p>"
+        return report_html
 
-        ds_exists = (self.out_dir / "datasets" / room).is_dir()
-        dl = (f"<p><a class='btn primary' href='/download/{esc(room)}'>Download {esc(room)}.zip</a></p>"
-              if ds_exists else "<p class='muted'>Dataset not generated yet.</p>")
-
-        sim_dir = self.out_dir / "datasets" / f"{room}_sim"
+    def _sim_section(self, room: str, sim_dir: Path) -> str:
+        """The room page's MuJoCo dataset block: download link and its labels, or how to make one."""
         sim_info = _read_json(sim_dir / "meta" / "info.json") if sim_dir.is_dir() else None
         if sim_dir.is_dir():
             si = sim_info if isinstance(sim_info, dict) else {}
@@ -798,20 +861,72 @@ class Handler(BaseHTTPRequestHandler):
                 "</table></div>"
             )
         else:
-            sim_html = (f"<p class='muted'>No simulation dataset at <code>out/datasets/{esc(room)}_sim</code>. "
-                        "Run <code>python -m arrival sim</code>.</p>")
+            sim_html = (
+                f"<p class='muted'>No simulation dataset at <code>out/datasets/{esc(room)}_sim</code>. "
+                "Run <code>python -m arrival sim</code>.</p>"
+            )
+        return sim_html
 
+    def _room(self, room: str):
+        """GET /rooms/<room>: the room's page (fixtures, tasks, both datasets, previews and report)."""
+        found = self._scan(room)
+        if found is None:
+            return self._not_found(f"No room {room}")
+        scan, scan_file = found
+        twin = _read_json(self.out_dir / "twins" / room / "twin.json")
+        src = twin if twin else scan
+        fx_table = self._fixtures_section(src, twin, scan_file)
+        tasks_html = self._tasks_section(room)
+        info = _read_json(self.out_dir / "datasets" / room / "meta" / "info.json") or {}
+        valid = info.get("arrival_physically_valid", False)
+        valid_text = "true" if valid is True else "false"
+        info_bits = ""
+        if info:
+            info_bits = "".join(
+                f"<tr><th>{esc(k)}</th><td><code>{esc(info.get(k))}</code></td></tr>"
+                for k in (
+                    "arrival_generator",
+                    "arrival_appearance",
+                    "arrival_video_policy",
+                    "total_episodes",
+                    "total_frames",
+                    "arrival_successes",
+                    "arrival_attempts",
+                    "robot_type",
+                    "fps",
+                )
+                if k in info
+            )
+            info_bits = f"<div class='scroll'><table class='kv'>{info_bits}</table></div>"
+
+        report_html = self._report_section(room)
+        ds_exists = (self.out_dir / "datasets" / room).is_dir()
+        dl = (
+            f"<p><a class='btn primary' href='/download/{esc(room)}'>Download {esc(room)}.zip</a></p>"
+            if ds_exists
+            else "<p class='muted'>Dataset not generated yet.</p>"
+        )
+
+        sim_dir = self.out_dir / "datasets" / f"{room}_sim"
+        sim_html = self._sim_section(room, sim_dir)
         png = self._preview(f"{room}_sim", "contact.png")
         mp4 = self._preview(f"{room}_sim", "overview.mp4")
         previews = ""
         if png:
-            previews += (f"<figure><img src='{esc(png)}' alt='contact sheet' loading='lazy'>"
-                         "<figcaption>Contact sheet from the simulation</figcaption></figure>")
+            previews += (
+                f"<figure><img src='{esc(png)}' alt='contact sheet' loading='lazy'>"
+                "<figcaption>Contact sheet from the simulation</figcaption></figure>"
+            )
         if mp4:
-            previews += (f"<figure><video src='{esc(mp4)}' controls muted loop playsinline preload='metadata'>"
-                         "</video><figcaption>Overview render</figcaption></figure>")
-        preview_html = f"<div class='media'>{previews}</div>" if previews else (
-            "<p class='muted'>No previews yet. They are written by <code>python -m arrival sim</code>.</p>")
+            previews += (
+                f"<figure><video src='{esc(mp4)}' controls muted loop playsinline preload='metadata'>"
+                "</video><figcaption>Overview render</figcaption></figure>"
+            )
+        preview_html = (
+            f"<div class='media'>{previews}</div>"
+            if previews
+            else ("<p class='muted'>No previews yet. They are written by <code>python -m arrival sim</code>.</p>")
+        )
         stats = self._ds_stats(f"{room}_sim") or self._ds_stats(room)
         if stats:
             ok_ = stats["valid"] is True
@@ -820,27 +935,40 @@ class Handler(BaseHTTPRequestHandler):
                 f"<div class='stat'><b>{esc('n/a' if stats['episodes'] is None else stats['episodes'])}</b><span>episodes</span></div>"
                 f"<div class='stat'><b>{esc(stats['rate'])}</b><span>success rate</span></div>"
                 f"<div class='stat'><b>{esc('n/a' if stats['contacts'] is None else stats['contacts'])}</b><span>human contacts</span></div></div>"
-                f"<div class='chips mt'>{_chip('physically valid: ' + str(ok_).lower(), 'ok' if ok_ else 'bad')}</div>")
+                f"<div class='chips mt'>{_chip('physically valid: ' + str(ok_).lower(), 'ok' if ok_ else 'bad')}</div>"
+            )
         else:
             headline = ""
         # the box is about the scripted placeholder in out/datasets/<room>. A room whose only dataset is the
         # physics-checked sim one has no placeholder, and the box told it not to fine-tune on its data right above
         # a headline that says physically valid: true
-        placeholder_warn = "" if sim_dir.is_dir() and not ds_exists else (
-            f"<div class='warn'><strong class='mono'>arrival_physically_valid: {valid_text}</strong>"
-            f"<br>{esc(PLACEHOLDER_NOTE)} Do not fine-tune on it while this flag is false.</div>")
+        placeholder_warn = (
+            ""
+            if sim_dir.is_dir() and not ds_exists
+            else (
+                f"<div class='warn'><strong class='mono'>arrival_physically_valid: {valid_text}</strong>"
+                f"<br>{esc(PLACEHOLDER_NOTE)} Do not fine-tune on it while this flag is false.</div>"
+            )
+        )
 
         body = (
             f"<p class='crumb'><a href='/'>← All rooms</a></p><h1>{esc(room)}</h1>"
             f"<p class='muted'>geometry_source: <code>{esc(scan.get('geometry_source', 'unknown'))}</code></p>"
             + placeholder_warn
             + headline
-            + "<h2>Previews</h2>" + preview_html
-            + "<h2>Fixtures</h2>" + fx_table
-            + "<h2>Tasks</h2>" + tasks_html
-            + "<h2>Dataset</h2>" + dl + info_bits
-            + "<h2>Simulation dataset (MuJoCo)</h2>" + sim_html
-            + "<h2>Report</h2>" + report_html
+            + "<h2>Previews</h2>"
+            + preview_html
+            + "<h2>Fixtures</h2>"
+            + fx_table
+            + "<h2>Tasks</h2>"
+            + tasks_html
+            + "<h2>Dataset</h2>"
+            + dl
+            + info_bits
+            + "<h2>Simulation dataset (MuJoCo)</h2>"
+            + sim_html
+            + "<h2>Report</h2>"
+            + report_html
         )
         self._html(200, f"{room} · Arrival", body)
 
@@ -892,8 +1020,12 @@ class Handler(BaseHTTPRequestHandler):
                             zf.write(p, Path(room) / p.relative_to(ds))
                 size = tmp.tell()
                 tmp.seek(0)
-                self._send_file(tmp, size, "application/zip",
-                                {"Content-Disposition": f"attachment; filename={hd.safe_filename(room)}.zip"})
+                self._send_file(
+                    tmp,
+                    size,
+                    "application/zip",
+                    {"Content-Disposition": f"attachment; filename={hd.safe_filename(room)}.zip"},
+                )
         finally:
             self.server.heavy_slots.release()
 
@@ -914,8 +1046,12 @@ class Handler(BaseHTTPRequestHandler):
             return True
         status = read_job(self.out_dir / "jobs", match.group(1))
         owner = self._owner()
-        return (status is not None and owner is not None and status.get("owner") == owner
-                and status.get("room_id") == name[:match.end(1)])
+        return (
+            status is not None
+            and owner is not None
+            and status.get("owner") == owner
+            and status.get("room_id") == name[: match.end(1)]
+        )
 
     def _job_for_request(self, job_id: str) -> dict | None:
         status = read_job(self.out_dir / "jobs", job_id)
@@ -964,8 +1100,12 @@ class Handler(BaseHTTPRequestHandler):
         status = read_job(self.out_dir / "jobs", job_id)
         if status is None or (self.server.public and (self._owner() is None or self._owner() != status.get("owner"))):
             return self._not_found()
-        measurement = status.get("realism") or {"state": "pending", "metrics": None, "preview": False,
-                                               "reason": "The worker has not compared these frames yet."}
+        measurement = status.get("realism") or {
+            "state": "pending",
+            "metrics": None,
+            "preview": False,
+            "reason": "The worker has not compared these frames yet.",
+        }
         if artifact == "report":
             return self._json(200, measurement)
         if artifact == "preview":
@@ -975,23 +1115,31 @@ class Handler(BaseHTTPRequestHandler):
             with path.open("rb") as stream:
                 return self._send_file(stream, path.stat().st_size, "image/png", {"Cache-Control": "no-store"})
         metrics = measurement.get("metrics")
-        body = ("<h1>Room comparison</h1><p><a href='/'>Back to jobs</a></p>"
-                f"<div class='card'><h2>{esc(measurement['state'].replace('_', ' '))}</h2>")
+        body = (
+            "<h1>Room comparison</h1><p><a href='/'>Back to jobs</a></p>"
+            f"<div class='card'><h2>{esc(measurement['state'].replace('_', ' '))}</h2>"
+        )
         if measurement.get("reason"):
             body += f"<p>{esc(measurement['reason'])}</p>"
         if metrics:
-            body += ("<dl>"
-                     f"<dt>Depth error (geometry)</dt><dd>{metrics['depth_l1_m']:.4f} m</dd>"
-                     f"<dt>RGB error (appearance)</dt><dd>{metrics['rgb_mae']:.4f}</dd>"
-                     f"<dt>Held-out frames</dt><dd>{metrics['frames']}</dd></dl>")
-        body += ("<p class='muted'>Depth compares room geometry. RGB also reflects differences in lighting and "
-                 "surface appearance. The camera-offset control checks sensitivity; it does not verify calibration "
-                 "or that the captures belong to this room.</p>")
+            body += (
+                "<dl>"
+                f"<dt>Depth error (geometry)</dt><dd>{metrics['depth_l1_m']:.4f} m</dd>"
+                f"<dt>RGB error (appearance)</dt><dd>{metrics['rgb_mae']:.4f}</dd>"
+                f"<dt>Held-out frames</dt><dd>{metrics['frames']}</dd></dl>"
+            )
+        body += (
+            "<p class='muted'>Depth compares room geometry. RGB also reflects differences in lighting and "
+            "surface appearance. The camera-offset control checks sensitivity; it does not verify calibration "
+            "or that the captures belong to this room.</p>"
+        )
         if measurement.get("preview"):
-            body += ("<div class='media'><figure>"
-                     f"<img src='/jobs/{esc(job_id)}/realism/preview' "
-                     "alt='Uploaded held-out views beside the simulated room and depth maps'>"
-                     "<figcaption>Reference RGB, twin RGB, reference depth, twin depth.</figcaption></figure></div>")
+            body += (
+                "<div class='media'><figure>"
+                f"<img src='/jobs/{esc(job_id)}/realism/preview' "
+                "alt='Uploaded held-out views beside the simulated room and depth maps'>"
+                "<figcaption>Reference RGB, twin RGB, reference depth, twin depth.</figcaption></figure></div>"
+            )
         body += f"<p><a href='/jobs/{esc(job_id)}/realism/report'>Comparison JSON</a></p></div>"
         self._html(200, "Room comparison", body)
 
@@ -1004,8 +1152,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(404, {"error": "dataset not ready", "status": status.get("status")})
         room = status.get("room_id") or job_id
         with open(zip_path, "rb") as f:
-            self._send_file(f, zip_path.stat().st_size, "application/zip",
-                            {"Content-Disposition": f"attachment; filename={hd.safe_filename(room, job_id)}_sim.zip"})
+            self._send_file(
+                f,
+                zip_path.stat().st_size,
+                "application/zip",
+                {"Content-Disposition": f"attachment; filename={hd.safe_filename(room, job_id)}_sim.zip"},
+            )
 
     def _drain(self, left: int):
         """Read and discard a small unread request body, so closing the socket does not reset the connection
@@ -1039,6 +1191,9 @@ class Handler(BaseHTTPRequestHandler):
         return shutil.disk_usage(p).free
 
     def _post_job(self):
+        """POST /jobs: accept a scan upload (and an optional RGB-D frames zip) and queue a job. Every cheap refusal
+        (rate limit, size, queue cap, content type, disk space, busy server) happens before the body is read; the
+        body is then streamed to a temp file, its parts are sniffed, and the job is created under the queue lock."""
         srv = self.server
         try:
             length = int(self.headers.get("Content-Length", ""))
@@ -1056,7 +1211,9 @@ class Handler(BaseHTTPRequestHandler):
             limits = Limits.from_env()
         except LimitError as e:  # a bad ARRIVAL_* variable is the operator's mistake, not the client's
             return refuse(500, f"server limits misconfigured: {e}")
-        max_bytes = min(srv.max_upload_bytes, limits.max_upload_bytes) if limits.max_upload_bytes else srv.max_upload_bytes
+        max_bytes = (
+            min(srv.max_upload_bytes, limits.max_upload_bytes) if limits.max_upload_bytes else srv.max_upload_bytes
+        )
 
         allowed, wait = srv.limiter.check(self._client())
         if not allowed:
@@ -1103,11 +1260,13 @@ class Handler(BaseHTTPRequestHandler):
                         offset, size, filename = find_part(buf, boundary, "scan")
                         frames_part = find_part(buf, boundary, "frames", optional=True)
                         if frames_part and frames_part[1] == 0 and not frames_part[2]:
-                            frames_part = None  # a browser sends the optional input left empty as a nameless, empty part
+                            frames_part = (
+                                None  # a browser sends the optional input left empty as a nameless, empty part
+                            )
                     except UploadError as e:
                         return self._json(400, {"error": str(e)})
-                    head = bytes(buf[offset:offset + min(size, 64)])
-                    fhead = bytes(buf[frames_part[0]:frames_part[0] + min(frames_part[1], 4)]) if frames_part else b""
+                    head = bytes(buf[offset : offset + min(size, 64)])
+                    fhead = bytes(buf[frames_part[0] : frames_part[0] + min(frames_part[1], 4)]) if frames_part else b""
                 if not filename:
                     return self._json(400, {"error": "file field 'scan' has no filename"})
                 if size <= 0:
@@ -1122,7 +1281,9 @@ class Handler(BaseHTTPRequestHandler):
                     f_off, f_size, f_name = frames_part
                     if f_size <= 0:
                         return self._json(400, {"error": "frames file is empty", "field": "frames"})
-                    if not hd.has_extension(hd.safe_filename(f_name), hd.FRAMES_EXTENSIONS) or not hd.looks_like_zip(fhead):
+                    if not hd.has_extension(hd.safe_filename(f_name), hd.FRAMES_EXTENSIONS) or not hd.looks_like_zip(
+                        fhead
+                    ):
                         return self._json(415, {"error": "frames must be a .zip of a CAP-2a bundle", "field": "frames"})
                     jobs_root.mkdir(parents=True, exist_ok=True)
                     incoming = jobs_root / f".incoming_{secrets.token_hex(8)}"
@@ -1130,8 +1291,10 @@ class Handler(BaseHTTPRequestHandler):
                         frames_mod.extract(tmp, f_off, f_size, incoming)
                         frames_summary = frames_mod.validate(incoming)
                     except frames_mod.FramesError as e:
-                        shutil.rmtree(incoming, ignore_errors=True)  # before answering, so no scratch outlives the reply
-                        code = (413 if e.code == "too_large" else 422 if e.code not in frames_mod.ARCHIVE_CODES else 400)
+                        shutil.rmtree(
+                            incoming, ignore_errors=True
+                        )  # before answering, so no scratch outlives the reply
+                        code = 413 if e.code == "too_large" else 422 if e.code not in frames_mod.ARCHIVE_CODES else 400
                         return self._json(code, {"error": str(e), "code": e.code, "field": "frames"})
                     adopt = {"frames": incoming}
                 token = hd.cookie_value(self.headers.get("Cookie"))
@@ -1144,29 +1307,40 @@ class Handler(BaseHTTPRequestHandler):
                     if self._queue_full():
                         if incoming is not None:
                             shutil.rmtree(incoming, ignore_errors=True)
-                        return self._json(503, {"error": "queue is full, try again when queued jobs finish"},
-                                          {"Retry-After": "60"})
-                    status = create_job(jobs_root, name, src=tmp, offset=offset, length=size,
-                                        extra_status=extra_status, adopt=adopt)
+                        return self._json(
+                            503, {"error": "queue is full, try again when queued jobs finish"}, {"Retry-After": "60"}
+                        )
+                    status = create_job(
+                        jobs_root, name, src=tmp, offset=offset, length=size, extra_status=extra_status, adopt=adopt
+                    )
         finally:
             srv.heavy_slots.release()
             if incoming is not None and incoming.exists():
                 shutil.rmtree(incoming, ignore_errors=True)
         extra = {}
         if new_cookie:
-            extra["Set-Cookie"] = (f"{hd.CLIENT_COOKIE}={token}; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax"
-                                   + ("; Secure" if self.https else ""))
+            extra["Set-Cookie"] = f"{hd.CLIENT_COOKIE}={token}; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax" + (
+                "; Secure" if self.https else ""
+            )
         body = {"status": "queued", "id": status["id"], "status_url": f"/jobs/{status['id']}"}
         if frames_summary:
             body["frames"] = frames_summary
         self._json(202, body, extra)
 
 
-def make_server(host: str = "127.0.0.1", port: int = 8000,
-                out_dir: Path = Path("out"), scans_dir: Path = Path("scans"), *,
-                max_upload_mb: float = MAX_UPLOAD_BYTES / (1024 * 1024), rate_limit: int = 10,
-                max_queued: int = 50, public: bool = False, behind_proxy: bool = False,
-                max_concurrent_uploads: int = 4) -> ThreadingHTTPServer:
+def make_server(
+    host: str = "127.0.0.1",
+    port: int = 8000,
+    out_dir: Path = Path("out"),
+    scans_dir: Path = Path("scans"),
+    *,
+    max_upload_mb: float = MAX_UPLOAD_BYTES / (1024 * 1024),
+    rate_limit: int = 10,
+    max_queued: int = 50,
+    public: bool = False,
+    behind_proxy: bool = False,
+    max_concurrent_uploads: int = 4,
+) -> ThreadingHTTPServer:
     """``rate_limit`` is uploads per minute per client (0 = off); ``max_queued`` caps queued + running jobs
     (0 = unlimited); ``public`` lists only the caller's own jobs; ``behind_proxy`` trusts X-Forwarded-Proto and
     X-Forwarded-For from a reverse proxy in front (never set it when clients can reach the port directly)."""
@@ -1195,16 +1369,22 @@ def lan_ip() -> str | None:
             return None
 
 
-def serve(port: int = 8000, out_dir: Path = Path("out"), scans_dir: Path = Path("scans"),
-          host: str = "127.0.0.1", **limits) -> None:
+def serve(
+    port: int = 8000, out_dir: Path = Path("out"), scans_dir: Path = Path("scans"), host: str = "127.0.0.1", **limits
+) -> None:
+    """Serve the page on host:port until Ctrl+C, printing the URL (and the LAN address for the capture app when bound to
+    all interfaces) and a warning whenever it is reachable beyond loopback."""
     server = make_server(host, port, out_dir, scans_dir, **limits)
     bound, real_port = server.server_address[:2]
     print(f"Arrival serving on http://{bound}:{real_port}/  (Ctrl+C to stop)", flush=True)
     if bound == "0.0.0.0" and (ip := lan_ip()):
         print(f"Capture app server URL: http://{ip}:{real_port}", flush=True)
     if bound not in LOOPBACK:
-        print("No authentication: only expose this beyond a network you trust behind a TLS and auth proxy "
-              "(see docs/REFERENCE.md, Web hardening).", flush=True)
+        print(
+            "No authentication: only expose this beyond a network you trust behind a TLS and auth proxy "
+            "(see docs/REFERENCE.md, Web hardening).",
+            flush=True,
+        )
     try:
         server.serve_forever()
     except KeyboardInterrupt:

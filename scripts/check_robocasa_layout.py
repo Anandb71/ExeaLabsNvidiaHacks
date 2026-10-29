@@ -49,17 +49,25 @@ def _wrap(a: float) -> float:
 
 # ---------- the twin's own boxes ----------
 
+
 def twin_boxes(twin: dict) -> dict:
     """name -> {kind, center, size (in its own frame), yaw} for every fixture and wall of the twin."""
     out = {}
     for f in twin["fixtures"]:
-        out[f["id"]] = {"kind": f["type"], "center": list(f["position"]), "size": list(f["size"]),
-                        "yaw": float(f.get("yaw") or 0.0)}
+        out[f["id"]] = {
+            "kind": f["type"],
+            "center": list(f["position"]),
+            "size": list(f["size"]),
+            "yaw": float(f.get("yaw") or 0.0),
+        }
     for w in twin.get("walls", []):
         (x0, y0), (x1, y1) = w["start"], w["end"]
-        out[w["id"]] = {"kind": "wall", "center": [(x0 + x1) / 2, (y0 + y1) / 2, w["height"] / 2],
-                        "size": [math.hypot(x1 - x0, y1 - y0), w["thickness"], w["height"]],
-                        "yaw": math.atan2(y1 - y0, x1 - x0)}
+        out[w["id"]] = {
+            "kind": "wall",
+            "center": [(x0 + x1) / 2, (y0 + y1) / 2, w["height"] / 2],
+            "size": [math.hypot(x1 - x0, y1 - y0), w["thickness"], w["height"]],
+            "yaw": math.atan2(y1 - y0, x1 - x0),
+        }
     return out
 
 
@@ -83,7 +91,7 @@ def twin_overlaps(boxes: dict) -> dict:
     names = sorted(boxes)
     out = {}
     for i, a in enumerate(names):
-        for b in names[i + 1:]:
+        for b in names[i + 1 :]:
             if boxes[a]["kind"] == boxes[b]["kind"] == "wall":
                 continue  # walls meet at corners by construction
             d = box_penetration(boxes[a], boxes[b])
@@ -93,6 +101,7 @@ def twin_overlaps(boxes: dict) -> dict:
 
 
 # ---------- RoboCasa ----------
+
 
 def build(doc: dict, style: int, seed: int):
     """RoboCasa's KitchenArena (scene_builder.create_fixtures) -> robosuite ManipulationTask -> MuJoCo model."""
@@ -137,8 +146,13 @@ def measure(arena, model, data, doc: dict) -> tuple[dict, dict, dict]:
         for b in range(root + 1, model.nbody):  # MuJoCo numbers a subtree after its root
             if int(model.body_parentid[b]) in sub:
                 sub.add(b)
-        geoms = [g for g in range(model.ngeom) if int(model.geom_bodyid[g]) in sub
-                 and (model.geom_contype[g] or model.geom_conaffinity[g]) and model.geom_rgba[g][3] > 0]
+        geoms = [
+            g
+            for g in range(model.ngeom)
+            if int(model.geom_bodyid[g]) in sub
+            and (model.geom_contype[g] or model.geom_conaffinity[g])
+            and model.geom_rgba[g][3] > 0
+        ]
         # (alpha 0 drops the parts RoboCasa parks out of sight, e.g. a counter's unused base panels at z + 10 m)
         for g in geoms:
             owner[g] = name
@@ -162,14 +176,21 @@ def measure(arena, model, data, doc: dict) -> tuple[dict, dict, dict]:
             ext_size = (r_.max(0) - r_.min(0)).tolist()
         c, s = math.cos(rot), math.sin(rot)
         world = hi - lo
-        built[name] = {"class": type(fx).__name__, "aabb_center": ((lo + hi) / 2).tolist(), "aabb_size": world.tolist(),
-                       "center": ext if ext is not None else ((lo + hi) / 2).tolist(), "ext_size": ext_size,
-                       "rot": rot, "body": body.tolist(),
-                       "origin_offset": [float(x) for x in getattr(fx, "origin_offset", (0, 0, 0))],
-                       "overhang": getattr(fx, "overhang", None),
-                       # the AABB's extent along the fixture's own x and y (exact for multiples of 90 degrees)
-                       "size": [abs(c) * world[0] + abs(s) * world[1], abs(s) * world[0] + abs(c) * world[1],
-                                float(world[2])] if abs(round(s * c, 6)) < 1e-6 else None}
+        built[name] = {
+            "class": type(fx).__name__,
+            "aabb_center": ((lo + hi) / 2).tolist(),
+            "aabb_size": world.tolist(),
+            "center": ext if ext is not None else ((lo + hi) / 2).tolist(),
+            "ext_size": ext_size,
+            "rot": rot,
+            "body": body.tolist(),
+            "origin_offset": [float(x) for x in getattr(fx, "origin_offset", (0, 0, 0))],
+            "overhang": getattr(fx, "overhang", None),
+            # the AABB's extent along the fixture's own x and y (exact for multiples of 90 degrees)
+            "size": [abs(c) * world[0] + abs(s) * world[1], abs(s) * world[0] + abs(c) * world[1], float(world[2])]
+            if abs(round(s * c, 6)) < 1e-6
+            else None,
+        }
     return built, owner, {"nbody": int(model.nbody), "ngeom": int(model.ngeom), "ncon": int(data.ncon)}
 
 
@@ -196,16 +217,30 @@ def compare(twin: dict, built: dict, overlaps: dict, sinks_in_counter: set, tol:
             continue
         d = [b["center"][i] - tb["center"][i] for i in range(3)]
         dxy, dz = math.hypot(d[0], d[1]), abs(d[2])
-        row = {"name": name, "kind": tb["kind"], "class": b["class"], "twin_center": [round(x, 4) for x in tb["center"]],
-               "built_center": [round(x, 4) for x in b["center"]], "dxy": round(dxy, 4), "dz": round(dz, 4)}
+        row = {
+            "name": name,
+            "kind": tb["kind"],
+            "class": b["class"],
+            "twin_center": [round(x, 4) for x in tb["center"]],
+            "built_center": [round(x, 4) for x in b["center"]],
+            "dxy": round(dxy, 4),
+            "dz": round(dz, 4),
+        }
         if tb["kind"] == "wall":
             ext = sorted(b["aabb_size"][:2])
-            want = sorted([abs(math.cos(tb["yaw"])) * tb["size"][0] + abs(math.sin(tb["yaw"])) * tb["size"][1],
-                           abs(math.sin(tb["yaw"])) * tb["size"][0] + abs(math.cos(tb["yaw"])) * tb["size"][1]])
-            row["size_err"] = round(max(abs(ext[0] - want[0]), abs(ext[1] - want[1]),
-                                        abs(b["aabb_size"][2] - tb["size"][2])), 4)
+            want = sorted(
+                [
+                    abs(math.cos(tb["yaw"])) * tb["size"][0] + abs(math.sin(tb["yaw"])) * tb["size"][1],
+                    abs(math.sin(tb["yaw"])) * tb["size"][0] + abs(math.cos(tb["yaw"])) * tb["size"][1],
+                ]
+            )
+            row["size_err"] = round(
+                max(abs(ext[0] - want[0]), abs(ext[1] - want[1]), abs(b["aabb_size"][2] - tb["size"][2])), 4
+            )
             if dxy > tol or dz > tol or row["size_err"] > tol:
-                errors.append(f"wall {name}: centre off {dxy:.3f} m (xy) {dz:.3f} m (z), size off {row['size_err']:.3f} m")
+                errors.append(
+                    f"wall {name}: centre off {dxy:.3f} m (xy) {dz:.3f} m (z), size off {row['size_err']:.3f} m"
+                )
         else:
             want = _wrap(tb["yaw"] + FRONT_FLIP)
             row["yaw_err"] = round(abs(_wrap(b["rot"] - want)), 4)
@@ -227,11 +262,18 @@ def compare(twin: dict, built: dict, overlaps: dict, sinks_in_counter: set, tol:
         errors.append(f"overlap RoboCasa added: {k} ({d:.3f} m deep)")
     floor_row = None
     if floor is not None:
-        floor_row = {"top_z": round(floor["aabb_center"][2] + floor["aabb_size"][2] / 2, 4),
-                     "size_xy": [round(x, 4) for x in floor["aabb_size"][:2]]}
-    return {"fixtures": rows, "errors": errors, "floor": floor_row,
-            "overlaps_robocasa": {f"{a} / {b}": d for (a, b), d in overlaps.items()},
-            "overlaps_twin": {f"{a} / {b}": d for (a, b), d in twin_ov.items()}, "overlaps_added": new}
+        floor_row = {
+            "top_z": round(floor["aabb_center"][2] + floor["aabb_size"][2] / 2, 4),
+            "size_xy": [round(x, 4) for x in floor["aabb_size"][:2]],
+        }
+    return {
+        "fixtures": rows,
+        "errors": errors,
+        "floor": floor_row,
+        "overlaps_robocasa": {f"{a} / {b}": d for (a, b), d in overlaps.items()},
+        "overlaps_twin": {f"{a} / {b}": d for (a, b), d in twin_ov.items()},
+        "overlaps_added": new,
+    }
 
 
 def check_twin(twin_dir: Path, style: int, seed: int, tol: float, save: Path | None) -> dict:
@@ -251,8 +293,14 @@ def check_twin(twin_dir: Path, style: int, seed: int, tol: float, save: Path | N
 
     # 2. the RoboCasa-native layout: build, read origin offsets and overhang, rebuild with them
     doc, notes = robocasa_layout(layout)
-    sinks = {r["interior_obj"] for g in doc.values() for k, rows in g.items() if not k.startswith("group_")
-             for r in rows if r.get("interior_obj")}
+    sinks = {
+        r["interior_obj"]
+        for g in doc.values()
+        for k, rows in g.items()
+        if not k.startswith("group_")
+        for r in rows
+        if r.get("interior_obj")
+    }
     try:
         arena, model, data = build(doc, style, seed)
         first, _, _ = measure(arena, model, data, doc)
@@ -262,15 +310,25 @@ def check_twin(twin_dir: Path, style: int, seed: int, tol: float, save: Path | N
         arena, model, data = build(doc, style, seed)
         built, owner, info = measure(arena, model, data, doc)
         cmp_ = compare(twin, built, contact_overlaps(model, data, owner), sinks, tol, built.get("floor"))
-        res["robocasa"] = {"built": True, "robocasa_fixtures": len(arena.fixtures), **info, "notes": notes,
-                           "origin_offsets": {k: [round(x, 4) for x in v] for k, v in offsets.items()},
-                           "overhang": overhang, **cmp_}
+        res["robocasa"] = {
+            "built": True,
+            "robocasa_fixtures": len(arena.fixtures),
+            **info,
+            "notes": notes,
+            "origin_offsets": {k: [round(x, 4) for x in v] for k, v in offsets.items()},
+            "overhang": overhang,
+            **cmp_,
+        }
         if save is not None:
             save.mkdir(parents=True, exist_ok=True)
             (save / f"{room}.robocasa.yaml").write_text(yaml.safe_dump(doc, sort_keys=False, default_flow_style=None))
     except Exception as e:  # noqa: BLE001
-        res["robocasa"] = {"built": False, "error": f"{type(e).__name__}: {e}", "notes": notes,
-                           "errors": [f"RoboCasa could not build it: {type(e).__name__}: {e}"]}
+        res["robocasa"] = {
+            "built": False,
+            "error": f"{type(e).__name__}: {e}",
+            "notes": notes,
+            "errors": [f"RoboCasa could not build it: {type(e).__name__}: {e}"],
+        }
     res["ok"] = bool(res["robocasa"]["built"] and not res["robocasa"]["errors"])
     return res
 
@@ -282,8 +340,10 @@ def _print(res: dict, tol: float) -> None:
         print(f"-- {part}: {'built' if r['built'] else 'NOT BUILT: ' + r.get('error', '')}")
         if not r["built"]:
             continue
-        print(f"   RoboCasa fixtures (walls and floor included): {r['robocasa_fixtures']}; MuJoCo bodies "
-              f"{r['nbody']}, geoms {r['ngeom']}, contacts {r['ncon']}")
+        print(
+            f"   RoboCasa fixtures (walls and floor included): {r['robocasa_fixtures']}; MuJoCo bodies "
+            f"{r['nbody']}, geoms {r['ngeom']}, contacts {r['ncon']}"
+        )
         if r["floor"]:
             print(f"   floor: top z {r['floor']['top_z']}, {r['floor']['size_xy'][0]} x {r['floor']['size_xy'][1]} m")
         for f in r["fixtures"]:
@@ -292,8 +352,10 @@ def _print(res: dict, tol: float) -> None:
                 continue
             extra = f" yaw_err {f['yaw_err']:.3f}" if "yaw_err" in f else ""
             extra += "" if f.get("z_checked", True) else " (z set by RoboCasa)"
-            print(f"   {f['name'][:40]:40s} {f['class']:20s} dxy {f['dxy']:.3f} dz {f['dz']:.3f} "
-                  f"size_err {f.get('size_err', float('nan')):.3f}{extra}")
+            print(
+                f"   {f['name'][:40]:40s} {f['class']:20s} dxy {f['dxy']:.3f} dz {f['dz']:.3f} "
+                f"size_err {f.get('size_err', float('nan')):.3f}{extra}"
+            )
         print(f"   overlaps > {OVERLAP} m in RoboCasa: {r['overlaps_robocasa'] or 'none'}")
         print(f"   overlaps > {OVERLAP} m already in the twin: {r['overlaps_twin'] or 'none'}")
         for n in r.get("notes", []):
@@ -318,13 +380,17 @@ def main(argv: list[str] | None = None) -> int:
         import robocasa  # noqa: F401
         import robosuite
     except ImportError as e:
-        print(f"SKIP: RoboCasa is not importable here ({e}); nothing was checked. Install robosuite (master) and "
-              "robocasa from their repos, or run with their interpreter.")
+        print(
+            f"SKIP: RoboCasa is not importable here ({e}); nothing was checked. Install robosuite (master) and "
+            "robocasa from their repos, or run with their interpreter."
+        )
         return 1 if a.require else 0
     import robocasa as rc
 
-    print(f"robocasa {getattr(rc, '__version__', '?')} ({Path(rc.__file__).parent}), robosuite "
-          f"{robosuite.__version__}, mujoco {mujoco.__version__}, style {a.style}, seed {a.seed}")
+    print(
+        f"robocasa {getattr(rc, '__version__', '?')} ({Path(rc.__file__).parent}), robosuite "
+        f"{robosuite.__version__}, mujoco {mujoco.__version__}, style {a.style}, seed {a.seed}"
+    )
     results = [check_twin(d, a.style, a.seed, a.tol, a.save_layouts) for d in a.twin_dirs]
     for res in results:
         _print(res, a.tol)

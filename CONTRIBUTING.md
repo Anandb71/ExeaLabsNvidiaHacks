@@ -19,7 +19,7 @@ Python 3.11 or 3.12. No GPU and no API keys are needed for anything below.
 |---|---|---|
 | Tests | `make test` | `python -m pytest -q -p no:cacheprovider` |
 | Offline demo | `make demo` | scan, twin, sim dataset, validate, eval, contact sheet, `out/index.html`; about 20 s |
-| Lint | `make lint` | ruff, syntax errors and undefined names only |
+| Lint | `make lint` | `ruff check` (bugs, sorted imports, no unused imports or variables) and `ruff format --check`; `make format` fixes both |
 | Docs | `make docs-check` | `scripts/check_docs.py` (commands parse, paths and labels agree) and `scripts/check_links.py` (relative links and anchors in every Markdown file) |
 | Packaging | `make package-smoke` | builds the sdist and wheel and runs the installed wheel from another directory |
 

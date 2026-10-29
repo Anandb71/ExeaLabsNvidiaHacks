@@ -1,4 +1,5 @@
 """G7 / issue #62: recorded teleop demos as SE(3) retargeting seeds (arrival.generate.teleop_seeds)."""
+
 import json
 
 import numpy as np
@@ -9,9 +10,10 @@ mujoco = pytest.importorskip("mujoco")
 from arrival.export.validate import validate  # noqa: E402
 from arrival.generate.se3_retarget import generate  # noqa: E402
 from arrival.generate.teleop_seeds import GENERATOR, TeleopReplay, load_demos, teleop_sources  # noqa: E402
-from arrival.sim.collect import FPS, SimEnv, run_episode  # noqa: E402
+from arrival.sim.collect import SimEnv, run_episode  # noqa: E402
 from arrival.sim.export import SimDatasetWriter  # noqa: E402
 from arrival.sim.policy import ScriptedExpert  # noqa: E402
+from arrival.sim.robot import FPS  # noqa: E402
 from arrival.sim.tasks import finish_task, make_tasks  # noqa: E402
 
 RES = 16
@@ -39,15 +41,26 @@ def write_run(root, task, ep, actions=None, instruction=None):
     """A folder laid out like arrival.sim.teleop's --record output and the P3 archive."""
     actions = ep["actions"] if actions is None else actions
     n = len(actions)
-    writer = SimDatasetWriter(root / "datasets" / "hero_kitchen_teleop", "hero_kitchen", FPS, RES, ("ego_view", "wrist"))
-    writer.add_episode({"states": ep["states"], "actions": actions, "detail": ep["detail"], "safety": ep["safety"],
-                        "videos": {c: np.zeros((n, RES, RES, 3), np.uint8) for c in ("ego_view", "wrist")},
-                        "people_xy": [[] for _ in range(n)]}, task)
+    writer = SimDatasetWriter(
+        root / "datasets" / "hero_kitchen_teleop", "hero_kitchen", FPS, RES, ("ego_view", "wrist")
+    )
+    writer.add_episode(
+        {
+            "states": ep["states"],
+            "actions": actions,
+            "detail": ep["detail"],
+            "safety": ep["safety"],
+            "videos": {c: np.zeros((n, RES, RES, 3), np.uint8) for c in ("ego_view", "wrist")},
+            "people_xy": [[] for _ in range(n)],
+        },
+        task,
+    )
     writer.finish(2)
     (root / "reports").mkdir(parents=True)
-    rows = [{"attempt": 0, "task_id": task["task_id"], "instruction": instruction or task["instruction"],
-             "success": True},
-            {"attempt": 1, "task_id": "sim_counter_to_sink_0001", "instruction": "x", "success": False}]
+    rows = [
+        {"attempt": 0, "task_id": task["task_id"], "instruction": instruction or task["instruction"], "success": True},
+        {"attempt": 1, "task_id": "sim_counter_to_sink_0001", "instruction": "x", "success": False},
+    ]
     (root / "reports" / "hero_kitchen_teleop_attempts.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
     (root / "session.json").write_text(json.dumps({"arguments": ["--successes", 1, "--seed", "0", "--people", "0"]}))
     return root
@@ -60,8 +73,14 @@ def test_a_recorded_demo_becomes_a_teleop_source_and_retargets_in_physics(twin, 
     (src,) = sources
     assert src["source_generator"] == GENERATOR and src["teleop"] == {"episode_index": 0, "attempt": 0}
     assert {s["segment"] for s in src["samples"]} == {"object", "sink"}
-    r = generate(twin, tmp_path / "out", sources=[src, src], res=32, offsets=[(.03, -.01, .08), (-.03, .01, -.08)],
-                 log=lambda *_: None)
+    r = generate(
+        twin,
+        tmp_path / "out",
+        sources=[src, src],
+        res=32,
+        offsets=[(0.03, -0.01, 0.08), (-0.03, 0.01, -0.08)],
+        log=lambda *_: None,
+    )
     report = r["report_data"]
     assert report["successes"] == report["attempts"] == 2, report["rows"]
     assert report["source_generator"] == [GENERATOR]
@@ -72,6 +91,7 @@ def test_a_recorded_demo_becomes_a_teleop_source_and_retargets_in_physics(twin, 
     assert json.loads((r["dataset"] / "meta/se3_sources.json").read_text())[0]["source_id"] == src["source_id"]
     # `arrival cost` files the run under the room and family, so it is compared with a teleop baseline (C3)
     from arrival.eval.cost import collect_rows
+
     row = next(x for x in collect_rows(tmp_path / "out") if x["family"] == "counter_to_sink")
     assert row["room"] == "hero_kitchen" and row["successes"] == 2 and row["seconds_per_demo"] > 0
 

@@ -1,12 +1,13 @@
 """fanout with the local backend refuses a --room that has no scan before any shard runs. Every shard's sim used to
 fail to load it, be retried until max_attempts, and the run said "rerun to resume" while run.json kept the misspelt
 room, so a rerun with the right one under the same --run-id was refused as "started with different settings"."""
+
 import shutil
 
 import pytest
+from conftest import SCANS
 
 from arrival import cli
-from conftest import SCANS
 
 pytest.importorskip("mujoco")  # cmd_fanout checks --families against arrival.sim.tasks
 
@@ -14,8 +15,10 @@ pytest.importorskip("mujoco")  # cmd_fanout checks --families against arrival.si
 @pytest.fixture
 def submitted(monkeypatch):
     """LocalBackend.submit raises instead of starting a shard, so a test sees how far a run got without a sim."""
+
     def submit(self, cfg, i):
         raise RuntimeError(f"submitted shard {i} of room {cfg.room}")
+
     monkeypatch.setattr("arrival.jobs.fanout.LocalBackend.submit", submit)
 
 

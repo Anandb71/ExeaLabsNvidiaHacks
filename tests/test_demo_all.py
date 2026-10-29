@@ -71,8 +71,16 @@ def test_missing_room_fails_with_one_line(demo_all, tmp_path, capsys):
 def test_a_failed_loader_check_fails_the_demo(demo_all, tmp_path, monkeypatch):
     from arrival.export import loader_check
 
-    monkeypatch.setattr(loader_check, "check_loader", lambda root: {
-        "ok": False, "errors": [{"code": "missing_meta", "msg": "missing meta/stats.json"}], "warnings": [], "info": {}})
+    monkeypatch.setattr(
+        loader_check,
+        "check_loader",
+        lambda root: {
+            "ok": False,
+            "errors": [{"code": "missing_meta", "msg": "missing meta/stats.json"}],
+            "warnings": [],
+            "info": {},
+        },
+    )
     assert demo_all.main(["--quick", "--out", str(tmp_path)]) == 1
     s = json.loads((tmp_path / "demo_summary.json").read_text())
     assert s["overall"] == "FAIL" and s["stages"][-1]["stage"] == "loader check"

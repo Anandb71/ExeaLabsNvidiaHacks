@@ -26,9 +26,15 @@ from arrival.scan import bundle, roomplan  # noqa: E402
 from arrival.twin.compile import compile_twin  # noqa: E402
 
 MARGIN = 0.6
-COLORS = {"counter": (214, 182, 128), "sink": (120, 170, 220), "stove": (220, 110, 90),
-          "fridge_bottom_freezer": (160, 160, 170), "dishwasher": (150, 200, 190),
-          "hinge_cabinet": (190, 160, 120), "box": (200, 180, 220)}
+COLORS = {
+    "counter": (214, 182, 128),
+    "sink": (120, 170, 220),
+    "stove": (220, 110, 90),
+    "fridge_bottom_freezer": (160, 160, 170),
+    "dishwasher": (150, 200, 190),
+    "hinge_cabinet": (190, 160, 120),
+    "box": (200, 180, 220),
+}
 PORTALS = {"doors": (150, 90, 40), "windows": (70, 130, 230), "openings": (150, 150, 150)}
 
 
@@ -53,8 +59,10 @@ def _corners(f: dict) -> list[tuple[float, float]]:
     sx, sy, _ = f["size"]
     x, y, _ = f["position"]
     c, s = math.cos(f.get("yaw", 0.0)), math.sin(f.get("yaw", 0.0))
-    return [(x + c * dx - s * dy, y + s * dx + c * dy)
-            for dx, dy in ((sx / 2, sy / 2), (-sx / 2, sy / 2), (-sx / 2, -sy / 2), (sx / 2, -sy / 2))]
+    return [
+        (x + c * dx - s * dy, y + s * dx + c * dy)
+        for dx, dy in ((sx / 2, sy / 2), (-sx / 2, sy / 2), (-sx / 2, -sy / 2), (sx / 2, -sy / 2))
+    ]
 
 
 def render(name: str, twin: dict, scale: float) -> Image.Image:
@@ -82,8 +90,13 @@ def render(name: str, twin: dict, scale: float) -> Image.Image:
         draw.multiline_text(px(f["position"]), label, fill=(20, 20, 20), font=small, anchor="mm", align="center")
     for w in twin["walls"]:
         draw.line([px(w["start"]), px(w["end"])], fill=(40, 40, 40), width=max(2, int(w["thickness"] * scale)))
-        draw.text(px(((w["start"][0] + w["end"][0]) / 2, (w["start"][1] + w["end"][1]) / 2)), w["id"][:12],
-                  fill=(90, 90, 90), font=small, anchor="mm")
+        draw.text(
+            px(((w["start"][0] + w["end"][0]) / 2, (w["start"][1] + w["end"][1]) / 2)),
+            w["id"][:12],
+            fill=(90, 90, 90),
+            font=small,
+            anchor="mm",
+        )
     for key, color in PORTALS.items():
         for p in twin.get(key, []):
             c, s = math.cos(p["yaw"]), math.sin(p["yaw"])
@@ -91,8 +104,9 @@ def render(name: str, twin: dict, scale: float) -> Image.Image:
             a = (p["position"][0] - c * h, p["position"][1] - s * h)
             b = (p["position"][0] + c * h, p["position"][1] + s * h)
             draw.line([px(a), px(b)], fill=color, width=6)
-            draw.text(px(p["position"]), key[:-1] + (" open" if p.get("is_open") else ""), fill=color, font=small,
-                      anchor="md")
+            draw.text(
+                px(p["position"]), key[:-1] + (" open" if p.get("is_open") else ""), fill=color, font=small, anchor="md"
+            )
     for o in twin["objects"]:
         x, y = px(o["position"])
         draw.ellipse([x - 4, y - 4, x + 4, y + 4], fill=(200, 40, 40))
@@ -110,8 +124,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", default="out/renders")
     ap.add_argument("--scale", type=float, default=100.0, help="pixels per metre")
     a = ap.parse_args(argv)
-    missing = [p for p in a.paths if not (Path(p).is_file() and Path(p).suffix == ".json")
-               and not any((Path(p) / n).is_file() for n in ("scan.json", "roomplan.json"))]
+    missing = [
+        p
+        for p in a.paths
+        if not (Path(p).is_file() and Path(p).suffix == ".json")
+        and not any((Path(p) / n).is_file() for n in ("scan.json", "roomplan.json"))
+    ]
     if missing:
         ap.error(f"no scan.json or roomplan.json at {', '.join(missing)}")
     paths = [Path(p) for p in a.paths] or sorted(p for p in (ROOT / "scans").iterdir() if p.is_dir())

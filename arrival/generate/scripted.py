@@ -1,7 +1,10 @@
 """Scripted retarget generator. NOT physics and NOT MimicGen: seed cartesian trajectories
-translated to new start poses, with the target point recomputed from the fixtures."""
+translated to new start poses, with the target point recomputed from the fixtures. A distance oracle (`judge`)
+drops attempts whose object did not reach the target."""
 
 from __future__ import annotations
+
+import math
 
 from arrival.tasks.propose import shuffled, top_z
 
@@ -12,6 +15,7 @@ HOVER = 0.18
 GRASP = 0.02
 LIFT = 0.20
 RISE = 0.15
+TOLERANCE = 0.05  # m: how close the object must end to the target for the oracle to keep the attempt
 
 
 def is_miss(attempt_index: int) -> bool:
@@ -26,6 +30,8 @@ def task_slot(attempt_index: int) -> int:
 
 
 def target_point(task: dict, twin: dict) -> list[float]:
+    """Where the scripted trajectory sets the object down: just above the sink for counter_to_sink, resting on the
+    target counter top otherwise."""
     fixtures = {f["id"]: f for f in twin["fixtures"]}
     target = fixtures[task["target_fixture_id"]]
     if task["family"] == "counter_to_sink":
@@ -74,18 +80,21 @@ def seed_trajectory(start: list[float], target: list[float], miss: bool = False)
             eef, grip, obj = _lerp(placed, risen, (k - 10) / 5), 0.0, list(target)
         if miss:
             grip, obj = 0.0, list(start)
-        frames.append({
-            "t": round(i / FPS, 6),
-            "joint": [0.0] * 7,
-            "gripper": round(grip, 6),
-            "eef": [round(v, 6) for v in eef],
-            "object_position": [round(v, 6) for v in obj],
-        })
+        frames.append(
+            {
+                "t": round(i / FPS, 6),
+                "joint": [0.0] * 7,
+                "gripper": round(grip, 6),
+                "eef": [round(v, 6) for v in eef],
+                "object_position": [round(v, 6) for v in obj],
+            }
+        )
     return frames
 
 
-def retarget(seed_frames: list[dict], seed_start: list[float], task: dict, target: list[float],
-             miss: bool = False) -> list[dict]:
+def retarget(
+    seed_frames: list[dict], seed_start: list[float], task: dict, target: list[float], miss: bool = False
+) -> list[dict]:
     """Translate the seed's approach (hover/grasp/lift) by start delta; recompute carry/release to target."""
     d = [task["start_position"][i] - seed_start[i] for i in range(3)]
     if not any(abs(v) > 1e-12 for v in d) and not miss:
@@ -111,13 +120,24 @@ def build_seeds(tasks: list[dict], twin: dict) -> dict:
     # Prefer the scanned pose; if the counter inset rejected it, fall back to the lowest surviving pose.
     for t in sorted(tasks, key=lambda t: t["pose_index"]):
         if t["lighting"] == "neutral" and t["wording_index"] == 1 and seed_key(t) not in seeds:
-            seeds[seed_key(t)] = (list(t["start_position"]), seed_trajectory(t["start_position"], target_point(t, twin)))
+            seeds[seed_key(t)] = (
+                list(t["start_position"]),
+                seed_trajectory(t["start_position"], target_point(t, twin)),
+            )
     return seeds
 
 
-def make_attempt(attempt_index: int, task: dict, twin: dict, seeds: dict) -> dict:
-    from arrival.generate.oracle import judge
+def judge(attempt: dict) -> bool:
+    """The oracle: True when the gripper closed and the object ended within TOLERANCE of the target (in 3D, so it
+    must be lowered onto the target, not left hovering)."""
+    frames, target = attempt["frames"], attempt["target"]
+    closed = max(f["gripper"] for f in frames) > 0.5
+    return math.dist(frames[-1]["object_position"], target) <= TOLERANCE and closed
 
+
+def make_attempt(attempt_index: int, task: dict, twin: dict, seeds: dict) -> dict:
+    """One scripted attempt: the task's seed trajectory retargeted to its start pose and target (a scripted miss at
+    every 10th index), judged by the oracle."""
     miss = is_miss(attempt_index)
     target = target_point(task, twin)
     seed_start, seed_frames = seeds[seed_key(task)]

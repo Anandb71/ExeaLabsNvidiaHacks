@@ -70,6 +70,7 @@ def owner_of(token: str | None) -> str | None:
 
 
 def cookie_value(header: str | None, name: str = CLIENT_COOKIE) -> str | None:
+    """The client token from a Cookie header, only if it has the token's exact shape."""
     for part in (header or "").split(";"):
         k, _, v = part.strip().partition("=")
         if k == name and CLIENT_TOKEN_RE.match(v):
@@ -130,12 +131,15 @@ def redact(text: str, environ=None) -> str:
 
 
 def csp_hash(text: str) -> str:
+    """The CSP 'sha256-...' source for an inline script or style."""
     import base64
 
     return "'sha256-" + base64.b64encode(hashlib.sha256(text.encode("utf-8")).digest()).decode() + "'"
 
 
 def security_headers(csp: str, https: bool = False) -> dict[str, str]:
+    """The headers every response carries: the given CSP, no sniffing or framing, no referrer, no device permissions,
+    same-origin isolation, and HSTS when served over HTTPS."""
     h = {
         "Content-Security-Policy": csp,
         "X-Content-Type-Options": "nosniff",

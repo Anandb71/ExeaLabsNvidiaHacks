@@ -14,15 +14,22 @@ from conftest import REPO  # noqa: E402
 
 sys.path.insert(0, str(REPO / "scripts"))
 import export_demo_data  # noqa: E402
-from arrival.sim.collect import FPS  # noqa: E402
+
 from arrival.sim.export import STATE_DIM  # noqa: E402
+from arrival.sim.robot import FPS  # noqa: E402
 
 
 def test_joint_states_are_arm_and_gripper_only():
     n = 2 * FPS  # two seconds of control steps
     states = np.arange(n * STATE_DIM, dtype=np.float64).reshape(n, STATE_DIM) / 100
-    rec = SimpleNamespace(names=["link1"], pos=[[[0.0, 0.0, float(i) / n]] for i in range(n)],
-                          quat=[[[1.0, 0.0, 0.0, 0.0]]] * n, states=list(states), people_xy=[[]] * n, joint_q=[])
+    rec = SimpleNamespace(
+        names=["link1"],
+        pos=[[[0.0, 0.0, float(i) / n]] for i in range(n)],
+        quat=[[[1.0, 0.0, 0.0, 0.0]]] * n,
+        states=list(states),
+        people_xy=[[]] * n,
+        joint_q=[],
+    )
     packed = export_demo_data.pack_episode(rec, export_demo_data.OUT_FPS)
     rows = packed["joint_states"]
     assert len(rows) == packed["n_frames"]
@@ -51,6 +58,7 @@ def test_committed_stats_match_the_committed_files():
     files = json.loads((data / "stats.json").read_text())["files"]
     assert not [k for k in files if "\\" in k]
     skip = {"stats.json", *export_demo_data.KEEP}
+
     def lf_size(path):  # git converts line endings in text files only; every PNG has \r\n in its header
         raw = path.read_bytes()
         return len(raw.replace(b"\r\n", b"\n") if path.suffix in (".json", ".md") else raw)
@@ -67,6 +75,7 @@ def test_rerun_keeps_the_hand_edited_todo_list_and_reader_lines(tmp_path, monkey
     (out / "todo.json").write_text('{"items": []}')
     (out / "readers-lines.json").write_text('[{"n": 1}]')  # the film's lines for readers.html and api/readers
     (out / "stale.json").write_text("{}")
+
     def stop(*_args, **_kwargs):  # stop right after the output folder is reset, before any sim runs
         raise RuntimeError("stop")
 

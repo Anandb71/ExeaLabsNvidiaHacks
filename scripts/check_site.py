@@ -10,7 +10,6 @@ Referenced paths come from index.html (src, href, importmap), css/*.css (url(...
 specifiers, new URL('...', import.meta.url), and fetched data paths), plus the files the data README promises
 (6 episodes, 24 previews). Standard library only.
 """
-from __future__ import annotations
 
 import argparse
 import re
@@ -26,17 +25,25 @@ FAMILIES = ["counter_to_sink", "open_drawer", "open_door", "open_fridge", "put_i
 
 def refs_html(text):
     out = set(re.findall(r'(?:src|href)="([^"#]+)"', text))
-    out |= set(re.findall(r'"three":\s*"([^"]+)"', text))          # importmap
+    out |= set(re.findall(r'"three":\s*"([^"]+)"', text))  # importmap
     return {r for r in out if not r.startswith(("http:", "https:", "data:", "mailto:", "#"))}
 
 
 def refs_css(text):
-    return {r for r in re.findall(r'url\(\s*["\']?([^"\')]+)["\']?\s*\)', text) if not r.startswith(("data:", "#", "http", "%23"))}
+    return {
+        r
+        for r in re.findall(r'url\(\s*["\']?([^"\')]+)["\']?\s*\)', text)
+        if not r.startswith(("data:", "#", "http", "%23"))
+    }
 
 
 def refs_js(text):
     out = set(re.findall(r'(?:from|import)\s*\(?\s*[\'"](\.{1,2}/[^\'"]+)[\'"]', text))
-    out |= {r for r in re.findall(r"new URL\(\s*[`'\"]([^`'\"$]+)[`'\"]\s*,\s*import\.meta\.url", text) if not r.endswith('/')}
+    out |= {
+        r
+        for r in re.findall(r"new URL\(\s*[`'\"]([^`'\"$]+)[`'\"]\s*,\s*import\.meta\.url", text)
+        if not r.endswith("/")
+    }
     out |= set(re.findall(r"\bj\(\s*[`'\"]([^`'\"$]+\.json)[`'\"]", text))
     out |= {"scan_points.bin"} if "scan_points.bin" in text else set()
     return out
@@ -45,9 +52,11 @@ def refs_js(text):
 def collect():
     """Return a list of (referencing file relative to site/, absolute path under site/)."""
     found = []
+
     def add(src, ref, base):
         p = (base / ref.split("?")[0]).resolve()
         found.append((src, p))
+
     idx = SITE / "index.html"
     for r in refs_html(idx.read_text()):
         add("index.html", r, SITE)
@@ -70,7 +79,13 @@ def collect():
                 add("data README", f"frames/{f}_{cam}_{w}.png", data_base)
     for n in ("rooms.json", "geoms.json", "stats.json", "scan_points.json", "scan_points.bin"):
         add("data README", n, data_base)
-    for n in ("three/three.module.js", "three/OrbitControls.js", "gsap/gsap.min.js", "gsap/ScrollTrigger.min.js", "lenis/lenis.min.js"):
+    for n in (
+        "three/three.module.js",
+        "three/OrbitControls.js",
+        "gsap/gsap.min.js",
+        "gsap/ScrollTrigger.min.js",
+        "lenis/lenis.min.js",
+    ):
         add("vendor", n, SITE / "vendor")
     for n in ("fraunces-opsz.woff2", "fraunces-opsz-italic.woff2", "dm-mono-400.woff2", "dm-mono-500.woff2"):
         add("fonts", n, SITE / "fonts")

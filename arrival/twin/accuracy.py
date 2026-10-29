@@ -31,13 +31,23 @@ import json
 import math
 from pathlib import Path
 
-from arrival.twin.compile import (ADJACENT_GAP, COUNTER_HEIGHT, ISLAND_CLEARANCE, is_counter_host, to_local,
-                                  wall_distance)
+from arrival.twin.compile import (
+    ADJACENT_GAP,
+    COUNTER_HEIGHT,
+    ISLAND_CLEARANCE,
+    is_counter_host,
+    to_local,
+    wall_distance,
+)
 
 DEFAULT_TOLERANCE_M = 0.05
 REQUIRED = ("counter_length_m", "counter_height_m", "sink_width_m")
-EXTRAS = {"island_length_m": None, "stove_width_m": "stove", "fridge_width_m": "fridge_bottom_freezer",
-          "dishwasher_width_m": "dishwasher"}
+EXTRAS = {
+    "island_length_m": None,
+    "stove_width_m": "stove",
+    "fridge_width_m": "fridge_bottom_freezer",
+    "dishwasher_width_m": "dishwasher",
+}
 META = ("tolerance_m", "measured_by", "date", "authored", "note")
 BUILT_IN = ("stove", "dishwasher")
 BUILT_IN_HEIGHT_SLACK = 0.05
@@ -62,6 +72,8 @@ def _positive_metres(value) -> bool:
 
 
 def load_measurements(path: str | Path) -> dict:
+    """A room's tape measurements (measurements.json), checked: every required dimension present, no unknown keys, all
+    positive metres. Raises MeasurementError otherwise."""
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise MeasurementError(f"{path}: expected a JSON object")
@@ -82,8 +94,9 @@ def _is_counter(f: dict, walls: list[dict]) -> bool:
     `storage` at counter height (`is_counter_host`), and those count too unless they stand clear of every wall,
     where the block is an island, which is never measured."""
     if f["type"] == "counter":
-        return not (f.get("island") or f.get("default_config_name") == "dining"
-                    or f.get("source_category") == "synthesized")
+        return not (
+            f.get("island") or f.get("default_config_name") == "dining" or f.get("source_category") == "synthesized"
+        )
     return is_counter_host(f) and not (walls and wall_distance(f, walls) > ISLAND_CLEARANCE)
 
 
@@ -134,8 +147,13 @@ def counter_runs(twin: dict) -> list[dict]:
             spans.append((c - m["size"][0] / 2, c + m["size"][0] / 2))
         counters = [m for m in members if m["type"] not in BUILT_IN]
         if counters:  # a run of a lone stove is not a counter
-            runs.append({"length": max(s[1] for s in spans) - min(s[0] for s in spans),
-                         "members": [m["id"] for m in members], "counters": counters})
+            runs.append(
+                {
+                    "length": max(s[1] for s in spans) - min(s[0] for s in spans),
+                    "members": [m["id"] for m in members],
+                    "counters": counters,
+                }
+            )
     runs.sort(key=lambda r: (-r["length"], min(r["members"])))
     return runs
 
@@ -147,6 +165,8 @@ def _over(sink: dict, counter: dict) -> bool:
 
 
 def extract_dimensions(twin: dict) -> dict[str, float]:
+    """The twin's values for the dimensions people tape-measure: the longest counter run and its height, and when
+    present the sink width on that run, the island length and the extra fixture widths."""
     runs = counter_runs(twin)
     if not runs:
         raise MeasurementError(f"{twin['room_id']}: no scanned counter to measure")
@@ -176,9 +196,13 @@ def compare(twin: dict, measurements: dict) -> dict:
     for key in (*REQUIRED, *(k for k in EXTRAS if k in measurements)):
         tape, got = float(measurements[key]), dims.get(key)
         err = None if got is None else got - tape
-        rows[key] = {"twin_m": got, "measured_m": tape, "error_m": err,
-                     "ok": err is not None and abs(err) <= tol + EPS}
-    return {"room_id": twin["room_id"], "tolerance_m": tol, "dimensions": rows,
-            "ok": all(r["ok"] for r in rows.values()),
-            "tape_measured": not measurements.get("authored", False),
-            "measured_by": measurements.get("measured_by"), "date": measurements.get("date")}
+        rows[key] = {"twin_m": got, "measured_m": tape, "error_m": err, "ok": err is not None and abs(err) <= tol + EPS}
+    return {
+        "room_id": twin["room_id"],
+        "tolerance_m": tol,
+        "dimensions": rows,
+        "ok": all(r["ok"] for r in rows.values()),
+        "tape_measured": not measurements.get("authored", False),
+        "measured_by": measurements.get("measured_by"),
+        "date": measurements.get("date"),
+    }

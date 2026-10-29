@@ -18,9 +18,14 @@ class SplatCompositeNotImplemented(NotImplementedError):
     """A rendered static and dynamic layer was not supplied."""
 
 
-def render(static_rgb: np.ndarray | None = None, static_depth: np.ndarray | None = None,
-           dynamic_rgb: np.ndarray | None = None, dynamic_depth: np.ndarray | None = None,
-           *, margin: float = DEPTH_MARGIN) -> np.ndarray:
+def render(
+    static_rgb: np.ndarray | None = None,
+    static_depth: np.ndarray | None = None,
+    dynamic_rgb: np.ndarray | None = None,
+    dynamic_depth: np.ndarray | None = None,
+    *,
+    margin: float = DEPTH_MARGIN,
+) -> np.ndarray:
     """Return RGB with a dynamic pixel where it is > margin metres nearer.
 
     Depth is optical-axis distance in metres. Zero, negative, NaN or infinity
@@ -38,8 +43,12 @@ def render(static_rgb: np.ndarray | None = None, static_depth: np.ndarray | None
     if dynamic_rgb.shape != static_rgb.shape or dynamic_rgb.dtype != np.uint8:
         raise ValueError("dynamic_rgb must match static_rgb's HxWx3 uint8 shape")
     size = static_rgb.shape[:2]
-    if (static_depth.shape != size or dynamic_depth.shape != size or
-            static_depth.dtype.kind not in "fi" or dynamic_depth.dtype.kind not in "fi"):
+    if (
+        static_depth.shape != size
+        or dynamic_depth.shape != size
+        or static_depth.dtype.kind not in "fi"
+        or dynamic_depth.dtype.kind not in "fi"
+    ):
         raise ValueError("depth layers must be numeric HxW arrays matching RGB")
     static_ok = np.isfinite(static_depth) & (static_depth > 0)
     dynamic_ok = np.isfinite(dynamic_depth) & (dynamic_depth > 0)

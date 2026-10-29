@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import numpy as np
 
-YIELD = (0.25, 0.50)  # walkers: clearance (m) to the closest robot body at which they stand still, and above which they walk freely
+YIELD = (
+    0.25,
+    0.50,
+)  # walkers: clearance (m) to the closest robot body at which they stand still, and above which they walk freely
 ROBOT_BODIES = ("robot_base",) + tuple(f"link{i}" for i in range(1, 8)) + ("hand", "finger_l", "finger_r")
 YIELD_BODIES = ROBOT_BODIES
 
@@ -29,16 +32,26 @@ def yield_factor(clearance: float) -> float:
 
 
 class SafetyMonitor:
+    """Per-episode safety record, updated every control step: the minimum distance between any walker and the robot's
+    collision geoms, whether a walker touched the robot or a door it was holding, and the deepest arm-fixture
+    contact."""
+
     def __init__(self, model):
         import mujoco
 
         body_ids = {model.body(n).id for n in ROBOT_BODIES}
-        self.geoms = [g for g in range(model.ngeom)
-                      if model.geom_bodyid[g] in body_ids and (model.geom_contype[g] or model.geom_conaffinity[g])]
+        self.geoms = [
+            g
+            for g in range(model.ngeom)
+            if model.geom_bodyid[g] in body_ids and (model.geom_contype[g] or model.geom_conaffinity[g])
+        ]
         self.capsule = {g: model.geom_type[g] == mujoco.mjtGeom.mjGEOM_CAPSULE for g in self.geoms}
-        self.radius = {g: float(np.hypot(model.geom_size[g][0], model.geom_size[g][1]))
-                       if model.geom_type[g] == mujoco.mjtGeom.mjGEOM_BOX else float(model.geom_size[g][0])
-                       for g in self.geoms}
+        self.radius = {
+            g: float(np.hypot(model.geom_size[g][0], model.geom_size[g][1]))
+            if model.geom_type[g] == mujoco.mjtGeom.mjGEOM_BOX
+            else float(model.geom_size[g][0])
+            for g in self.geoms
+        }
         self.half = {g: float(model.geom_size[g][1]) for g in self.geoms}
         # The same links can approach people whether the pedestal is fixed or driving.
         yb = {model.body(n).id for n in YIELD_BODIES}
@@ -75,18 +88,22 @@ class SafetyMonitor:
         for i in range(data.ncon):
             c = data.contact[i]
             for a, b in ((c.geom1, c.geom2), (c.geom2, c.geom1)):
-                if a in self.link_geoms and b not in self.arm_ignore and b not in driven:  # a door a person is swinging is human contact, not arm contact
+                if (
+                    a in self.link_geoms and b not in self.arm_ignore and b not in driven
+                ):  # a door a person is swinging is human contact, not arm contact
                     hit = True
                     if -c.dist > self.arm_depth:
                         self.arm_depth = -c.dist
-                        self.arm_worst = (model.body(model.geom_bodyid[a]).name,
-                                          model.geom(b).name or model.body(model.geom_bodyid[b]).name)
+                        self.arm_worst = (
+                            model.body(model.geom_bodyid[a]).name,
+                            model.geom(b).name or model.body(model.geom_bodyid[b]).name,
+                        )
         self.arm_steps += hit
 
     def clearance(self, data, p, r: float, geoms=None) -> float:
         """Horizontal clearance from a person cylinder (centre p, radius r) to the robot geoms (all, or `geoms`)."""
         d = float("inf")
-        for g in (self.geoms if geoms is None else geoms):
+        for g in self.geoms if geoms is None else geoms:
             c = data.geom_xpos[g]
             if self.capsule[g]:
                 axis = data.geom_xmat[g].reshape(3, 3)[:, 2] * self.half[g]
@@ -137,16 +154,39 @@ class SafetyMonitor:
         self.n += 1
 
     def summary(self) -> dict:
-        arm = {"arm_contact_steps": self.arm_steps, "arm_contact_max_depth_m": round(self.arm_depth, 4),
-               "arm_contact_worst": list(self.arm_worst) if self.arm_worst else None}
+        """The episode's safety record as a JSON-ready dict; the distance fields are None when the episode had no people
+        or never stepped."""
+        arm = {
+            "arm_contact_steps": self.arm_steps,
+            "arm_contact_max_depth_m": round(self.arm_depth, 4),
+            "arm_contact_worst": list(self.arm_worst) if self.arm_worst else None,
+        }
         if not self.people:
-            return {"min_human_distance_m": None, "min_distance_step": None, "human_contact": False, "people": 0,
-                    "door_contact": False, **arm}
+            return {
+                "min_human_distance_m": None,
+                "min_distance_step": None,
+                "human_contact": False,
+                "people": 0,
+                "door_contact": False,
+                **arm,
+            }
         if self.min_d == float("inf"):  # update() never ran; inf is not valid JSON
-            return {"min_human_distance_m": None, "min_distance_step": None, "human_contact": False,
-                    "people": len(self.people), "door_contact": False, **arm}
-        return {"min_human_distance_m": round(self.min_d, 4), "min_distance_step": self.min_step,
-                "human_contact": bool(self.contact), "people": len(self.people), "door_contact": bool(self.door_contact), **arm}
+            return {
+                "min_human_distance_m": None,
+                "min_distance_step": None,
+                "human_contact": False,
+                "people": len(self.people),
+                "door_contact": False,
+                **arm,
+            }
+        return {
+            "min_human_distance_m": round(self.min_d, 4),
+            "min_distance_step": self.min_step,
+            "human_contact": bool(self.contact),
+            "people": len(self.people),
+            "door_contact": bool(self.door_contact),
+            **arm,
+        }
 
 
 def overhead_clearance(model, data) -> float:
@@ -157,8 +197,18 @@ def overhead_clearance(model, data) -> float:
     def name(g):
         return model.geom(g).name
 
-    mine = [g for g in range(model.ngeom) if name(g).startswith("person_") and name(g).split("_", 2)[2] in
-            ("head", "hair", "uarm_r", "uarm_l", "farm_r", "farm_l")]
+    mine = [
+        g
+        for g in range(model.ngeom)
+        if name(g).startswith("person_")
+        and name(g).split("_", 2)[2] in ("head", "hair", "uarm_r", "uarm_l", "farm_r", "farm_l")
+    ]
     body = lambda g: model.body(model.geom_bodyid[g]).name
-    other = [g for g in range(model.ngeom) if "_upper" in name(g) or "_upper_door" in body(g) or body(g).startswith("fridge") and body(g).endswith("_door")]
-    return min((float(mujoco.mj_geomDistance(model, data, a, b, 1.0, None)) for a in mine for b in other), default=float("inf"))
+    other = [
+        g
+        for g in range(model.ngeom)
+        if "_upper" in name(g) or "_upper_door" in body(g) or body(g).startswith("fridge") and body(g).endswith("_door")
+    ]
+    return min(
+        (float(mujoco.mj_geomDistance(model, data, a, b, 1.0, None)) for a in mine for b in other), default=float("inf")
+    )

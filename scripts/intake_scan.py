@@ -51,9 +51,20 @@ def main(argv: list[str] | None = None) -> int:
     if not a.roomplan:
         ap.error("--roomplan is required (or --check to re-check an existing folder)")
     try:
-        r = intake(a.room_id, a.roomplan, a.photos, scans=a.scans, no_photos=a.no_photos,
-                   location_type=a.location_type, phone=a.phone, ios=a.ios, lighting=a.lighting,
-                   clutter=a.clutter, measures=a.measure, out_dir=a.out)
+        r = intake(
+            a.room_id,
+            a.roomplan,
+            a.photos,
+            scans=a.scans,
+            no_photos=a.no_photos,
+            location_type=a.location_type,
+            phone=a.phone,
+            ios=a.ios,
+            lighting=a.lighting,
+            clutter=a.clutter,
+            measures=a.measure,
+            out_dir=a.out,
+        )
     except IntakeError as e:
         print(f"refused: {e}", file=sys.stderr)
         return 2
@@ -68,8 +79,11 @@ def _report(r: dict) -> int:
         print(f"  - {p}")
     d = Path(r["dir"])
     scans = "" if d.parent.resolve() == (ROOT / "scans").resolve() else f" --scans {d.parent}"
-    print("GO" if r["go"] else f"NO-GO: fix the items above in {d}, then run "
-          f"python scripts/intake_scan.py {d.name} --check{scans}")
+    print(
+        "GO"
+        if r["go"]
+        else f"NO-GO: fix the items above in {d}, then run python scripts/intake_scan.py {d.name} --check{scans}"
+    )
     return 0 if r["go"] else 1
 
 

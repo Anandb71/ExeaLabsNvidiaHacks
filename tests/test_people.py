@@ -12,8 +12,17 @@ from arrival.sim.people import HEIGHT, Walkers, person_spec  # noqa: E402
 from arrival.sim.scene import build_mjcf  # noqa: E402
 from arrival.twin.compile import compile_twin  # noqa: E402
 
-TASK = {"family": "counter_to_sink", "object_id": "mug_1", "source": "counter_a", "target": "sink_1",
-        "target_x": 1.6, "start": [1.0, 0.35, 0.97], "lighting": "neutral", "people": 2, "seed": 3}
+TASK = {
+    "family": "counter_to_sink",
+    "object_id": "mug_1",
+    "source": "counter_a",
+    "target": "sink_1",
+    "target_x": 1.6,
+    "start": [1.0, 0.35, 0.97],
+    "lighting": "neutral",
+    "people": 2,
+    "seed": 3,
+}
 HOLD = np.array(list(robot.HOME) + [robot.FINGER_OPEN])
 
 
@@ -71,7 +80,12 @@ def _inside(twin, xy, z):
 
 def test_people_never_clip_through_fixtures(twin):
     t = copy.deepcopy(twin)
-    island = {**copy.deepcopy(t["fixtures"][2]), "id": "island_1", "position": [2.0, 2.0, 0.46], "size": [0.6, 0.5, 0.92]}
+    island = {
+        **copy.deepcopy(t["fixtures"][2]),
+        "id": "island_1",
+        "position": [2.0, 2.0, 0.46],
+        "size": [0.6, 0.5, 0.92],
+    }
     t["fixtures"].append(island)
     m = mujoco.MjModel.from_xml_string(build_mjcf(t, (1.3, 1.0, 0.75), n_people=3, people_seed=11))
     d = mujoco.MjData(m)
@@ -103,7 +117,10 @@ def test_feet_stay_out_of_the_counter_at_the_stop(twin):
         d = mujoco.MjData(m)
         walkers = Walkers(2, floor, seed=seed, base_xy=base[:2], front_y=0.75, fixtures=twin["fixtures"])
         feet = [g for g in range(m.ngeom) if "_foot_" in m.geom(g).name]
-        (cx, _, _), (sx, _, _) = next(f for f in twin["fixtures"] if f["id"] == "counter_a")["position"],             next(f for f in twin["fixtures"] if f["id"] == "counter_a")["size"]
+        (cx, _, _), (sx, _, _) = (
+            next(f for f in twin["fixtures"] if f["id"] == "counter_a")["position"],
+            next(f for f in twin["fixtures"] if f["id"] == "counter_a")["size"],
+        )
         stopped = set()
         for _ in range(400):
             walkers.step(m, d, 0.05)
@@ -113,10 +130,16 @@ def test_feet_stay_out_of_the_counter_at_the_stop(twin):
                 axis = d.geom_xmat[g].reshape(3, 3)[:, 2] * half
                 for p in (c - axis, c + axis):
                     assert _inside(twin, p[:2], p[2]) is None, (seed, m.geom(g).name, np.round(p, 3))
-            for i in range(2):  # a pause starting in front of counter_a; the fridge visit's pauses sit left of it or deeper
+            for i in range(
+                2
+            ):  # a pause starting in front of counter_a; the fridge visit's pauses sit left of it or deeper
                 x, y = walkers.pos[i]
-                if (walkers.wait[i] > 0 and abs(walkers.wait[i] - walkers.total[i]) < 1e-9
-                        and abs(x - cx) < sx / 2 and y < 1.2):
+                if (
+                    walkers.wait[i] > 0
+                    and abs(walkers.wait[i] - walkers.total[i]) < 1e-9
+                    and abs(x - cx) < sx / 2
+                    and y < 1.2
+                ):
                     stopped.add(i)
         assert stopped == {0, 1}, (seed, stopped)
 
@@ -129,8 +152,9 @@ def test_person_opens_and_closes_the_fridge(twin):
     base = (2.6, 1.0, 0.75)
     m = mujoco.MjModel.from_xml_string(build_mjcf(twin, base, n_people=2, people_seed=3))
     d = mujoco.MjData(m)
-    walkers = Walkers(2, (0.4, 1.65, 3.6, 2.7), seed=3, base_xy=base[:2], front_y=0.75, fixtures=twin["fixtures"],
-                      fridge_visit=True)
+    walkers = Walkers(
+        2, (0.4, 1.65, 3.6, 2.7), seed=3, base_xy=base[:2], front_y=0.75, fixtures=twin["fixtures"], fridge_visit=True
+    )
     assert walkers.visit is not None
     who = walkers.visit["person"]
     door, qadr = _door_geoms(m), int(m.joint("fridge_1_door").qposadr[0])
@@ -169,8 +193,9 @@ def test_fridge_visit_is_seeded_and_optional(twin):
         assert a.visit["person"] == b.visit["person"] and a.visit["q_open"] == b.visit["q_open"]
     none = Walkers(2, floor, seed=3, base_xy=(2.6, 1.0), front_y=0.75, fixtures=fx, fridge_visit=False)
     assert none.visit is None
-    visits = sum(Walkers(2, floor, seed=s, base_xy=(2.6, 1.0), front_y=0.75, fixtures=fx).visit is not None
-                 for s in range(20))
+    visits = sum(
+        Walkers(2, floor, seed=s, base_xy=(2.6, 1.0), front_y=0.75, fixtures=fx).visit is not None for s in range(20)
+    )
     assert 5 <= visits <= 18  # P_VISIT is 0.6 and the plan can decline
     near = Walkers(2, floor, seed=3, base_xy=(1.2, 1.0), front_y=0.75, fixtures=fx, fridge_visit=True)
     assert near.visit is None  # the base is inside the door's swing plus CLEAR: nobody opens it
@@ -181,8 +206,15 @@ def test_episode_with_a_fridge_visit_still_succeeds(twin):
     from arrival.sim.policy import ScriptedExpert
 
     for seed in range(12):
-        task = {"family": "open_drawer", "fixture": "counter_b", "handle": "counter_b_drawer0_handle",
-                "joint": "counter_b_drawer0", "lighting": "neutral", "people": 2, "seed": seed}
+        task = {
+            "family": "open_drawer",
+            "fixture": "counter_b",
+            "handle": "counter_b_drawer0_handle",
+            "joint": "counter_b_drawer0",
+            "lighting": "neutral",
+            "people": 2,
+            "seed": seed,
+        }
         env = SimEnv(twin, task, res=32)
         if env.walkers.visit is not None:
             break
@@ -198,8 +230,9 @@ def test_episode_with_a_fridge_visit_still_succeeds(twin):
 def test_yaw_does_not_spike_on_the_frame_a_walker_arrives_at_a_pause(twin):
     m = mujoco.MjModel.from_xml_string(build_mjcf(twin, (2.6, 1.0, 0.75), n_people=2, people_seed=3))
     d = mujoco.MjData(m)
-    walkers = Walkers(2, (0.4, 1.65, 3.6, 2.7), seed=3, base_xy=(2.6, 1.0), front_y=0.75,
-                      fixtures=twin["fixtures"], fridge_visit=True)
+    walkers = Walkers(
+        2, (0.4, 1.65, 3.6, 2.7), seed=3, base_xy=(2.6, 1.0), front_y=0.75, fixtures=twin["fixtures"], fridge_visit=True
+    )
     for _ in range(240):
         walkers.step(m, d, 0.05)
         for i in range(2):
@@ -268,8 +301,9 @@ def test_walker_yields_to_arm_links(twin, base_mode):
         for j, v in zip(robot.BASE_JOINTS, (0.1, 0.2, 0.3)):
             d.qpos[int(m.joint(j).qposadr[0])] = v
     mujoco.mj_forward(m, d)
-    w = Walkers(1, (0.4, 1.65, 3.6, 2.7), seed=3, base_xy=base[:2], front_y=0.75,
-                fixtures=twin["fixtures"], fridge_visit=False)
+    w = Walkers(
+        1, (0.4, 1.65, 3.6, 2.7), seed=3, base_xy=base[:2], front_y=0.75, fixtures=twin["fixtures"], fridge_visit=False
+    )
     r, far, give = float(w.specs[0]["torso_r"]), np.array([3.4, 2.5]), mon.yield_clearance(d)
     assert give(far, r) > YIELD[1] and mon.clearance(d, far, r, old) > YIELD[1]
     # Approach the extended arm with positive clearance: the old mobile subset would still let us walk.
@@ -291,8 +325,15 @@ def test_walker_yields_to_arm_links(twin, base_mode):
 
 
 def test_counter_pause_is_held_while_the_hand_is_close(twin):
-    w = Walkers(1, (0.4, 1.65, 3.6, 2.7), seed=3, base_xy=(2.6, 1.0), front_y=0.75, fixtures=twin["fixtures"],
-                fridge_visit=False)
+    w = Walkers(
+        1,
+        (0.4, 1.65, 3.6, 2.7),
+        seed=3,
+        base_xy=(2.6, 1.0),
+        front_y=0.75,
+        fixtures=twin["fixtures"],
+        fridge_visit=False,
+    )
     m = mujoco.MjModel.from_xml_string(build_mjcf(twin, (2.6, 1.0, 0.75), n_people=1, people_seed=3))
     d = mujoco.MjData(m)
     for _ in range(2000):
@@ -319,8 +360,9 @@ def _held_by_the_arm(twin, track: bool, seconds: float = 30.0):
     base, dt = (2.6, 1.0, 0.75), 0.05
     m = mujoco.MjModel.from_xml_string(build_mjcf(twin, base, n_people=1, people_seed=4))
     d = mujoco.MjData(m)
-    w = Walkers(1, (0.4, 1.65, 3.6, 2.7), seed=4, base_xy=base[:2], front_y=0.75, fixtures=twin["fixtures"],
-                fridge_visit=False)
+    w = Walkers(
+        1, (0.4, 1.65, 3.6, 2.7), seed=4, base_xy=base[:2], front_y=0.75, fixtures=twin["fixtures"], fridge_visit=False
+    )
     mon = SafetyMonitor(m)
     adr = [m.jnt_qposadr[m.joint(f"joint{k}").id] for k in range(1, 8)]
     q = np.array([0.0, 1.2, 0.0, -0.8, 0.0, 1.4, 0.0])
@@ -359,6 +401,7 @@ def test_walker_held_by_an_arm_pointing_at_them_walks_away(twin):
     assert longest <= WAIT_MAX + 1e-6 and far > PROGRESS
     assert not mon.contact
 
+
 def test_walking_away_never_steps_into_the_arm_links(twin):
     """The arm reaching out at a seeded pose and turning at 0.5 rad/s to point at one of two walkers (seed 4), 60 s.
     No step a walker takes brings them closer than the stop line to any robot geom, the links included, measured as
@@ -371,8 +414,9 @@ def test_walking_away_never_steps_into_the_arm_links(twin):
     base, dt = (2.6, 1.0, 0.75), 0.05
     m = mujoco.MjModel.from_xml_string(build_mjcf(twin, base, n_people=2, people_seed=4))
     d = mujoco.MjData(m)
-    w = Walkers(2, (0.4, 1.65, 3.6, 2.7), seed=4, base_xy=base[:2], front_y=0.75, fixtures=twin["fixtures"],
-                fridge_visit=False)
+    w = Walkers(
+        2, (0.4, 1.65, 3.6, 2.7), seed=4, base_xy=base[:2], front_y=0.75, fixtures=twin["fixtures"], fridge_visit=False
+    )
     mon = SafetyMonitor(m)
     rad = [r for _, r in mon.people]
     adr = [m.jnt_qposadr[m.joint(f"joint{k}").id] for k in range(1, 8)]
@@ -413,8 +457,15 @@ def test_counter_pause_hold_is_capped_even_when_the_hand_flickers_away(twin):
     adds up, so the walker leaves at most WAIT_MAX after the planned pause would have ended."""
     from arrival.sim.people import PROGRESS, WAIT_MAX
 
-    w = Walkers(1, (0.4, 1.65, 3.6, 2.7), seed=3, base_xy=(2.6, 1.0), front_y=0.75, fixtures=twin["fixtures"],
-                fridge_visit=False)
+    w = Walkers(
+        1,
+        (0.4, 1.65, 3.6, 2.7),
+        seed=3,
+        base_xy=(2.6, 1.0),
+        front_y=0.75,
+        fixtures=twin["fixtures"],
+        fridge_visit=False,
+    )
     m = mujoco.MjModel.from_xml_string(build_mjcf(twin, (2.6, 1.0, 0.75), n_people=1, people_seed=3))
     d = mujoco.MjData(m)
     for _ in range(2000):
@@ -438,8 +489,9 @@ def test_heads_and_arms_clear_wall_cabinets_and_the_fridge_door(twin):
 
     m = mujoco.MjModel.from_xml_string(build_mjcf(twin, (2.6, 1.0, 0.75), n_people=2, people_seed=3))
     d = mujoco.MjData(m)
-    w = Walkers(2, (0.4, 1.65, 3.6, 2.7), seed=3, base_xy=(2.6, 1.0), front_y=0.75, fixtures=twin["fixtures"],
-                fridge_visit=True)
+    w = Walkers(
+        2, (0.4, 1.65, 3.6, 2.7), seed=3, base_xy=(2.6, 1.0), front_y=0.75, fixtures=twin["fixtures"], fridge_visit=True
+    )
     lo = float("inf")
     for _ in range(300):
         w.step(m, d, 0.05)
@@ -453,8 +505,14 @@ def test_open_fridge_with_walkers_succeeds_without_contact(twin):
     from arrival.sim.policy import ScriptedExpert
 
     for seed in (3, 5):
-        task = {"family": "open_fridge", "fixture": "fridge_1", "joint": "fridge_1_door", "lighting": "neutral",
-                "people": 2, "seed": seed}
+        task = {
+            "family": "open_fridge",
+            "fixture": "fridge_1",
+            "joint": "fridge_1_door",
+            "lighting": "neutral",
+            "people": 2,
+            "seed": seed,
+        }
         env = SimEnv(twin, task, res=32)
         ep = run_episode(env, ScriptedExpert(), task)
         assert ep["success"], (seed, ep["detail"])
@@ -481,16 +539,18 @@ def test_floor_walk_without_a_counter_stop_keeps_clear_of_the_base(twin, base_to
     keep CLEAR of the base and of a mobile base's drive as the counter-stop loops do, and so do the fridge visitor's
     legs into and out of that loop (24 of these 30 seeds have a visit). Routed round the fixtures alone,
     kitchen_real_01's open_oven at seed 7 started a person 0.20 m from the base centre: contact at step 0."""
-    from arrival.sim.people import CLEAR, _seg_dist
+    from arrival.sim.geometry import point_segment_distance
+    from arrival.sim.people import CLEAR
 
     base = np.array([2.6, 1.0])
     end = base if base_to is None else np.array(base_to)
     drive = [base + k / 8 * (end - base) for k in range(9)]
     for seed in range(30):
-        w = Walkers(2, (0.4, 0.4, 3.6, 2.6), seed=seed, base_xy=base, front_y=None, fixtures=twin["fixtures"],
-                    base_to=base_to)
+        w = Walkers(
+            2, (0.4, 0.4, 3.6, 2.6), seed=seed, base_xy=base, front_y=None, fixtures=twin["fixtures"], base_to=base_to
+        )
         for path in w.paths:
-            near = min(_seg_dist(path[k - 1], path[k], q) for k in range(len(path)) for q in drive)
+            near = min(point_segment_distance(q, path[k - 1], path[k]) for k in range(len(path)) for q in drive)
             assert near >= CLEAR, (seed, round(near, 3))
 
 
@@ -519,4 +579,6 @@ def test_people_never_phase_through_each_other(twin):
                 for i in range(n):
                     for j in range(i + 1, n):
                         dist = float(np.linalg.norm(w.pos[i] - w.pos[j]))
-                        assert dist >= 0.40, f"Walkers {i} and {j} phased through each other: dist={dist:.3f} m (seed {seed}, n={n})"
+                        assert dist >= 0.40, (
+                            f"Walkers {i} and {j} phased through each other: dist={dist:.3f} m (seed {seed}, n={n})"
+                        )

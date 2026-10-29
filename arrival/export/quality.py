@@ -29,36 +29,41 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from arrival.export.lerobot import _stats, dataset_stats, list_column
+from arrival.export.lerobot import dataset_stats, feature_stats, list_column, read_jsonl
 
-LIMIT_FRAC = 0.03       # fraction of a joint's range counted as "at the limit"
-LIMIT_STEPS = 40        # consecutive steps at the limit before it is flagged (2 s at 20 fps)
-STUCK_GAP_RAD = 0.15    # |action - state| above this on some arm joint means the arm is not following the command
-STUCK_STEP_RAD = 1e-3   # per-step state change below this on every arm joint means the arm is frozen
-STUCK_STEPS = 40        # consecutive steps, both conditions, before it is flagged
+LIMIT_FRAC = 0.03  # fraction of a joint's range counted as "at the limit"
+LIMIT_STEPS = 40  # consecutive steps at the limit before it is flagged (2 s at 20 fps)
+STUCK_GAP_RAD = 0.15  # |action - state| above this on some arm joint means the arm is not following the command
+STUCK_STEP_RAD = 1e-3  # per-step state change below this on every arm joint means the arm is frozen
+STUCK_STEPS = 40  # consecutive steps, both conditions, before it is flagged
 ZERO_MOTION_RAD = 1e-3  # peak-to-peak of every state dim below this over the whole episode
-LENGTH_RATIO = 2.5      # outlier when length > median * ratio or < median / ratio
-MIN_GROUP = 4           # episodes needed in a family before lengths are compared
-MIN_LENGTH = 5          # fewer steps than this is never a demonstration
-BLANK_STD = 2.0         # a frame whose pixel std is below this (0..255) is blank
-BLANK_FRACTION = 0.5    # fraction of blank frames that flags the camera
+LENGTH_RATIO = 2.5  # outlier when length > median * ratio or < median / ratio
+MIN_GROUP = 4  # episodes needed in a family before lengths are compared
+MIN_LENGTH = 5  # fewer steps than this is never a demonstration
+BLANK_STD = 2.0  # a frame whose pixel std is below this (0..255) is blank
+BLANK_FRACTION = 0.5  # fraction of blank frames that flags the camera
 ARM_DOF = 7
 NOT_CHECKED = {
     "carried_object_tilt": "object pose is not recorded in the dataset",
     "wrist_useful_pixels": "only frame uniformity is measured (blank_video), not what the wrist camera sees",
 }
-THRESHOLDS = {"limit_frac": LIMIT_FRAC, "limit_steps": LIMIT_STEPS, "stuck_gap_rad": STUCK_GAP_RAD,
-              "stuck_step_rad": STUCK_STEP_RAD, "stuck_steps": STUCK_STEPS, "zero_motion_rad": ZERO_MOTION_RAD,
-              "length_ratio": LENGTH_RATIO, "min_group": MIN_GROUP, "min_length": MIN_LENGTH,
-              "blank_std": BLANK_STD, "blank_fraction": BLANK_FRACTION}
+THRESHOLDS = {
+    "limit_frac": LIMIT_FRAC,
+    "limit_steps": LIMIT_STEPS,
+    "stuck_gap_rad": STUCK_GAP_RAD,
+    "stuck_step_rad": STUCK_STEP_RAD,
+    "stuck_steps": STUCK_STEPS,
+    "zero_motion_rad": ZERO_MOTION_RAD,
+    "length_ratio": LENGTH_RATIO,
+    "min_group": MIN_GROUP,
+    "min_length": MIN_LENGTH,
+    "blank_std": BLANK_STD,
+    "blank_fraction": BLANK_FRACTION,
+}
 
 
 class QualityError(ValueError):
     """The folder cannot be checked at all (not a dataset), or a drop would leave nothing."""
-
-
-def _jsonl(path: Path) -> list[dict]:
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
 def longest_run(mask: np.ndarray) -> int:
@@ -91,15 +96,25 @@ def check_trace(state: np.ndarray, action: np.ndarray, limits: list[tuple[float,
         frozen = np.concatenate([[False], np.abs(np.diff(state[:, :arm], axis=0)).max(1) < STUCK_STEP_RAD])
         run = longest_run(gap & frozen)
         if run > STUCK_STEPS:
-            flags.append(_flag("stuck_arm", f"arm frozen {run} consecutive steps while commanded more than "
-                                            f"{STUCK_GAP_RAD} rad away (limit {STUCK_STEPS})"))
+            flags.append(
+                _flag(
+                    "stuck_arm",
+                    f"arm frozen {run} consecutive steps while commanded more than "
+                    f"{STUCK_GAP_RAD} rad away (limit {STUCK_STEPS})",
+                )
+            )
     if limits:
-        for j, (lo, hi) in enumerate(limits[:state.shape[1]]):
+        for j, (lo, hi) in enumerate(limits[: state.shape[1]]):
             band = LIMIT_FRAC * (hi - lo)
             run = longest_run((state[:, j] <= lo + band) | (state[:, j] >= hi - band))
             if run > LIMIT_STEPS:
-                flags.append(_flag("joint_at_limit", f"joint {j + 1} within {LIMIT_FRAC:.0%} of its limit for {run} "
-                                                     f"consecutive steps (limit {LIMIT_STEPS})"))
+                flags.append(
+                    _flag(
+                        "joint_at_limit",
+                        f"joint {j + 1} within {LIMIT_FRAC:.0%} of its limit for {run} "
+                        f"consecutive steps (limit {LIMIT_STEPS})",
+                    )
+                )
     return flags
 
 
@@ -142,12 +157,13 @@ def _load(root: Path) -> tuple[dict, list[dict]]:
     if not (root.is_dir() and (meta / "info.json").is_file() and (meta / "episodes.jsonl").is_file()):
         raise QualityError(f"{root} is not a LeRobot dataset folder (needs meta/info.json and meta/episodes.jsonl)")
     try:
-        info, episodes = json.loads((meta / "info.json").read_text()), _jsonl(meta / "episodes.jsonl")
+        info, episodes = json.loads((meta / "info.json").read_text()), read_jsonl(meta / "episodes.jsonl")
     except ValueError as e:
         raise QualityError(f"{root}: meta/info.json or meta/episodes.jsonl is not valid JSON ({e})") from e
     if not isinstance(info, dict) or not all(isinstance(e, dict) and "episode_index" in e for e in episodes):
-        raise QualityError(f"{root}: meta/info.json must be an object and each meta/episodes.jsonl line an object "
-                           "with episode_index")
+        raise QualityError(
+            f"{root}: meta/info.json must be an object and each meta/episodes.jsonl line an object with episode_index"
+        )
     return info, episodes
 
 
@@ -160,6 +176,7 @@ def check_episodes(root: str | Path, frames: bool = False) -> dict:
     limits = None
     if info.get("robot_type") == "arrival_sim_panda":
         from arrival.sim.robot import RANGES
+
         limits = list(RANGES)
     video_keys = [k for k, v in info.get("features", {}).items() if v.get("dtype") == "video"]
     rows, lengths, groups = [], {}, {}
@@ -199,15 +216,27 @@ def check_episodes(root: str | Path, frames: bool = False) -> dict:
     checks = ["unreadable", "nonfinite", "zero_motion", "stuck_arm", "length_outlier"]
     checks += ["joint_at_limit"] if limits else []
     checks += ["blank_video"] if frames and video_keys else []
-    return {"dataset": str(root), "robot_type": info.get("robot_type"), "episodes": len(rows), "flagged": len(bad),
-            "kept": len(rows) - len(bad), "flagged_episodes": bad, "flags_by_check": by_check, "checks_run": checks,
-            "not_checked": NOT_CHECKED, "thresholds": THRESHOLDS, "results": rows}
+    return {
+        "dataset": str(root),
+        "robot_type": info.get("robot_type"),
+        "episodes": len(rows),
+        "flagged": len(bad),
+        "kept": len(rows) - len(bad),
+        "flagged_episodes": bad,
+        "flags_by_check": by_check,
+        "checks_run": checks,
+        "not_checked": NOT_CHECKED,
+        "thresholds": THRESHOLDS,
+        "results": rows,
+    }
 
 
 def _rewrite_table(t: pa.Table, new_ep: int, cursor: int) -> pa.Table:
     n = t.num_rows
-    for name, vals in (("episode_index", np.full(n, new_ep, dtype=np.int64)),
-                       ("index", np.arange(cursor, cursor + n, dtype=np.int64))):
+    for name, vals in (
+        ("episode_index", np.full(n, new_ep, dtype=np.int64)),
+        ("index", np.arange(cursor, cursor + n, dtype=np.int64)),
+    ):
         t = t.set_column(t.schema.get_field_index(name), t.schema.field(name), pa.array(vals))
     return t
 
@@ -230,7 +259,7 @@ def drop_flagged(root: str | Path, out: str | Path, report: dict | None = None, 
     data_tpl, video_tpl = info["data_path"], info.get("video_path") or ""
     video_keys = [k for k, v in info.get("features", {}).items() if v.get("dtype") == "video"]
     shutil.copytree(root / "meta", out / "meta")
-    old_stats = {r["episode_index"]: r for r in _jsonl(root / "meta" / "episodes_stats.jsonl")}
+    old_stats = {r["episode_index"]: r for r in read_jsonl(root / "meta" / "episodes_stats.jsonl")}
     new_eps, new_stats, cursor, mapping = [], [], 0, {}
     for j, e in enumerate(kept):
         i = e["episode_index"]
@@ -242,7 +271,7 @@ def drop_flagged(root: str | Path, out: str | Path, report: dict | None = None, 
         stats = dict(old_stats.get(i, {}).get("stats", {}))
         for col in list(stats):
             if col in t.column_names:
-                stats[col] = _stats(np.array(t.column(col).to_pylist(), dtype=np.float64))
+                stats[col] = feature_stats(np.array(t.column(col).to_pylist(), dtype=np.float64))
         new_stats.append({"episode_index": j, "stats": stats})
         new_eps.append({**e, "episode_index": j, "length": t.num_rows})
         if video_tpl:
@@ -260,13 +289,22 @@ def drop_flagged(root: str | Path, out: str | Path, report: dict | None = None, 
         (meta / "stats.json").write_text(json.dumps(dataset_stats(out, new_stats), indent=2))
     side = meta / "arrival_cartesian.jsonl"
     if side.is_file():
-        rows = [{**r, "episode_index": mapping[r["episode_index"]]} for r in _jsonl(side)
-                if r.get("episode_index") in mapping]
+        rows = [
+            {**r, "episode_index": mapping[r["episode_index"]]}
+            for r in read_jsonl(side)
+            if r.get("episode_index") in mapping
+        ]
         side.write_text("".join(json.dumps(r) + "\n" for r in rows))
     n = len(kept)
-    info.update({"total_episodes": n, "total_frames": cursor, "splits": {"train": f"0:{n}"},
-                 "total_chunks": max(1, -(-n // size)),
-                 "arrival_dropped_by_validator": len(bad)})
+    info.update(
+        {
+            "total_episodes": n,
+            "total_frames": cursor,
+            "splits": {"train": f"0:{n}"},
+            "total_chunks": max(1, -(-n // size)),
+            "arrival_dropped_by_validator": len(bad),
+        }
+    )
     if info.get("total_videos") is not None:
         info["total_videos"] = n * len(video_keys)
     if "arrival_successes" in info:
@@ -274,15 +312,24 @@ def drop_flagged(root: str | Path, out: str | Path, report: dict | None = None, 
     if "arrival_families" in info:
         info["arrival_families"] = sorted({e["arrival_family"] for e in kept if e.get("arrival_family")})
     (meta / "info.json").write_text(json.dumps(info, indent=2))
-    cleaned = {"output": str(out), "kept": n, "dropped": sorted(bad), "index_map": {str(k): v for k, v in mapping.items()},
-               "dropped_reasons": {str(r["episode_index"]): r["flags"] for r in report["results"] if not r["ok"]}}
+    cleaned = {
+        "output": str(out),
+        "kept": n,
+        "dropped": sorted(bad),
+        "index_map": {str(k): v for k, v in mapping.items()},
+        "dropped_reasons": {str(r["episode_index"]): r["flags"] for r in report["results"] if not r["ok"]},
+    }
     (meta / "dropped_episodes.json").write_text(json.dumps(cleaned, indent=2))
     return {**report, "cleaned": cleaned}
 
 
 def format_report(report: dict) -> str:
-    lines = [f"{report['dataset']}: {report['episodes']} episodes, {report['flagged']} flagged, {report['kept']} ok "
-             f"(checks: {', '.join(report['checks_run'])})"]
+    """The per-episode quality report as text: counts, one line per flag, and the checks that were not run with the
+    reason."""
+    lines = [
+        f"{report['dataset']}: {report['episodes']} episodes, {report['flagged']} flagged, {report['kept']} ok "
+        f"(checks: {', '.join(report['checks_run'])})"
+    ]
     for r in report["results"]:
         for f in r["flags"]:
             lines.append(f"  episode {r['episode_index']} [{r['family']}] {f['check']}: {f['detail']}")

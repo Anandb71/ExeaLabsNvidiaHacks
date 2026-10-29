@@ -91,7 +91,9 @@ def test_check_mujoco():
         assert res.status == "fail"
         assert "RuntimeError: DLL failed to load" in res.detail
 
-    with patch("builtins.__import__", side_effect=RuntimeError("invalid value for environment variable MUJOCO_GL: egl")):
+    with patch(
+        "builtins.__import__", side_effect=RuntimeError("invalid value for environment variable MUJOCO_GL: egl")
+    ):
         res = check_mujoco()
         assert res.status == "fail"
         assert "invalid value for environment variable MUJOCO_GL: egl" in res.detail
@@ -118,13 +120,16 @@ def test_check_rendering(monkeypatch):
         assert "skipped (mujoco import failed: RuntimeError: DLL failed to load)" in res.detail
 
     # When invalid MUJOCO_GL causes import failure, invalid value shows up in message
-    with patch("builtins.__import__", side_effect=RuntimeError("invalid value for environment variable MUJOCO_GL: egl")):
+    with patch(
+        "builtins.__import__", side_effect=RuntimeError("invalid value for environment variable MUJOCO_GL: egl")
+    ):
         res = check_rendering()
         assert res.status == "warn"
         assert "invalid value for environment variable MUJOCO_GL: egl" in res.detail
 
     # When off-screen renderer raises an error
     import mujoco
+
     with patch.object(mujoco, "Renderer", side_effect=RuntimeError("gladLoadGL error")):
         monkeypatch.delenv("MUJOCO_GL", raising=False)
         res = check_rendering()
@@ -179,7 +184,7 @@ def test_env_parsing_and_privacy(tmp_path):
         "# Comment line\n"
         "EMPTY=\n"
         "TOKEN_FACTORY_API_KEY=super_secret_token_value_999\n"
-        "export TAVILY_API_KEY=\"tavily_secret_abc\"\n"
+        'export TAVILY_API_KEY="tavily_secret_abc"\n'
         "'GR00T_POLICY_URL'='http://secret-gr00t.local:8000'\n"
         "NO_EQUALS_HERE\n",
         encoding="utf-8",
@@ -324,8 +329,10 @@ def test_cli_doctor(tmp_path, capsys):
     assert rc_fail == cli.EXIT_INVALID
     assert "[FAIL] disk:" in out_fail
 
+
 def test_doctor_nebius_cloud_env_keys(tmp_path):
     from arrival.jobs.nebius import JOB_SETTINGS, STORE_SETTINGS
+
     env = {
         "NEBIUS_IAM_TOKEN": "secret_iam_token_xyz",
         "NEBIUS_PROJECT_ID": "project-12345",
@@ -353,7 +360,9 @@ def test_token_factory_key_without_model_ids_warns(tmp_path):
     assert exit_code(checks) == 0
 
     env_file = tmp_path / ".env"
-    env_file.write_text("TOKEN_FACTORY_API_KEY=k\nNEMOTRON_SUPER_MODEL=nvidia/nemotron-3-super-120b-a12b\n", encoding="utf-8")
+    env_file.write_text(
+        "TOKEN_FACTORY_API_KEY=k\nNEMOTRON_SUPER_MODEL=nvidia/nemotron-3-super-120b-a12b\n", encoding="utf-8"
+    )
     checks = check_env(environ={"NEMOTRON_OMNI_MODEL": "m"}, env_files=[env_file])
     assert [c.name for c in checks if c.status == "warn"] == ["NEMOTRON_LIGHTNING_MODEL"]
     assert not any("nemotron-3-super" in c.detail for c in checks)

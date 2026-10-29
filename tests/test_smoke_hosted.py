@@ -6,10 +6,9 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
+from conftest import REPO, SCANS
 
 from arrival.web.app import make_server
-
-from conftest import REPO, SCANS
 
 _spec = importlib.util.spec_from_file_location("smoke_hosted", REPO / "scripts" / "smoke_hosted.py")
 smoke = importlib.util.module_from_spec(_spec)
@@ -50,8 +49,11 @@ class _AcceptsEverything(BaseHTTPRequestHandler):
 
     def do_POST(self):
         self.rfile.read(int(self.headers.get("Content-Length", 0)))
-        self._ok(202, json.dumps({"id": "job_x", "status": "queued", "status_url": "/jobs/job_x"}).encode(),
-                 "application/json")
+        self._ok(
+            202,
+            json.dumps({"id": "job_x", "status": "queued", "status_url": "/jobs/job_x"}).encode(),
+            "application/json",
+        )
 
 
 def test_passes_against_the_arrival_server(arrival_url, capsys):
@@ -59,7 +61,10 @@ def test_passes_against_the_arrival_server(arrival_url, capsys):
     assert smoke.main([url, "--json"]) == 0
     res = json.loads(capsys.readouterr().out)
     assert res["ok"] and {r["check"] for r in res["results"] if r["required"]} >= {
-        "good upload queued", "job status readable", "upload without a scan field refused"}
+        "good upload queued",
+        "job status readable",
+        "upload without a scan field refused",
+    }
     assert len(list((out / "jobs").iterdir())) == 1  # only the good upload became a job
 
 
@@ -98,9 +103,16 @@ def test_wait_reports_a_job_the_worker_never_finished(arrival_url, capsys):
     assert "FAIL worker finished the job: status=queued" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("args, why", [(["--scan", "no_such_scan.json"], "no_such_scan.json"),
-                                       (["--timeout", "0"], "--timeout"), (["--timeout", "nan"], "--timeout"),
-                                       (["--wait", "-1"], "--wait"), (["--wait", "nan"], "--wait")])
+@pytest.mark.parametrize(
+    "args, why",
+    [
+        (["--scan", "no_such_scan.json"], "no_such_scan.json"),
+        (["--timeout", "0"], "--timeout"),
+        (["--timeout", "nan"], "--timeout"),
+        (["--wait", "-1"], "--wait"),
+        (["--wait", "nan"], "--wait"),
+    ],
+)
 def test_bad_arguments_exit_2_before_any_request(args, why, capsys):
     with pytest.raises(SystemExit) as e:
         smoke.main(["http://127.0.0.1:9", *args])

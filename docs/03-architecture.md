@@ -25,17 +25,16 @@ On the MVP night the later boxes were only modules that raised a named error or 
 | `arrival.scan.four_photo` | Four images → ScanBundle flagged unmeasured |
 | `arrival.twin.compile` | ScanBundle → layout dict + YAML |
 | `arrival.twin.detect` | VLM-based object detection in scan frames |
-| `arrival.catalog.fixtures` | RoomPlan category → RoboCasa fixture type or `box` |
-| `arrival.catalog.objects` | Object label → catalog id |
+| `arrival.catalog.categories` | RoomPlan category → RoboCasa fixture type or `box`, default sizes; object label → catalog id and physical spec |
 | `arrival.tasks.propose` | Tasks, variations, wordings. No network |
 | `arrival.generate.scripted` | Seed trajectories and pose retargets |
-| `arrival.generate.oracle` | Drop attempts that miss the goal |
+| `arrival.generate.scripted` (`judge`) | Drop attempts that miss the goal |
 | `arrival.generate.mimicgen` | Import probe. Checks if RoboCasa is installed; wiring not yet implemented |
 | `arrival.render.sim_texture` | 64×64 RGB frames from episode cartesian traces |
 | `arrival.render.splat` | Depth-based composite of static splat RGB-D and dynamic sim RGB-D |
 | `arrival.export.lerobot` | Parquet, mp4, meta |
 | `arrival.export.validate` | Structural checker. Does not import GR00T |
-| `arrival.eval.report` | Speed and cost report |
+| `arrival.eval.cost` | Speed and cost report |
 | `arrival.models.token_factory` | OpenAI-compatible client. Used for VLM planning and wordings |
 | `arrival.jobs.queue` | Write `out/jobs/<id>/status.json` |
 | `arrival.web.app` | `ThreadingHTTPServer` routes |

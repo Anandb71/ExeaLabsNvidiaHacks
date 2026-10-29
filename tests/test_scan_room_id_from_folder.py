@@ -32,8 +32,18 @@ def test_sim_and_demo_name_the_twin_after_the_folder(tmp_path):
     from arrival import cli
 
     scans, out = _copied(tmp_path), tmp_path / "out"
-    ns = argparse.Namespace(room="my_kitchen", scans=str(scans), out=str(out), families="wipe_counter", episodes=1,
-                            people=0, res=64, seed=0, base="fixed", arm="procedural")
+    ns = argparse.Namespace(
+        room="my_kitchen",
+        scans=str(scans),
+        out=str(out),
+        families="wipe_counter",
+        episodes=1,
+        people=0,
+        res=64,
+        seed=0,
+        base="fixed",
+        arm="procedural",
+    )
     _, twin = cli._sim_args(ns)
     assert twin["room_id"] == "my_kitchen"  # collect writes out/datasets/<room_id>_sim
     cli.run_demo("my_kitchen", 1, "none", out, scans, log=lambda *_: None)

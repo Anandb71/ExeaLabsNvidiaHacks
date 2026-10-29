@@ -7,9 +7,17 @@ from arrival.twin.compile import compile_twin, layout_dict, write_twin
 
 
 def _bundle(fixtures, walls=()):
-    return {"schema_version": "1", "room_id": "t", "units": "meters", "frame": "z_up",
-            "geometry_source": "roomplan", "blocks_claims": [], "walls": list(walls),
-            "fixtures": fixtures, "objects": []}
+    return {
+        "schema_version": "1",
+        "room_id": "t",
+        "units": "meters",
+        "frame": "z_up",
+        "geometry_source": "roomplan",
+        "blocks_claims": [],
+        "walls": list(walls),
+        "fixtures": fixtures,
+        "objects": [],
+    }
 
 
 def test_hero_fixture_types(hero_twin):
@@ -23,22 +31,27 @@ def test_hero_fixture_types(hero_twin):
 
 
 def test_unknown_category_is_box():
-    twin = compile_twin(_bundle([{"id": "tv", "category": "television", "size": [1, 0.1, 0.6],
-                                  "position": [1, 1, 1], "yaw": 0}]))
+    twin = compile_twin(
+        _bundle([{"id": "tv", "category": "television", "size": [1, 0.1, 0.6], "position": [1, 1, 1], "yaw": 0}])
+    )
     assert twin["fixtures"][0]["type"] == "box"
     assert layout_dict(twin)["main_group"]["bottom_row"][0]["type"] == "box"
 
 
 def test_table_is_dining_counter():
-    twin = compile_twin(_bundle([{"id": "t1", "category": "table", "size": [1, 1, 0.75],
-                                  "position": [1, 1, 0.375], "yaw": 0}]))
+    twin = compile_twin(
+        _bundle([{"id": "t1", "category": "table", "size": [1, 1, 0.75], "position": [1, 1, 0.375], "yaw": 0}])
+    )
     assert twin["fixtures"][0]["type"] == "counter"
     assert twin["fixtures"][0]["default_config_name"] == "dining"
 
 
 def test_sink_only_synthesizes_counter():
-    twin = compile_twin(_bundle([{"id": "sink_1", "category": "sink", "size": [0.6, 0.5, 0.25],
-                                  "position": [1.6, 0.4, 0.85], "yaw": 0}]))
+    twin = compile_twin(
+        _bundle(
+            [{"id": "sink_1", "category": "sink", "size": [0.6, 0.5, 0.25], "position": [1.6, 0.4, 0.85], "yaw": 0}]
+        )
+    )
     counters = [f for f in twin["fixtures"] if f["type"] == "counter"]
     assert len(counters) == 1
     c = counters[0]
@@ -49,10 +62,20 @@ def test_sink_only_synthesizes_counter():
 def test_sink_on_counter_height_storage_does_not_synthesize_overlapping_counter():
     import math
 
-    sink = {"id": "sink", "category": "sink", "size": [0.6, 0.5, 0.25],
-            "position": [2.0, 1.5, 0.85], "yaw": -math.pi / 2}
-    base = {"id": "base", "category": "storage", "size": [1.0, 0.6, 0.9],
-            "position": [2.0, 1.5, 0.45], "yaw": -math.pi / 2}
+    sink = {
+        "id": "sink",
+        "category": "sink",
+        "size": [0.6, 0.5, 0.25],
+        "position": [2.0, 1.5, 0.85],
+        "yaw": -math.pi / 2,
+    }
+    base = {
+        "id": "base",
+        "category": "storage",
+        "size": [1.0, 0.6, 0.9],
+        "position": [2.0, 1.5, 0.45],
+        "yaw": -math.pi / 2,
+    }
     twin = compile_twin(_bundle([sink, base]))
     assert [f["id"] for f in twin["fixtures"]] == ["sink", "base"]
     assert twin["fixtures"][1]["type"] == "hinge_cabinet"
@@ -80,8 +103,9 @@ def test_yawed_sink_counter_and_containment():
     from arrival.tasks.propose import in_top_rect
 
     yaw = math.pi / 2
-    twin = compile_twin(_bundle([{"id": "s", "category": "sink", "size": [0.6, 0.5, 0.25],
-                                  "position": [0.4, 2.0, 0.85], "yaw": yaw}]))
+    twin = compile_twin(
+        _bundle([{"id": "s", "category": "sink", "size": [0.6, 0.5, 0.25], "position": [0.4, 2.0, 0.85], "yaw": yaw}])
+    )
     c = next(f for f in twin["fixtures"] if f["type"] == "counter")
     assert c["yaw"] == yaw
     assert in_top_rect([0.4, 2.8], c) and not in_top_rect([1.2, 2.0], c)  # long axis runs along world Y
@@ -113,13 +137,22 @@ def test_place_default_objects_seeded():
 def test_stove_between_counters_gets_no_synthesized_counter():
     from arrival.twin.compile import compile_twin
 
-    bundle = {"schema_version": "1", "room_id": "r", "units": "meters", "frame": "z_up",
-              "geometry_source": "authored_sample", "blocks_claims": [], "walls": [], "objects": [],
-              "fixtures": [
-                  {"id": "left", "category": "counter", "size": [1.0, 0.65, 0.92], "position": [0.5, 0.4, 0.46], "yaw": 0},
-                  {"id": "stove", "category": "stove", "size": [0.7, 0.65, 0.9], "position": [1.35, 0.4, 0.45], "yaw": 0},
-                  {"id": "right", "category": "counter", "size": [1.0, 0.65, 0.92], "position": [2.2, 0.4, 0.46], "yaw": 0},
-                  {"id": "lone", "category": "stove", "size": [0.7, 0.65, 0.9], "position": [1.35, 2.5, 0.45], "yaw": 0}]}
+    bundle = {
+        "schema_version": "1",
+        "room_id": "r",
+        "units": "meters",
+        "frame": "z_up",
+        "geometry_source": "authored_sample",
+        "blocks_claims": [],
+        "walls": [],
+        "objects": [],
+        "fixtures": [
+            {"id": "left", "category": "counter", "size": [1.0, 0.65, 0.92], "position": [0.5, 0.4, 0.46], "yaw": 0},
+            {"id": "stove", "category": "stove", "size": [0.7, 0.65, 0.9], "position": [1.35, 0.4, 0.45], "yaw": 0},
+            {"id": "right", "category": "counter", "size": [1.0, 0.65, 0.92], "position": [2.2, 0.4, 0.46], "yaw": 0},
+            {"id": "lone", "category": "stove", "size": [0.7, 0.65, 0.9], "position": [1.35, 2.5, 0.45], "yaw": 0},
+        ],
+    }
     ids = [f["id"] for f in compile_twin(bundle)["fixtures"]]
     assert "counter_synth_stove" not in ids  # flanked by counters: no phantom counter over the neighbours
     assert "counter_synth_lone" in ids  # a stove with nothing around it still gets a counter
@@ -145,9 +178,11 @@ def u_kitchen_bundle():
         _u_fixture("storage_c", "storage", 6.93, 3.42, 0.45, [0.9, 0.6, 0.9], 0.0),
         _u_fixture("fridge", "refrigerator", 6.95, 0.47, 0.9, [0.9, 0.7, 1.8], U_YAW),
     ]
-    walls = [{"id": "w_s", "start": [0, 0], "end": [7.55, 0], "height": 2.5, "thickness": 0.1},
-             {"id": "w_w", "start": [0, 0], "end": [0, 3.82], "height": 2.5, "thickness": 0.1},
-             {"id": "w_n", "start": [0, 3.82], "end": [7.55, 3.82], "height": 2.5, "thickness": 0.1}]
+    walls = [
+        {"id": "w_s", "start": [0, 0], "end": [7.55, 0], "height": 2.5, "thickness": 0.1},
+        {"id": "w_w", "start": [0, 0], "end": [0, 3.82], "height": 2.5, "thickness": 0.1},
+        {"id": "w_n", "start": [0, 3.82], "end": [7.55, 3.82], "height": 2.5, "thickness": 0.1},
+    ]
     return _bundle(fixtures, walls)
 
 
@@ -156,8 +191,9 @@ def _real_overlaps(twin):
     from test_scans import _allowed, _overlap
 
     fx = twin["fixtures"]
-    return sorted((a["id"], b["id"]) for i, a in enumerate(fx) for b in fx[i + 1:]
-                  if _overlap(a, b) and not _allowed(a, b))
+    return sorted(
+        (a["id"], b["id"]) for i, a in enumerate(fx) for b in fx[i + 1 :] if _overlap(a, b) and not _allowed(a, b)
+    )
 
 
 def test_u_kitchen_sink_in_scanned_cabinet_gets_no_second_counter():
@@ -182,11 +218,18 @@ def test_u_kitchen_builds_a_scene_with_the_sink_in_its_cabinet():
 
 def _wall_end_bundle(fridge_x=1.55):
     sink = {"id": "sink", "category": "sink", "size": [0.6, 0.5, 0.25], "position": [0.7, 0.4, 0.85], "yaw": 0.0}
-    fridge = {"id": "fridge", "category": "refrigerator", "size": [0.9, 0.7, 1.8], "position": [fridge_x, 0.45, 0.9],
-              "yaw": 0.0}
-    walls = [{"id": "w_s", "start": [0, 0], "end": [4, 0], "height": 2.5, "thickness": 0.1},
-             {"id": "w_w", "start": [0, 0], "end": [0, 3], "height": 2.5, "thickness": 0.1},
-             {"id": "w_n", "start": [0, 3], "end": [4, 3], "height": 2.5, "thickness": 0.1}]
+    fridge = {
+        "id": "fridge",
+        "category": "refrigerator",
+        "size": [0.9, 0.7, 1.8],
+        "position": [fridge_x, 0.45, 0.9],
+        "yaw": 0.0,
+    }
+    walls = [
+        {"id": "w_s", "start": [0, 0], "end": [4, 0], "height": 2.5, "thickness": 0.1},
+        {"id": "w_w", "start": [0, 0], "end": [0, 3], "height": 2.5, "thickness": 0.1},
+        {"id": "w_n", "start": [0, 3], "end": [4, 3], "height": 2.5, "thickness": 0.1},
+    ]
     return _bundle([sink, fridge], walls)
 
 
@@ -197,7 +240,9 @@ def test_synthesized_counter_stops_at_the_fridge_beside_the_sink():
     counter, fridge, sink = fx["counter_synth_sink"], fx["fridge"], fx["sink"]
     assert _real_overlaps(twin) == []
     assert counter["position"][0] + counter["size"][0] / 2 <= fridge["position"][0] - fridge["size"][0] / 2 + 0.021
-    assert counter["position"][0] - counter["size"][0] / 2 <= sink["position"][0] - sink["size"][0] / 2  # holds the sink
+    assert (
+        counter["position"][0] - counter["size"][0] / 2 <= sink["position"][0] - sink["size"][0] / 2
+    )  # holds the sink
     assert counter["position"][0] + counter["size"][0] / 2 >= sink["position"][0] + sink["size"][0] / 2
     assert counter["size"][0] < 1.8 and counter["position"][2] == 0.46 and counter["size"][1] == 0.65
 
@@ -210,8 +255,16 @@ def test_synthesized_counter_keeps_its_default_length_when_nothing_is_beside_it(
 
 def test_sinks_in_a_row_share_one_counter():
     """Five sinks 0.9 m apart used to get stacked counters with a sink straddling each seam."""
-    sinks = [{"id": f"s{i}", "category": "sink", "size": [0.6, 0.5, 0.25], "position": [1.0 + 0.9 * i, 0.4, 0.85],
-              "yaw": 0.0} for i in range(5)]
+    sinks = [
+        {
+            "id": f"s{i}",
+            "category": "sink",
+            "size": [0.6, 0.5, 0.25],
+            "position": [1.0 + 0.9 * i, 0.4, 0.85],
+            "yaw": 0.0,
+        }
+        for i in range(5)
+    ]
     twin = compile_twin(_bundle(sinks))
     counters = [f for f in twin["fixtures"] if f["type"] == "counter"]
     assert len(counters) == 1
@@ -226,8 +279,13 @@ def test_island_clear_of_walls_in_an_open_u_room():
     bundle = u_kitchen_bundle()
     bundle["fixtures"] += [
         {"id": "island", "category": "table", "size": [1.6, 0.9, 0.92], "position": [3.0, 1.9, 0.46], "yaw": 0.0},
-        {"id": "table_on_wall", "category": "table", "size": [1.6, 0.6, 0.92], "position": [2.0, 3.45, 0.46],
-         "yaw": 0.0},
+        {
+            "id": "table_on_wall",
+            "category": "table",
+            "size": [1.6, 0.6, 0.92],
+            "position": [2.0, 3.45, 0.46],
+            "yaw": 0.0,
+        },
     ]
     fx = {f["id"]: f for f in compile_twin(bundle)["fixtures"]}
     assert fx["island"].get("island") is True

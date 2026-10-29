@@ -29,14 +29,19 @@ def trace(n=64, phase=0.0):
 
 def video(n, blank=False, seed=0):
     rng = np.random.default_rng(seed)
-    return (np.zeros((n, RES, RES, 3), np.uint8) if blank else rng.integers(0, 255, (n, RES, RES, 3), dtype=np.uint8))
+    return np.zeros((n, RES, RES, 3), np.uint8) if blank else rng.integers(0, 255, (n, RES, RES, 3), dtype=np.uint8)
 
 
 def episode(s, a, blank_wrist=False, seed=0):
     n = len(s)
-    return {"states": s, "actions": a, "videos": {"ego_view": video(n, seed=seed), "wrist": video(n, blank_wrist, seed + 1)},
-            "detail": {"ok": True}, "safety": {"min_human_distance_m": 1.0, "human_contact": False},
-            "people_xy": [[1.0, 1.0]] * n}
+    return {
+        "states": s,
+        "actions": a,
+        "videos": {"ego_view": video(n, seed=seed), "wrist": video(n, blank_wrist, seed + 1)},
+        "detail": {"ok": True},
+        "safety": {"min_human_distance_m": 1.0, "human_contact": False},
+        "people_xy": [[1.0, 1.0]] * n,
+    }
 
 
 def build(root, defects, bad_first=False):
@@ -106,9 +111,14 @@ def test_each_defect_is_flagged_on_its_own_episode(ds):
     root, idx = ds
     rep = quality.check_episodes(root, frames=True)
     assert [r["episode_index"] for r in rep["results"] if r["ok"]] == list(range(6))  # defects come last
-    for name, check in (("nan", "nonfinite"), ("zero_motion", "zero_motion"), ("stuck_arm", "stuck_arm"),
-                        ("joint_at_limit", "joint_at_limit"), ("length_outlier", "length_outlier"),
-                        ("blank_video", "blank_video")):
+    for name, check in (
+        ("nan", "nonfinite"),
+        ("zero_motion", "zero_motion"),
+        ("stuck_arm", "stuck_arm"),
+        ("joint_at_limit", "joint_at_limit"),
+        ("length_outlier", "length_outlier"),
+        ("blank_video", "blank_video"),
+    ):
         assert check in flags_of(rep, idx[name]), name
     assert flags_of(rep, idx["nan"]) == {"nonfinite"}  # NaN short-circuits: no noise from the other checks
     assert flags_of(rep, idx["joint_at_limit"]) == {"joint_at_limit"}
@@ -126,7 +136,7 @@ def test_thresholds_are_boundaries_not_hair_triggers():
     # joint 7 at its stop for exactly LIMIT_STEPS steps passes, one more flags
     s = s.copy()
     s[:, 6] = MID[6]
-    s[:quality.LIMIT_STEPS, 6] = RANGES[6][1]
+    s[: quality.LIMIT_STEPS, 6] = RANGES[6][1]
     assert not [f for f in quality.check_trace(s, a, list(RANGES)) if f["check"] == "joint_at_limit"]
     s[quality.LIMIT_STEPS, 6] = RANGES[6][1]
     assert [f for f in quality.check_trace(s, a, list(RANGES)) if f["check"] == "joint_at_limit"]
@@ -167,8 +177,12 @@ def test_drop_writes_a_valid_reindexed_dataset(ds, tmp_path):
     assert len(list((out / "videos").rglob("*.mp4"))) == 12
     stats = json.loads((out / "meta" / "stats.json").read_text())
     assert stats["observation.state"]["count"] == [info["total_frames"]]
-    rows = np.concatenate([np.asarray(pq.read_table(f).column("observation.state").to_pylist())
-                           for f in sorted((out / "data").rglob("*.parquet"))])
+    rows = np.concatenate(
+        [
+            np.asarray(pq.read_table(f).column("observation.state").to_pylist())
+            for f in sorted((out / "data").rglob("*.parquet"))
+        ]
+    )
     assert np.allclose(stats["observation.state"]["q01"], np.quantile(rows, 0.01, axis=0))
     assert np.allclose(stats["observation.state"]["q99"], np.quantile(rows, 0.99, axis=0))
 
@@ -191,10 +205,14 @@ def test_drop_of_a_whole_family_removes_it_from_info(tmp_path):
     w = SimDatasetWriter(tmp_path / "ds", "qa_room", 20, RES, ("ego_view", "wrist"))
     for i in range(5):
         s, a = trace(60 + 2 * i, phase=i * 0.1)
-        w.add_episode(episode(s, a, seed=i), {"instruction": "open the drawer", "family": "open_drawer", "lighting": "day"})
+        w.add_episode(
+            episode(s, a, seed=i), {"instruction": "open the drawer", "family": "open_drawer", "lighting": "day"}
+        )
     s, a = trace()
-    w.add_episode(episode(np.repeat(s[:1], 64, 0), a),
-                  {"instruction": "pick up the cup", "family": "pick_place", "lighting": "day"})
+    w.add_episode(
+        episode(np.repeat(s[:1], 64, 0), a),
+        {"instruction": "pick up the cup", "family": "pick_place", "lighting": "day"},
+    )
     w.finish(len(w.episodes))
     quality.drop_flagged(tmp_path / "ds", tmp_path / "clean")
     info = json.loads((tmp_path / "clean" / "meta" / "info.json").read_text())
@@ -238,9 +256,14 @@ def test_truncated_meta_file_is_reported_not_a_traceback(tmp_path, capsys, name)
     assert not res["ok"] and [e["code"] for e in res["errors"]] == ["meta_unreadable"]
 
 
-@pytest.mark.parametrize("name,text,msg", [(m, "[]", ("line 1 " if m.endswith(".jsonl") else "") + "is a JSON list, not an object") for m in META] + [
-    ("episodes.jsonl", '{"episode_index": 0}', "line 1 has no length"),
-    ("tasks.jsonl", '{"task": "x"}', "line 1 has no task_index")])
+@pytest.mark.parametrize(
+    "name,text,msg",
+    [(m, "[]", ("line 1 " if m.endswith(".jsonl") else "") + "is a JSON list, not an object") for m in META]
+    + [
+        ("episodes.jsonl", '{"episode_index": 0}', "line 1 has no length"),
+        ("tasks.jsonl", '{"task": "x"}', "line 1 has no task_index"),
+    ],
+)
 def test_wrong_shape_meta_file_is_reported_not_a_traceback(tmp_path, capsys, name, text, msg):
     root = tmp_path / "ds"
     build(root, {})
@@ -250,7 +273,8 @@ def test_wrong_shape_meta_file_is_reported_not_a_traceback(tmp_path, capsys, nam
     assert f"meta/{name} {msg}" in capsys.readouterr().err
     res = check_loader(root)
     assert not res["ok"] and [(e["code"], e["msg"]) for e in res["errors"]] == [
-        ("meta_unreadable", f"meta/{name} {msg}")]
+        ("meta_unreadable", f"meta/{name} {msg}")
+    ]
 
 
 def test_cli_plain_validate_ignores_quality(tmp_path):
@@ -274,18 +298,31 @@ def test_cli_episodes_exit_codes_and_drop(ds, tmp_path, capsys):
 
 def _write_episodes(root, rng, lengths):
     import pyarrow as pa
+
     from arrival.export import lerobot
 
     (root / "data" / "chunk-000").mkdir(parents=True)
     stats = []
     for i, n in enumerate(lengths):
         s, a = (rng.normal(size=(n, 11)).astype(np.float32) for _ in range(2))
-        t = pa.Table.from_arrays([pa.array(list(s), type=pa.list_(pa.float32())),
-                                  pa.array(list(a), type=pa.list_(pa.float32())),
-                                  pa.array(np.arange(n, dtype=np.float32) / 20)], names=["observation.state", "action", "timestamp"])
+        t = pa.Table.from_arrays(
+            [
+                pa.array(list(s), type=pa.list_(pa.float32())),
+                pa.array(list(a), type=pa.list_(pa.float32())),
+                pa.array(np.arange(n, dtype=np.float32) / 20),
+            ],
+            names=["observation.state", "action", "timestamp"],
+        )
         pq.write_table(t, root / "data" / "chunk-000" / f"episode_{i:06d}.parquet")
-        stats.append({"stats": {"observation.state": lerobot._stats(s), "action": lerobot._stats(a),
-                                  "timestamp": lerobot._stats(np.arange(n, dtype=np.float32) / 20)}})
+        stats.append(
+            {
+                "stats": {
+                    "observation.state": lerobot.feature_stats(s),
+                    "action": lerobot.feature_stats(a),
+                    "timestamp": lerobot.feature_stats(np.arange(n, dtype=np.float32) / 20),
+                }
+            }
+        )
     return stats
 
 
@@ -295,18 +332,24 @@ def test_dataset_stats_quantiles_match_the_python_list_reading(tmp_path):
     stats = _write_episodes(tmp_path, np.random.default_rng(3), [40, 1, 77])
     got = dataset_stats(tmp_path, stats)
     for key in ("observation.state", "action", "timestamp"):
-        rows = [v for f in sorted(tmp_path.glob("data/chunk-*/episode_*.parquet"))
-                for v in pq.read_table(f).column(key).to_pylist()]
+        rows = [
+            v
+            for f in sorted(tmp_path.glob("data/chunk-*/episode_*.parquet"))
+            for v in pq.read_table(f).column(key).to_pylist()
+        ]
         q01, q99 = np.quantile(np.asarray(rows, dtype=np.float64).reshape(len(rows), -1), QUANTILES, axis=0)
         assert got[key]["q01"] == q01.tolist() and got[key]["q99"] == q99.tolist()
 
 
 def test_list_column_matches_to_pylist_and_refuses_ragged_or_null_rows():
     import pyarrow as pa
+
     from arrival.export.lerobot import list_column
 
     rows = np.random.default_rng(0).normal(size=(5, 3)).astype(np.float32)
-    col = pa.chunked_array([pa.array(list(rows[:2]), pa.list_(pa.float32())), pa.array(list(rows[2:]), pa.list_(pa.float32()))])
+    col = pa.chunked_array(
+        [pa.array(list(rows[:2]), pa.list_(pa.float32())), pa.array(list(rows[2:]), pa.list_(pa.float32()))]
+    )
     assert np.array_equal(list_column(col), np.array(col.to_pylist(), dtype=np.float64))
     with pytest.raises(ValueError):
         list_column(pa.chunked_array([pa.array([[1.0, 2.0], [3.0]], pa.list_(pa.float32()))]))

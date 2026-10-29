@@ -29,8 +29,16 @@ def test_scene_has_moving_parts_and_people(twin):
 
 
 def test_ik_reaches_counter_point(twin):
-    task = {"family": "counter_to_sink", "object_id": "mug_1", "source": "counter_a", "target": "sink_1",
-            "target_x": 1.6, "start": [1.0, 0.35, 0.97], "lighting": "neutral", "people": 0}
+    task = {
+        "family": "counter_to_sink",
+        "object_id": "mug_1",
+        "source": "counter_a",
+        "target": "sink_1",
+        "target_x": 1.6,
+        "start": [1.0, 0.35, 0.97],
+        "lighting": "neutral",
+        "people": 0,
+    }
     env = SimEnv(twin, task, res=32)
     target = np.array([1.0, 0.35, 1.0])
     q, err = ik.solve(env.model, env.data, target, ik.down(0.0), np.array(robot.HOME), env.qadr, env.dofadr)
@@ -64,7 +72,7 @@ def test_demo_video_episode_frames_lifecycle_on_windows(twin):
 
     tasks = make_tasks(twin, ["counter_to_sink", "open_drawer"], 2, seed=0, people=0, log=lambda *a: None)
     sink_t, drawer_t = tasks
-    drawer_t["handle"], drawer_t["joint"] = f'{drawer_t["fixture"]}_drawer0_handle', f'{drawer_t["fixture"]}_drawer0'
+    drawer_t["handle"], drawer_t["joint"] = f"{drawer_t['fixture']}_drawer0_handle", f"{drawer_t['fixture']}_drawer0"
     fx = {f["id"]: f for f in twin["fixtures"]}
     sx = (sink_t["start"][0] + fx[sink_t["target"]]["position"][0]) / 2
 
@@ -129,12 +137,20 @@ def test_scripted_expert_opens_cabinet_door(twin, fixture):
     from arrival.sim.collect import run_episode
     from arrival.sim.policy import ScriptedExpert
 
-    task = {"family": "open_door", "fixture": fixture, "joint": f"{fixture}_door", "lighting": "neutral", "people": 0,
-            "seed": 0}
+    task = {
+        "family": "open_door",
+        "fixture": fixture,
+        "joint": f"{fixture}_door",
+        "lighting": "neutral",
+        "people": 0,
+        "seed": 0,
+    }
     env = SimEnv(twin, task, res=32)
     ep = run_episode(env, ScriptedExpert(), task)
     assert ep["success"], ep["detail"]
-    assert ep["detail"]["qpos"] > np.radians(62)  # 63 to 66 deg with joint 7 held off its stop (MAN-2 had 66.6 with it pinned)
+    assert ep["detail"]["qpos"] > np.radians(
+        62
+    )  # 63 to 66 deg with joint 7 held off its stop (MAN-2 had 66.6 with it pinned)
     assert ep["ik_error"] < 0.02
 
 
@@ -143,8 +159,14 @@ def test_door_pull_keeps_joint7_off_its_stop(twin, fixture):
     from arrival.sim.collect import run_episode
     from arrival.sim.policy import ScriptedExpert
 
-    task = {"family": "open_door", "fixture": fixture, "joint": f"{fixture}_door", "lighting": "neutral", "people": 0,
-            "seed": 0}
+    task = {
+        "family": "open_door",
+        "fixture": fixture,
+        "joint": f"{fixture}_door",
+        "lighting": "neutral",
+        "people": 0,
+        "seed": 0,
+    }
     ep = run_episode(SimEnv(twin, task, res=32), ScriptedExpert(), task)
     assert ep["success"], ep["detail"]
     assert np.abs(ep["states"][:, 6]).max() < robot.RANGES[6][1] - 0.3
@@ -154,8 +176,14 @@ def _open_door_wall_steps(twin, fixture):
     from arrival.sim.collect import run_episode
     from arrival.sim.policy import ScriptedExpert
 
-    task = {"family": "open_door", "fixture": fixture, "joint": f"{fixture}_door", "lighting": "neutral", "people": 0,
-            "seed": 0}
+    task = {
+        "family": "open_door",
+        "fixture": fixture,
+        "joint": f"{fixture}_door",
+        "lighting": "neutral",
+        "people": 0,
+        "seed": 0,
+    }
     env = SimEnv(twin, task, res=32)
     m, d = env.model, env.data
     links = {g for g in range(m.ngeom) if m.body(m.geom_bodyid[g]).name.startswith("link")}
@@ -165,7 +193,7 @@ def _open_door_wall_steps(twin, fixture):
 
     def checked_step(a):
         step(a)
-        hits[0] += any({c.geom1, c.geom2} & links and {c.geom1, c.geom2} & walls for c in d.contact[:d.ncon])
+        hits[0] += any({c.geom1, c.geom2} & links and {c.geom1, c.geom2} & walls for c in d.contact[: d.ncon])
 
     env.step = checked_step
     return run_episode(env, ScriptedExpert(), task), hits[0]
@@ -175,8 +203,8 @@ def test_door_pull_keeps_the_wrist_off_the_wall_beside_the_hinge(twin):
     """counter_b's hinge end is drawn 1 cm into the east wall, and the pull ends with the bar 4 cm from it. From the
     usual door spot link7 grazed the wall for 22 steps (0.9 mm); open_door stands OPEN_DOOR_WALL_OUT further out there.
     counter_a keeps the usual spot."""
-    from arrival.sim.preflight import OPEN_DOOR_WALL_OUT, base_pose, park
-    from arrival.sim.scene import front_stand
+    from arrival.sim.geometry import front_stand
+    from arrival.sim.stand import OPEN_DOOR_WALL_OUT, base_pose, park
 
     for fixture, out in (("counter_a", 0.0), ("counter_b", OPEN_DOOR_WALL_OUT)):
         src = next(f for f in twin["fixtures"] if f["id"] == fixture)
@@ -194,8 +222,8 @@ def test_door_pull_keeps_its_spot_when_the_run_stops_at_the_wall(twin):
     of 60 deg."""
     import copy
 
-    from arrival.sim.preflight import OPEN_DOOR_INSIDE, _door_wall_gaps, base_pose, park
-    from arrival.sim.scene import front_stand
+    from arrival.sim.geometry import front_stand
+    from arrival.sim.stand import OPEN_DOOR_INSIDE, _door_wall_gaps, base_pose, park
 
     tw = copy.deepcopy(twin)
     b = next(f for f in tw["fixtures"] if f["id"] == "counter_b")
@@ -207,8 +235,9 @@ def test_door_pull_keeps_its_spot_when_the_run_stops_at_the_wall(twin):
     assert ep["success"], ep["detail"]
 
 
-@pytest.mark.parametrize("family,fixture", [("close_door", "counter_a"), ("close_door", "counter_b"),
-                                            ("open_oven", "stove_1")])
+@pytest.mark.parametrize(
+    "family,fixture", [("close_door", "counter_a"), ("close_door", "counter_b"), ("open_oven", "stove_1")]
+)
 def test_door_episodes_keep_every_joint_off_its_stops(twin, family, fixture):
     """The 224 px G1 dataset had all of its close_door and open_oven episodes flagged joint_at_limit: the closing
     push sat on joint 2's -1.76 stop (and on joint 7's +2.90 at counter_a), the oven grasp on joint 5's +2.90. No arm
@@ -228,12 +257,19 @@ def test_door_episodes_keep_every_joint_off_its_stops(twin, family, fixture):
     assert not check_trace(ep["states"], ep["actions"], robot.RANGES)
     assert ep["ik_error"] < 0.005  # the plan no longer asks for poses past a stop (1.3 to 1.9 cm before)
 
+
 def test_scripted_expert_opens_fridge(twin):
     from arrival.sim.collect import FRIDGE_OPEN, run_episode
     from arrival.sim.policy import ScriptedExpert
 
-    task = {"family": "open_fridge", "fixture": "fridge_1", "joint": "fridge_1_door", "lighting": "neutral",
-            "people": 0, "seed": 0}
+    task = {
+        "family": "open_fridge",
+        "fixture": "fridge_1",
+        "joint": "fridge_1_door",
+        "lighting": "neutral",
+        "people": 0,
+        "seed": 0,
+    }
     env = SimEnv(twin, task, res=32)
     ep = run_episode(env, ScriptedExpert(), task)
     assert ep["success"], ep["detail"]
@@ -251,15 +287,30 @@ def test_open_fridge_is_one_task_per_fridge_and_not_a_default(twin):
     assert "open_fridge" not in build_parser().parse_args(["sim"]).families
 
 
-@pytest.mark.parametrize("family,fixture", [("close_drawer", "counter_a"), ("close_drawer", "counter_b"),
-                                            ("close_door", "counter_a"), ("close_door", "counter_b")])
+@pytest.mark.parametrize(
+    "family,fixture",
+    [
+        ("close_drawer", "counter_a"),
+        ("close_drawer", "counter_b"),
+        ("close_door", "counter_a"),
+        ("close_door", "counter_b"),
+    ],
+)
 def test_scripted_expert_closes_open_parts(twin, family, fixture):
-    from arrival.sim.collect import DOOR_OPEN, DRAWER_OPEN, run_episode
+    from arrival.sim.collect import DRAWER_OPEN, run_episode
     from arrival.sim.policy import ScriptedExpert
+    from arrival.sim.stand import DOOR_OPEN
 
     joint = f"{fixture}_door" if family == "close_door" else f"{fixture}_drawer0"
-    task = {"family": family, "fixture": fixture, "joint": joint, "handle": f"{fixture}_drawer0_handle",
-            "lighting": "neutral", "people": 0, "seed": 0}
+    task = {
+        "family": family,
+        "fixture": fixture,
+        "joint": joint,
+        "handle": f"{fixture}_drawer0_handle",
+        "lighting": "neutral",
+        "people": 0,
+        "seed": 0,
+    }
     env = SimEnv(twin, task, res=32)
     start = float(env.data.joint(joint).qpos[0])
     assert start == pytest.approx(DOOR_OPEN if family == "close_door" else DRAWER_OPEN)  # it really starts open
@@ -276,7 +327,7 @@ def test_scripted_expert_puts_mug_in_drawer_and_wipes(twin):
     for family in ("put_in_drawer", "wipe_counter"):
         task = make_tasks(twin, [family], 1, seed=0)[0]
         if family == "put_in_drawer":
-            task["handle"], task["joint"] = f'{task["fixture"]}_drawer0_handle', f'{task["fixture"]}_drawer0'
+            task["handle"], task["joint"] = f"{task['fixture']}_drawer0_handle", f"{task['fixture']}_drawer0"
         env = SimEnv(twin, task, res=32)
         ep = run_episode(env, ScriptedExpert(), task)
         assert ep["success"], (family, ep["detail"])
@@ -291,7 +342,9 @@ def test_wrist_camera_frames_the_held_object(twin):
     env = SimEnv(twin, task, res=32)
     seg = mujoco.Renderer(env.model, 32, 32)
     seg.enable_segmentation_rendering()
-    obj_geoms = {g for g in range(env.model.ngeom) if env.model.body(env.model.geom_bodyid[g]).name == task["object_id"]}
+    obj_geoms = {
+        g for g in range(env.model.ngeom) if env.model.body(env.model.geom_bodyid[g]).name == task["object_id"]
+    }
     policy = ScriptedExpert()
     policy.reset(env, task)
     states, closed = [], None
@@ -324,9 +377,16 @@ def test_bowl_is_hollow_and_goes_to_sink(twin):
     assert ep["success"], ep["detail"]
 
 
-@pytest.mark.parametrize("family,fixture", [("open_door", "counter_a"), ("open_door", "counter_b"),
-                                            ("close_door", "counter_a"), ("close_door", "counter_b"),
-                                            ("put_in_drawer", "counter_a")])
+@pytest.mark.parametrize(
+    "family,fixture",
+    [
+        ("open_door", "counter_a"),
+        ("open_door", "counter_b"),
+        ("close_door", "counter_a"),
+        ("close_door", "counter_b"),
+        ("put_in_drawer", "counter_a"),
+    ],
+)
 def test_arm_stays_out_of_drawn_fronts(twin, family, fixture):
     """MAN-2: a physics-checked success must not pass the arm through the fronts the cameras see."""
     from arrival.sim.collect import run_episode
@@ -344,8 +404,13 @@ def test_arm_stays_out_of_drawn_fronts(twin, family, fixture):
     m, d = env.model, env.data
     arm = [g for g in range(m.ngeom) if m.body(m.geom_bodyid[g]).name.startswith(("link", "hand", "finger"))]
     fixture_ids = tuple(f["id"] for f in twin["fixtures"])
-    drawn = [g for g in range(m.ngeom) if m.geom_group[g] == 2 and m.geom_type[g] == mujoco.mjtGeom.mjGEOM_BOX
-             and m.body(m.geom_bodyid[g]).name.startswith(fixture_ids)]
+    drawn = [
+        g
+        for g in range(m.ngeom)
+        if m.geom_group[g] == 2
+        and m.geom_type[g] == mujoco.mjtGeom.mjGEOM_BOX
+        and m.body(m.geom_bodyid[g]).name.startswith(fixture_ids)
+    ]
     assert arm and drawn
     deepest = [0.0, None]
     step = env.step
@@ -361,7 +426,9 @@ def test_arm_stays_out_of_drawn_fronts(twin, family, fixture):
     env.step = checked_step
     ep = run_episode(env, ScriptedExpert(), task)
     assert ep["success"], ep["detail"]
-    assert deepest[0] > -0.01, f"{deepest[1]} penetrates {-deepest[0] * 100:.1f} cm"  # contact depth, not a pass-through
+    assert deepest[0] > -0.01, (
+        f"{deepest[1]} penetrates {-deepest[0] * 100:.1f} cm"
+    )  # contact depth, not a pass-through
 
 
 def test_close_door_keeps_the_wrist_off_the_wall_beside_the_hinge(twin):
@@ -369,9 +436,9 @@ def test_close_door_keeps_the_wrist_off_the_wall_beside_the_hinge(twin):
     and that wall, the handle 0.117 m from it. From the usual door spot link6 grazed the wall for 27 steps (2.0 mm);
     close_door now stands CLOSE_DOOR_WALL_ALONG nearer the hinge there. counter_a keeps the usual spot."""
     from arrival.sim.collect import run_episode
+    from arrival.sim.geometry import front_stand
     from arrival.sim.policy import ScriptedExpert
-    from arrival.sim.preflight import CLOSE_DOOR_WALL_ALONG, base_pose, park
-    from arrival.sim.scene import front_stand
+    from arrival.sim.stand import CLOSE_DOOR_WALL_ALONG, base_pose, park
 
     for fixture, shift in (("counter_a", 0.0), ("counter_b", CLOSE_DOOR_WALL_ALONG)):
         src = next(f for f in twin["fixtures"] if f["id"] == fixture)
@@ -379,8 +446,14 @@ def test_close_door_keeps_the_wrist_off_the_wall_beside_the_hinge(twin):
         base, _, _ = base_pose(twin, {"family": "close_door", "fixture": fixture})
         assert np.allclose(np.subtract(base[:2], rule[:2]), (shift, 0.0))  # both runs face +y with the hinge at +x
 
-    task = {"family": "close_door", "fixture": "counter_b", "joint": "counter_b_door", "lighting": "neutral",
-            "people": 0, "seed": 0}
+    task = {
+        "family": "close_door",
+        "fixture": "counter_b",
+        "joint": "counter_b_door",
+        "lighting": "neutral",
+        "people": 0,
+        "seed": 0,
+    }
     env = SimEnv(twin, task, res=32)
     m, d = env.model, env.data
     links = {g for g in range(m.ngeom) if m.body(m.geom_bodyid[g]).name.startswith("link")}
@@ -390,8 +463,11 @@ def test_close_door_keeps_the_wrist_off_the_wall_beside_the_hinge(twin):
 
     def checked_step(a):
         step(a)
-        hits.extend(k for k in range(d.ncon) if {d.contact[k].geom1, d.contact[k].geom2} & links
-                    and {d.contact[k].geom1, d.contact[k].geom2} & walls)
+        hits.extend(
+            k
+            for k in range(d.ncon)
+            if {d.contact[k].geom1, d.contact[k].geom2} & links and {d.contact[k].geom1, d.contact[k].geom2} & walls
+        )
 
     env.step = checked_step
     ep = run_episode(env, ScriptedExpert(), task)
@@ -406,9 +482,9 @@ def test_close_door_keeps_its_spot_when_the_handle_has_room(twin):
     import copy
 
     from arrival.sim.collect import run_episode
+    from arrival.sim.geometry import door_w, front_stand
     from arrival.sim.policy import ScriptedExpert
-    from arrival.sim.preflight import CLOSE_DOOR_FLUSH, _close_door_gaps, base_pose, park
-    from arrival.sim.scene import door_w, front_stand
+    from arrival.sim.stand import CLOSE_DOOR_FLUSH, _close_door_gaps, base_pose, park
 
     tw = copy.deepcopy(twin)
     b = next(f for f in tw["fixtures"] if f["id"] == "counter_b")
@@ -416,8 +492,14 @@ def test_close_door_keeps_its_spot_when_the_handle_has_room(twin):
     assert door_w(b, tw["fixtures"]) == pytest.approx(0.46) and _close_door_gaps(tw, b)[0] > CLOSE_DOOR_FLUSH
     base, _, _ = base_pose(tw, {"family": "close_door", "fixture": "counter_b"})
     assert np.allclose(base[:2], park(b, *front_stand(b, "close_door", tw["fixtures"]))[:2])
-    task = {"family": "close_door", "fixture": "counter_b", "joint": "counter_b_door", "lighting": "neutral",
-            "people": 0, "seed": 0}
+    task = {
+        "family": "close_door",
+        "fixture": "counter_b",
+        "joint": "counter_b_door",
+        "lighting": "neutral",
+        "people": 0,
+        "seed": 0,
+    }
     ep = run_episode(SimEnv(tw, task, res=32), ScriptedExpert(), task)
     assert ep["success"], ep["detail"]
 
@@ -443,7 +525,10 @@ def test_rule_plan_knows_every_sim_family():
     assert rule_plan("Open the fridge.", objs, fxs)["family"] == "open_fridge"
     assert rule_plan("Pull the fridge door open.", objs, fxs)["family"] == "open_fridge"
     assert rule_plan("Wipe the counter with the sponge.", objs, fxs) == {
-        "family": "wipe_counter", "object": "sponge_1", "target": None}
+        "family": "wipe_counter",
+        "object": "sponge_1",
+        "target": None,
+    }
     assert rule_plan("Close the drawer.", objs, fxs)["family"] == "close_drawer"
     assert rule_plan("Close the cabinet door.", objs, fxs)["family"] == "close_door"
     assert rule_plan("Put the mug in the open drawer.", objs, fxs)["family"] == "put_in_drawer"
@@ -460,25 +545,55 @@ def test_planner_cache_key_is_stable_across_processes():
 
 def test_planner_never_rewrites_the_tasks_family(twin, tmp_path, monkeypatch):
     # a planner that answers with a family lacking the task's fields must not break or relabel the episode
-    monkeypatch.setattr(VLMPlanner, "plan", lambda self, *a, **k: setattr(self, "source", "stub") or
-                        {"family": "counter_to_counter", "object": None, "target": None})
-    res = collect(twin, ["open_fridge"], 1, tmp_path, people=0, res=32, planner_name="vlm",
-                  cache_path=tmp_path / "c.json", log=lambda *_: None)
+    monkeypatch.setattr(
+        VLMPlanner,
+        "plan",
+        lambda self, *a, **k: (
+            setattr(self, "source", "stub") or {"family": "counter_to_counter", "object": None, "target": None}
+        ),
+    )
+    res = collect(
+        twin,
+        ["open_fridge"],
+        1,
+        tmp_path,
+        people=0,
+        res=32,
+        planner_name="vlm",
+        cache_path=tmp_path / "c.json",
+        log=lambda *_: None,
+    )
     assert list(res["report_data"]["families"]) == ["open_fridge"]
 
 
 def test_each_episode_records_what_actually_planned_it(twin, tmp_path, monkeypatch):
     # with no key the vlm planner falls back to the rule parser; the dataset must say so, not just "planner: vlm"
-    monkeypatch.setattr(VLMPlanner, "plan", lambda self, *a, **k: setattr(self, "source", "rule_based") or
-                        {"family": "open_drawer", "object": None, "target": None})
-    collect(twin, ["open_drawer"], 1, tmp_path / "vlm", people=0, res=32, planner_name="vlm",
-            cache_path=tmp_path / "c.json", log=lambda *_: None)
-    rows = [json.loads(x) for x in
-            next((tmp_path / "vlm").glob("datasets/*/meta/episodes.jsonl")).read_text().splitlines()]
+    monkeypatch.setattr(
+        VLMPlanner,
+        "plan",
+        lambda self, *a, **k: (
+            setattr(self, "source", "rule_based") or {"family": "open_drawer", "object": None, "target": None}
+        ),
+    )
+    collect(
+        twin,
+        ["open_drawer"],
+        1,
+        tmp_path / "vlm",
+        people=0,
+        res=32,
+        planner_name="vlm",
+        cache_path=tmp_path / "c.json",
+        log=lambda *_: None,
+    )
+    rows = [
+        json.loads(x) for x in next((tmp_path / "vlm").glob("datasets/*/meta/episodes.jsonl")).read_text().splitlines()
+    ]
     assert rows and all(r["arrival_planned_by"] == "rule_based" for r in rows)
     collect(twin, ["open_drawer"], 1, tmp_path / "rule", people=0, res=32, log=lambda *_: None)
-    rows = [json.loads(x) for x in
-            next((tmp_path / "rule").glob("datasets/*/meta/episodes.jsonl")).read_text().splitlines()]
+    rows = [
+        json.loads(x) for x in next((tmp_path / "rule").glob("datasets/*/meta/episodes.jsonl")).read_text().splitlines()
+    ]
     assert rows and not any("arrival_planned_by" in r for r in rows)
 
 
@@ -496,12 +611,28 @@ def test_each_episode_records_what_wrote_its_instruction(twin, tmp_path, monkeyp
         return [json.loads(x) for x in next(out.glob("datasets/*/meta/episodes.jsonl")).read_text().splitlines()]
 
     monkeypatch.setattr(tf, "complete", down)
-    collect(twin, ["open_drawer"], 1, tmp_path / "down", people=0, res=32, use_generated_instructions=True,
-            log=lambda *_: None)
+    collect(
+        twin,
+        ["open_drawer"],
+        1,
+        tmp_path / "down",
+        people=0,
+        res=32,
+        use_generated_instructions=True,
+        log=lambda *_: None,
+    )
     assert [r["arrival_instruction_source"] for r in rows(tmp_path / "down")] == ["template_fallback"]
     monkeypatch.setattr(tf, "complete", lambda *a, **k: '["Pull the drawer open.", "Open that drawer."]')
-    collect(twin, ["open_drawer"], 1, tmp_path / "up", people=0, res=32, use_generated_instructions=True,
-            log=lambda *_: None)
+    collect(
+        twin,
+        ["open_drawer"],
+        1,
+        tmp_path / "up",
+        people=0,
+        res=32,
+        use_generated_instructions=True,
+        log=lambda *_: None,
+    )
     assert [r["arrival_instruction_source"] for r in rows(tmp_path / "up")] == ["token_factory"]
     collect(twin, ["open_drawer"], 1, tmp_path / "template", people=0, res=32, log=lambda *_: None)
     assert not any("arrival_instruction_source" in r for r in rows(tmp_path / "template"))
@@ -518,7 +649,9 @@ def test_collect_skips_a_task_whose_policy_raises_and_closes_its_env(twin, tmp_p
     r = res["report_data"]
     assert closed
     assert (r["skipped_error"], r["attempts"], r["successes"]) == (2, 0, 0)  # skipped tasks are not attempts
-    assert [x["stage"] for x in r["skip_reasons"]] == ["rollout", "rollout"] and "boom" in r["skip_reasons"][0]["reason"]
+    assert [x["stage"] for x in r["skip_reasons"]] == ["rollout", "rollout"] and "boom" in r["skip_reasons"][0][
+        "reason"
+    ]
     assert res["info"]["total_episodes"] == 0 and res["info"]["arrival_skipped_error"] == 2  # nothing was written
 
 
@@ -566,8 +699,14 @@ def test_run_episode_closes_env_when_the_policy_raises(twin, monkeypatch):
     from arrival.sim.collect import run_episode
     from arrival.sim.policy import ScriptedExpert
 
-    task = {"family": "open_fridge", "fixture": "fridge_1", "joint": "fridge_1_door", "lighting": "neutral",
-            "people": 0, "seed": 0}
+    task = {
+        "family": "open_fridge",
+        "fixture": "fridge_1",
+        "joint": "fridge_1_door",
+        "lighting": "neutral",
+        "people": 0,
+        "seed": 0,
+    }
     monkeypatch.setattr(ScriptedExpert, "reset", lambda self, env, task: (_ for _ in ()).throw(ValueError("boom")))
     env = SimEnv(twin, task, res=32)
     with pytest.raises(ValueError):

@@ -16,7 +16,7 @@ import shutil
 import time
 from pathlib import Path
 
-from arrival.jobs.worker import _read_status
+from arrival.jobs.queue import read_status
 
 FINISHED = ("done", "failed", "cancelled")
 ID_RE = re.compile(r"^[a-z0-9_]+$")
@@ -38,8 +38,12 @@ def job_paths(out_dir: Path, job_id: str, status: dict) -> list[Path]:
     paths = []
     room = status.get("room_id")
     if isinstance(room, str) and ID_RE.match(room) and room.endswith(job_id):
-        paths += [out / "twins" / room, out / "datasets" / f"{room}_sim", out / "reports" / f"{room}_sim.json",
-                  out / "progress" / f"{room}_sim.jsonl"]
+        paths += [
+            out / "twins" / room,
+            out / "datasets" / f"{room}_sim",
+            out / "reports" / f"{room}_sim.json",
+            out / "progress" / f"{room}_sim.jsonl",
+        ]
     paths.append(out / "jobs" / job_id)
     return [p for p in paths if p.exists()]
 
@@ -49,7 +53,7 @@ def delete_job(out_dir: Path, job_id: str, dry_run: bool = False) -> dict | None
     if not isinstance(job_id, str) or not ID_RE.match(job_id):
         return None
     out = Path(out_dir)
-    status = _read_status(out / "jobs" / job_id)
+    status = read_status(out / "jobs" / job_id)
     if status is None or status.get("id") != job_id:
         return None
     if status.get("status") not in FINISHED:
@@ -78,8 +82,7 @@ def _remove(path: Path) -> None:
 
 def gc(out_dir: Path, max_age_hours: float, now: float | None = None, dry_run: bool = False, log=print) -> dict:
     """Delete finished jobs whose ``finished_at`` (else ``created_unix``) is older than ``max_age_hours``."""
-    if (type(max_age_hours) not in (int, float) or not math.isfinite(max_age_hours)
-            or max_age_hours <= 0):
+    if type(max_age_hours) not in (int, float) or not math.isfinite(max_age_hours) or max_age_hours <= 0:
         raise ValueError("max_age_hours must be finite and > 0")
     now = time.time() if now is None else now
     if type(now) not in (int, float) or not math.isfinite(now):
@@ -87,12 +90,11 @@ def gc(out_dir: Path, max_age_hours: float, now: float | None = None, dry_run: b
     root = Path(out_dir) / "jobs"
     removed, freed = [], 0
     for d in sorted(root.iterdir()) if root.is_dir() else []:
-        st = _read_status(d)
+        st = read_status(d)
         if st is None or st.get("status") not in FINISHED or d.name != st.get("id"):
             continue
         stamp = st.get("finished_at") or st.get("created_unix")
-        if (type(stamp) not in (int, float) or not math.isfinite(stamp)
-                or now - stamp <= max_age_hours * 3600):
+        if type(stamp) not in (int, float) or not math.isfinite(stamp) or now - stamp <= max_age_hours * 3600:
             continue
         try:
             res = delete_job(out_dir, d.name, dry_run=dry_run)

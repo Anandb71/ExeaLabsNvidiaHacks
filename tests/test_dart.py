@@ -68,15 +68,27 @@ def test_merged_shards_keep_the_noise_level_and_refuse_a_mix(twin, tmp_path):
 
     def shards(root, noise_for):
         for i in range(2):
-            collect(twin, ["counter_to_sink"], 4, root, people=0, res=32, seed=2, shard=(i, 2),
-                    exec_noise=noise_for(i), log=lambda *_: None)
+            collect(
+                twin,
+                ["counter_to_sink"],
+                4,
+                root,
+                people=0,
+                res=32,
+                seed=2,
+                shard=(i, 2),
+                exec_noise=noise_for(i),
+                log=lambda *_: None,
+            )
 
     shards(tmp_path / "a", lambda i: 0.02)
     out = merge_shards([str(tmp_path / "a")], tmp_path / "merged")
     info = json.loads((out["dataset"] / "meta" / "info.json").read_text())
     assert info["arrival_exec_noise_rad"] == 0.02
     assert info["arrival_provenance"]["run"]["exec_noise"] == 0.02  # the shards' provenance survives the merge
-    for f in (tmp_path / "a" / "shards").glob("*/datasets/*/meta/info.json"):  # shards written before the info key existed
+    for f in (tmp_path / "a" / "shards").glob(
+        "*/datasets/*/meta/info.json"
+    ):  # shards written before the info key existed
         d = json.loads(f.read_text())
         d.pop("arrival_exec_noise_rad")
         f.write_text(json.dumps(d))

@@ -59,13 +59,16 @@ def test_post_job_queues(server):
     boundary = "----arrivaltestboundary"
     payload = b'{"room_id": "uploaded"}'
     body = (
-        f"--{boundary}\r\n"
-        'Content-Disposition: form-data; name="scan"; filename="scan.json"\r\n'
-        "Content-Type: application/json\r\n\r\n"
-    ).encode() + payload + f"\r\n--{boundary}--\r\n".encode()
+        (
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="scan"; filename="scan.json"\r\n'
+            "Content-Type: application/json\r\n\r\n"
+        ).encode()
+        + payload
+        + f"\r\n--{boundary}--\r\n".encode()
+    )
     conn = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=10)
-    conn.request("POST", "/jobs", body=body,
-                 headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+    conn.request("POST", "/jobs", body=body, headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
     resp = conn.getresponse()
     data = json.loads(resp.read())
     conn.close()
@@ -85,11 +88,9 @@ def test_post_job_queues(server):
 def test_post_without_scan_field_is_400(server):
     srv, _ = server
     boundary = "b0undary"
-    body = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"other\"\r\n\r\nx\r\n"
-            f"--{boundary}--\r\n").encode()
+    body = (f'--{boundary}\r\nContent-Disposition: form-data; name="other"\r\n\r\nx\r\n--{boundary}--\r\n').encode()
     conn = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=10)
-    conn.request("POST", "/jobs", body=body,
-                 headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+    conn.request("POST", "/jobs", body=body, headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
     resp = conn.getresponse()
     resp.read()
     conn.close()
@@ -127,8 +128,13 @@ def _raw_post(srv, body: bytes, length: int, boundary: str = "bnd"):
     import socket
 
     s = socket.create_connection(("127.0.0.1", srv.server_address[1]), timeout=10)
-    s.sendall((f"POST /jobs HTTP/1.1\r\nHost: x\r\nContent-Type: multipart/form-data; boundary={boundary}\r\n"
-               f"Content-Length: {length}\r\nConnection: close\r\n\r\n").encode() + body)
+    s.sendall(
+        (
+            f"POST /jobs HTTP/1.1\r\nHost: x\r\nContent-Type: multipart/form-data; boundary={boundary}\r\n"
+            f"Content-Length: {length}\r\nConnection: close\r\n\r\n"
+        ).encode()
+        + body
+    )
     s.shutdown(socket.SHUT_WR)  # client stops sending: server sees EOF before Content-Length bytes
     data = b""
     while chunk := s.recv(65536):
@@ -139,8 +145,11 @@ def _raw_post(srv, body: bytes, length: int, boundary: str = "bnd"):
 
 def _part(filename: str, payload: bytes, boundary: str = "bnd", close: bool = True) -> bytes:
     fn = f'; filename="{filename}"' if filename is not None else ""
-    return (f'--{boundary}\r\nContent-Disposition: form-data; name="scan"{fn}\r\n\r\n').encode() + payload + (
-        f"\r\n--{boundary}--\r\n".encode() if close else b"")
+    return (
+        (f'--{boundary}\r\nContent-Disposition: form-data; name="scan"{fn}\r\n\r\n').encode()
+        + payload
+        + (f"\r\n--{boundary}--\r\n".encode() if close else b"")
+    )
 
 
 def test_truncated_upload_is_400(server):
@@ -167,9 +176,16 @@ def test_room_page_links_sim_dataset(server):
     srv, out = server
     meta = out / "datasets" / "hero_kitchen_sim" / "meta"
     meta.mkdir(parents=True)
-    (meta / "info.json").write_text(json.dumps({"arrival_generator": "mujoco_sim", "total_episodes": 3,
-                                                "arrival_physically_valid": True,
-                                                "arrival_families": ["counter_to_sink", "open_drawer"]}))
+    (meta / "info.json").write_text(
+        json.dumps(
+            {
+                "arrival_generator": "mujoco_sim",
+                "total_episodes": 3,
+                "arrival_physically_valid": True,
+                "arrival_families": ["counter_to_sink", "open_drawer"],
+            }
+        )
+    )
     status, body = _get(srv, "/rooms/hero_kitchen")
     assert status == 200
     assert b"/download/hero_kitchen_sim" in body and b"mujoco_sim" in body and b"open_drawer" in body
@@ -184,14 +200,21 @@ def test_capture_app_upload_reaches_worker(server):
     boundary = "ArrivalBoundary-3F2504E0-4F89-11D3-9A0C-0305E82C3301"
     payload = (REPO / "tests" / "fixtures" / "roomplan" / "office.json").read_bytes()
     body = (
-        f"--{boundary}\r\n"
-        'Content-Disposition: form-data; name="scan"; filename="kitchen_a.json"\r\n'
-        "Content-Type: application/json\r\n\r\n"
-    ).encode() + payload + f"\r\n--{boundary}--\r\n".encode()
+        (
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="scan"; filename="kitchen_a.json"\r\n'
+            "Content-Type: application/json\r\n\r\n"
+        ).encode()
+        + payload
+        + f"\r\n--{boundary}--\r\n".encode()
+    )
     conn = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=10)
-    conn.request("POST", "/jobs", body=body,
-                 headers={"Content-Type": f"multipart/form-data; boundary={boundary}",
-                          "Accept": "application/json"})
+    conn.request(
+        "POST",
+        "/jobs",
+        body=body,
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}", "Accept": "application/json"},
+    )
     resp = conn.getresponse()
     data = json.loads(resp.read())
     conn.close()
@@ -231,7 +254,9 @@ def test_job_download_streams_zip(server):
     d.mkdir(parents=True)
     payload = b"PK-not-really-but-bytes" * 100000
     (d / "dataset.zip").write_bytes(payload)
-    (d / "status.json").write_text(_json.dumps({"id": "job_cafe0000000000000000000000000001", "status": "done", "room_id": "r", "zip": "x"}))
+    (d / "status.json").write_text(
+        _json.dumps({"id": "job_cafe0000000000000000000000000001", "status": "done", "room_id": "r", "zip": "x"})
+    )
     status, body = _get(srv, "/jobs/job_cafe0000000000000000000000000001/download")
     assert status == 200 and body == payload
 
@@ -277,8 +302,11 @@ def make(tmp_path):
 def _multipart(parts, boundary="bnd7"):
     body = b""
     for name, filename, payload in parts:
-        body += (f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"; filename="{filename}"\r\n\r\n'
-                 ).encode() + payload + b"\r\n"
+        body += (
+            (f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"; filename="{filename}"\r\n\r\n').encode()
+            + payload
+            + b"\r\n"
+        )
     body += f"--{boundary}--\r\n".encode()
     return body, {"Content-Type": f"multipart/form-data; boundary={boundary}"}
 
@@ -328,6 +356,7 @@ def _frames_zip(tmp_path, unit="m", mutate=None) -> bytes:
 
 # -- job ids, paths, cross-user access
 
+
 def test_job_ids_are_128_bit_random(make):
     srv, out = make(rate_limit=0)
     ids = []
@@ -338,15 +367,29 @@ def test_job_ids_are_128_bit_random(make):
     assert ids[0] != ids[1]
 
 
-@pytest.mark.parametrize("path", [
-    "/jobs/..%2F..%2Fetc%2Fpasswd", "/jobs/job_1", "/jobs/JOB_DEADBEEF", "/jobs/job_deadbeef%00", "/jobs/..",
-    "/jobs/job_deadbeef/../../secret", "/jobs/%2e%2e%2fsecret/download", "/previews/..%2f..%2fsecret.png",
-    "/previews/%2e%2e", "/rooms/..%2f..", "/download/..%2f..%2fsecret", "/jobs/job_" + "f" * 33,
-])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/jobs/..%2F..%2Fetc%2Fpasswd",
+        "/jobs/job_1",
+        "/jobs/JOB_DEADBEEF",
+        "/jobs/job_deadbeef%00",
+        "/jobs/..",
+        "/jobs/job_deadbeef/../../secret",
+        "/jobs/%2e%2e%2fsecret/download",
+        "/previews/..%2f..%2fsecret.png",
+        "/previews/%2e%2e",
+        "/rooms/..%2f..",
+        "/download/..%2f..%2fsecret",
+        "/jobs/job_" + "f" * 33,
+    ],
+)
 def test_traversal_and_malformed_ids_are_404(server, path):
     srv, out = server
     (out / "secret").mkdir(parents=True)
-    (out / "secret" / "status.json").write_text(json.dumps({"id": "SECRETJOB", "status": "done", "room_id": "x", "zip": "y"}))
+    (out / "secret" / "status.json").write_text(
+        json.dumps({"id": "SECRETJOB", "status": "done", "room_id": "x", "zip": "y"})
+    )
     status, body = _get(srv, path)
     assert status == 404 and b"SECRETJOB" not in body
 
@@ -415,8 +458,10 @@ def test_public_uploaded_dataset_and_preview_require_owner(make):
     preview.parent.mkdir(parents=True)
     preview.write_bytes(b"private preview")
 
-    for path, expected in ((f"/download/{room}_sim", b"private dataset"),
-                           (f"/previews/{preview.name}", b"private preview")):
+    for path, expected in (
+        (f"/download/{room}_sim", b"private dataset"),
+        (f"/previews/{preview.name}", b"private preview"),
+    ):
         code, body, _ = _fetch(srv, path, {"Cookie": cookie_a})
         assert code == 200
         if path.startswith("/download/"):
@@ -437,10 +482,18 @@ def test_local_mode_lists_all_jobs(make):
 
 # -- upload type, content and filename checks
 
-@pytest.mark.parametrize("name,payload", [
-    ("scan.exe", TINY), ("scan", TINY), ("scan.json", b"MZ\x90\x00binary"),
-    ("scan.json", b"<html></html>"), ("scan.json.zip", TINY), ("scan.json", b"[1, 2]"),
-])
+
+@pytest.mark.parametrize(
+    "name,payload",
+    [
+        ("scan.exe", TINY),
+        ("scan", TINY),
+        ("scan.json", b"MZ\x90\x00binary"),
+        ("scan.json", b"<html></html>"),
+        ("scan.json.zip", TINY),
+        ("scan.json", b"[1, 2]"),
+    ],
+)
 def test_wrong_type_or_content_is_415(make, name, payload):
     srv, out = make()
     code, data, _ = _post(srv, [("scan", name, payload)])
@@ -461,11 +514,21 @@ def test_filename_is_sanitised_everywhere(make):
     assert b"<script>alert(1)" not in page
 
 
-@pytest.mark.parametrize("raw,expected", [
-    ("kitchen_a.json", "kitchen_a.json"), ("..\\..\\win\\evil.json", "evil.json"), ("/abs/path/x.json", "x.json"),
-    ("My Kitchen (2).json", "My Kitchen (2).json"), ("", "upload.bin"), (None, "upload.bin"), ("....", "upload.bin"),
-    ("a\x00b\nc.json", "abc.json"), ("<b>x</b>.json", "b_.json"), ("..hidden.json", "hidden.json"),
-])
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("kitchen_a.json", "kitchen_a.json"),
+        ("..\\..\\win\\evil.json", "evil.json"),
+        ("/abs/path/x.json", "x.json"),
+        ("My Kitchen (2).json", "My Kitchen (2).json"),
+        ("", "upload.bin"),
+        (None, "upload.bin"),
+        ("....", "upload.bin"),
+        ("a\x00b\nc.json", "abc.json"),
+        ("<b>x</b>.json", "b_.json"),
+        ("..hidden.json", "hidden.json"),
+    ],
+)
 def test_safe_filename(raw, expected):
     assert hd.safe_filename(raw) == expected
 
@@ -476,6 +539,7 @@ def test_safe_filename_caps_length_and_keeps_extension():
 
 
 # -- limits: size, rate, queue, concurrency
+
 
 def test_max_upload_mb_is_enforced(make):
     srv, out = make(max_upload_mb=0.001)  # 1048 bytes
@@ -548,6 +612,7 @@ def test_low_disk_is_507(make, monkeypatch):
 
 # -- headers, error pages, logs
 
+
 def test_security_headers_on_html_json_and_errors(server):
     srv, out = server
     for path in ("/", "/rooms/hero_kitchen", "/nope", "/jobs/job_" + "0" * 32, "/jobs/xx"):
@@ -616,8 +681,11 @@ def test_unsupported_methods_are_405_with_allow(server):
         assert status == 405 and "POST" in resp.getheader("Allow"), method
 
 
-@pytest.mark.parametrize("raw,code", [(b"GET / HTTP/9.9\r\n\r\n", b" 505 "), (b"GET /" + b"a" * 70000 + b" HTTP/1.1\r\n\r\n", b" 414 ")],
-                         ids=["unsupported_version", "long_request"])
+@pytest.mark.parametrize(
+    "raw,code",
+    [(b"GET / HTTP/9.9\r\n\r\n", b" 505 "), (b"GET /" + b"a" * 70000 + b" HTTP/1.1\r\n\r\n", b" 414 ")],
+    ids=["unsupported_version", "long_request"],
+)
 def test_protocol_errors_get_our_error_page_not_a_traceback(server, raw, code):
     srv, _ = server
     s = socket.create_connection(("127.0.0.1", srv.server_address[1]), timeout=10)
@@ -633,9 +701,16 @@ def test_protocol_errors_get_our_error_page_not_a_traceback(server, raw, code):
 
 
 def test_redact_masks_env_secrets_bearer_and_key_pairs():
-    env = {"TAVILY_API_KEY": "tvly-abcdef123456", "PATH": "/usr/bin", "MY_PASSWORD": "hunter2hunter2", "SHORT_KEY": "ab"}
-    text = ("call failed for tvly-abcdef123456 with Authorization: Bearer eyJhbGciOi.payload.sig and "
-            "url=https://x/?api_key=abc123xyz&b=1 pw hunter2hunter2 in /usr/bin")
+    env = {
+        "TAVILY_API_KEY": "tvly-abcdef123456",
+        "PATH": "/usr/bin",
+        "MY_PASSWORD": "hunter2hunter2",
+        "SHORT_KEY": "ab",
+    }
+    text = (
+        "call failed for tvly-abcdef123456 with Authorization: Bearer eyJhbGciOi.payload.sig and "
+        "url=https://x/?api_key=abc123xyz&b=1 pw hunter2hunter2 in /usr/bin"
+    )
     out = hd.redact(text, env)
     for leaked in ("tvly-abcdef123456", "eyJhbGciOi", "abc123xyz", "hunter2hunter2"):
         assert leaked not in out
@@ -649,6 +724,7 @@ def test_index_form_shows_limit_and_frames_input(make):
 
 
 # -- L14: RGB-D frames through the upload path
+
 
 @pytest.mark.parametrize("unit", ["m", "mm"])
 def test_frames_upload_is_validated_stored_and_scan_still_reaches_the_worker(make, tmp_path, unit):
@@ -689,6 +765,7 @@ def _edit_manifest(fn):
         m = json.loads(p.read_text())
         fn(m, root)
         p.write_text(json.dumps(m))
+
     return mutate
 
 
@@ -728,9 +805,11 @@ def _wrong_confidence_size(m, root):
     Image.new("L", (3, 3), 2).save(root / "confidence.png")
     m["frames"][0]["confidence"] = "confidence.png"
 
+
 def _wrong_depth_dtype(m, root):
     path = root / m["frames"][0]["depth"]
     np.save(path, np.load(path).astype(np.float64))
+
 
 def _invalid_confidence_level(m, root):
     from PIL import Image
@@ -762,20 +841,32 @@ def _nul_in_path(m, root):
     m["frames"][0]["rgb"] = "rgb/f000\x00.png"  # was an unhandled ValueError, HTTP 500
 
 
-@pytest.mark.parametrize("mutate,code", [
-    (_same_times, "non_monotonic_timestamps"), (_drop_file, "missing_file"), (_wrong_rgb_size, "bad_size"),
-    (_corrupt_rgb, "bad_image"), (_wrong_depth_shape, "depth_shape"),
-    (_wrong_confidence_size, "bad_size"), (_pickled_depth, "bad_depth"),
-
-    (_wrong_depth_dtype, "depth_shape"), (_pickled_depth, "bad_depth"),
-
-    (_corrupt_rgb, "bad_image"), (_grayscale_rgb, "bad_image"),
-    (_wrong_depth_shape, "depth_shape"), (_pickled_depth, "bad_depth"),
-
-    (_corrupt_rgb, "bad_image"), (_wrong_depth_shape, "depth_shape"), (_pickled_depth, "bad_depth"),
-    (_invalid_confidence_level, "bad_confidence"), (_invalid_confidence_mode, "bad_confidence"),
-    (_bad_axes, "axis_convention"), (_list_depth_unit, "depth_unit"), (_nul_in_path, "bad_path"),
-])
+@pytest.mark.parametrize(
+    "mutate,code",
+    [
+        (_same_times, "non_monotonic_timestamps"),
+        (_drop_file, "missing_file"),
+        (_wrong_rgb_size, "bad_size"),
+        (_corrupt_rgb, "bad_image"),
+        (_wrong_depth_shape, "depth_shape"),
+        (_wrong_confidence_size, "bad_size"),
+        (_pickled_depth, "bad_depth"),
+        (_wrong_depth_dtype, "depth_shape"),
+        (_pickled_depth, "bad_depth"),
+        (_corrupt_rgb, "bad_image"),
+        (_grayscale_rgb, "bad_image"),
+        (_wrong_depth_shape, "depth_shape"),
+        (_pickled_depth, "bad_depth"),
+        (_corrupt_rgb, "bad_image"),
+        (_wrong_depth_shape, "depth_shape"),
+        (_pickled_depth, "bad_depth"),
+        (_invalid_confidence_level, "bad_confidence"),
+        (_invalid_confidence_mode, "bad_confidence"),
+        (_bad_axes, "axis_convention"),
+        (_list_depth_unit, "depth_unit"),
+        (_nul_in_path, "bad_path"),
+    ],
+)
 def test_bad_frames_bundle_is_rejected_and_nothing_is_queued(make, tmp_path, mutate, code):
     srv, out = make(rate_limit=0)
     blob = _frames_zip(tmp_path, "m", _edit_manifest(mutate))
@@ -798,11 +889,18 @@ def _zip_of(entries, symlink=None) -> bytes:
     return buf.getvalue()
 
 
-@pytest.mark.parametrize("entries,symlink", [
-    ({"../evil.png": b"x"}, None), ({"/abs.png": b"x"}, None), ({"a/../../evil.png": b"x"}, None),
-    ({"rgb\\evil.png": b"x"}, None), ({"run.sh": b"#!/bin/sh"}, None),
-    ({"x.PNG": b"a", "x.png": b"b"}, None), ({"frames_manifest.json": b"{}"}, "link.png"),
-])
+@pytest.mark.parametrize(
+    "entries,symlink",
+    [
+        ({"../evil.png": b"x"}, None),
+        ({"/abs.png": b"x"}, None),
+        ({"a/../../evil.png": b"x"}, None),
+        ({"rgb\\evil.png": b"x"}, None),
+        ({"run.sh": b"#!/bin/sh"}, None),
+        ({"x.PNG": b"a", "x.png": b"b"}, None),
+        ({"frames_manifest.json": b"{}"}, "link.png"),
+    ],
+)
 def test_unsafe_zip_members_are_400(make, tmp_path, entries, symlink):
     srv, out = make(rate_limit=0)
     status, data, _ = _post(srv, [("scan", "hero.json", HERO_SCAN), ("frames", "f.zip", _zip_of(entries, symlink))])
@@ -851,6 +949,7 @@ def test_frames_member_count_cap(make, monkeypatch):
 
 # -- CLI flags and the doctor
 
+
 def test_a_port_already_served_cannot_be_bound_again(make):
     """On Windows SO_REUSEADDR let a second `arrival serve` bind the port the first one was serving."""
     srv, out = make()
@@ -868,8 +967,9 @@ def test_serve_reports_an_address_it_cannot_listen_on(capsys):
 def test_serve_hardening_flags_parse_and_validate():
     from arrival.cli import EXIT_USAGE, build_parser, main
 
-    a = build_parser().parse_args(["serve", "--max-upload-mb", "5", "--rate-limit", "3", "--max-queued", "2",
-                                   "--public", "--behind-proxy"])
+    a = build_parser().parse_args(
+        ["serve", "--max-upload-mb", "5", "--rate-limit", "3", "--max-queued", "2", "--public", "--behind-proxy"]
+    )
     assert (a.max_upload_mb, a.rate_limit, a.max_queued, a.public, a.behind_proxy) == (5, 3, 2, True, True)
     d = build_parser().parse_args(["serve"])
     assert (d.max_upload_mb, d.rate_limit, d.max_queued, d.public, d.behind_proxy) == (200, 10, 50, False, False)
@@ -928,7 +1028,9 @@ def test_doctor_json_cli_and_exit_codes(tmp_path, monkeypatch, capsys):
     assert {"python", "numpy", "mujoco", "ffmpeg", "disk", "TOKEN_FACTORY_API_KEY"} <= names
     assert all(c["status"] in ("ok", "warn", "fail", "info") for c in data["checks"])
     real = importlib.util.find_spec  # a missing core dependency is a failure with exit code 1
-    monkeypatch.setattr(importlib.util, "find_spec", lambda name, *a, **k: None if name == "pyarrow" else real(name, *a, **k))
+    monkeypatch.setattr(
+        importlib.util, "find_spec", lambda name, *a, **k: None if name == "pyarrow" else real(name, *a, **k)
+    )
     assert main(["doctor", "--out", str(tmp_path / "out")]) == EXIT_INVALID
     assert "FAIL" in capsys.readouterr().out
 
@@ -939,7 +1041,7 @@ def test_doctor_disk_and_mujoco_levels(tmp_path, monkeypatch):
     from arrival import doctor
 
     Usage = namedtuple("Usage", "total used free")
-    gib = 1024 ** 3
+    gib = 1024**3
     monkeypatch.setattr(doctor.shutil, "disk_usage", lambda p: Usage(100 * gib, 0, int(0.1 * gib)))
     assert doctor.check_disk(tmp_path).status == "fail"
     monkeypatch.setattr(doctor.shutil, "disk_usage", lambda p: Usage(100 * gib, 0, int(1 * gib)))
@@ -953,6 +1055,7 @@ def test_doctor_disk_and_mujoco_levels(tmp_path, monkeypatch):
 
 
 # ---- DELETE /jobs/<id>: cancel or delete, owner only ---------------------------------------------------------------
+
 
 def _set_status(out, jid, **kw):
     path = out / "jobs" / jid / "status.json"
@@ -1024,43 +1127,54 @@ def test_npz_depth_disguised_as_npy_is_rejected(make, tmp_path):
     status, data, _ = _post(srv, [("scan", "hero.json", HERO_SCAN), ("frames", "frames.zip", blob)])
     assert status == 422 and data["code"] == "bad_depth" and data["field"] == "frames", data
     assert not list((out / "jobs").glob("*/status.json"))
-@pytest.mark.parametrize("disposition", [
-    'form-data; filename="scan.json"; name="scan"',
-    'form-data; filename="scan.json";NAME="scan"',
-])
+
+
+@pytest.mark.parametrize(
+    "disposition",
+    [
+        'form-data; filename="scan.json"; name="scan"',
+        'form-data; filename="scan.json";NAME="scan"',
+    ],
+)
 def test_upload_accepts_filename_before_field_name(server, disposition):
     srv, out = server
     boundary = "arrival-parameter-order"
     payload = b'{"room_id":"uploaded"}'
-    body = (f"--{boundary}\r\nContent-Disposition: {disposition}\r\n"
-            "Content-Type: application/json\r\n\r\n").encode() + payload + f"\r\n--{boundary}--\r\n".encode()
+    body = (
+        (f"--{boundary}\r\nContent-Disposition: {disposition}\r\nContent-Type: application/json\r\n\r\n").encode()
+        + payload
+        + f"\r\n--{boundary}--\r\n".encode()
+    )
     conn = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=10)
     try:
-        conn.request("POST", "/jobs", body=body,
-                     headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+        conn.request("POST", "/jobs", body=body, headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
         response = conn.getresponse()
         data = json.loads(response.read())
         assert response.status == 202, data
         assert (out / "jobs" / data["id"] / "upload.bin").read_bytes() == payload
     finally:
         conn.close()
+
+
 @pytest.mark.parametrize("template", ["bytes={}-", "bytes=0-{}", "bytes=-{}"])
 def test_preview_ignores_unparseable_range_numbers(make, template):
     srv, out = make()
     preview = out / "previews" / "test.png"
     preview.parent.mkdir(parents=True, exist_ok=True)
     preview.write_bytes(b"0123456789")
-    status, body, response = _fetch(srv, "/previews/test.png",
-                                    headers={"Range": template.format("9" * 4301)})
+    status, body, response = _fetch(srv, "/previews/test.png", headers={"Range": template.format("9" * 4301)})
     assert status == 200 and body == b"0123456789"
     assert response.getheader("Content-Range") is None
 
 
-@pytest.mark.parametrize(("value", "code", "expected", "content_range"), [
-    ("bytes=2-4", 206, b"234", "bytes 2-4/10"),
-    ("bytes=-3", 206, b"789", "bytes 7-9/10"),
-    ("bytes=50-", 416, b"", "bytes */10"),
-])
+@pytest.mark.parametrize(
+    ("value", "code", "expected", "content_range"),
+    [
+        ("bytes=2-4", 206, b"234", "bytes 2-4/10"),
+        ("bytes=-3", 206, b"789", "bytes 7-9/10"),
+        ("bytes=50-", 416, b"", "bytes */10"),
+    ],
+)
 def test_preview_normal_ranges_keep_existing_behavior(make, value, code, expected, content_range):
     srv, out = make()
     preview = out / "previews" / "test.png"
@@ -1069,6 +1183,8 @@ def test_preview_normal_ranges_keep_existing_behavior(make, value, code, expecte
     status, body, response = _fetch(srv, "/previews/test.png", headers={"Range": value})
     assert status == code and body == expected
     assert response.getheader("Content-Range") == content_range
+
+
 def test_invalid_manifest_encoding_is_a_validation_response(make):
     srv, out = make()
     blob = _zip_of({"frames_manifest.json": b"\xff"})
@@ -1085,10 +1201,10 @@ def test_invalid_utf8_zip_entry_name_returns_archive_error(make, location):
     central = blob.index(b"PK\x01\x02")
     if location in ("local", "both"):
         struct.pack_into("<H", blob, 6, 0x800)
-        blob[30] = 0xff
+        blob[30] = 0xFF
     if location in ("central", "both"):
         struct.pack_into("<H", blob, central + 8, 0x800)
-        blob[central + 46] = 0xff
+        blob[central + 46] = 0xFF
     srv, out = make()
     status, data, _ = _post(srv, [("scan", "hero.json", HERO_SCAN), ("frames", "frames.zip", bytes(blob))])
     assert status == 400 and data["code"] == "bad_zip" and data["field"] == "frames", data

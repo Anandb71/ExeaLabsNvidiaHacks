@@ -6,11 +6,10 @@ import math
 
 import pytest
 import yaml
+from conftest import REPO, SCANS
 
 from arrival.scan import bundle, roomplan
 from arrival.twin.compile import compile_twin, write_twin
-
-from conftest import REPO, SCANS
 
 WALL_TOL = 0.01
 FLOOR_TOL = 1e-6
@@ -40,8 +39,10 @@ def _corners(f: dict) -> list[tuple[float, float]]:
     sx, sy, _ = f["size"]
     x, y, _ = f["position"]
     c, s = math.cos(f.get("yaw", 0.0)), math.sin(f.get("yaw", 0.0))
-    return [(x + c * dx - s * dy, y + s * dx + c * dy)
-            for dx, dy in ((sx / 2, sy / 2), (-sx / 2, sy / 2), (-sx / 2, -sy / 2), (sx / 2, -sy / 2))]
+    return [
+        (x + c * dx - s * dy, y + s * dx + c * dy)
+        for dx, dy in ((sx / 2, sy / 2), (-sx / 2, sy / 2), (-sx / 2, -sy / 2), (sx / 2, -sy / 2))
+    ]
 
 
 def _overlap(a: dict, b: dict, tol: float = OVERLAP_TOL) -> bool:
@@ -63,8 +64,9 @@ def _contains(outer: dict, inner: dict, tol: float = 1e-6) -> bool:
     from arrival.twin.compile import to_local
 
     sx, sy, _ = outer["size"]
-    return all(abs(lx) <= sx / 2 + tol and abs(ly) <= sy / 2 + tol
-               for lx, ly in (to_local(c, outer) for c in _corners(inner)))
+    return all(
+        abs(lx) <= sx / 2 + tol and abs(ly) <= sy / 2 + tol for lx, ly in (to_local(c, outer) for c in _corners(inner))
+    )
 
 
 def _allowed(a: dict, b: dict) -> bool:
@@ -82,8 +84,12 @@ def _allowed(a: dict, b: dict) -> bool:
 @pytest.mark.parametrize("room,source", CASES)
 def test_no_overlapping_fixtures(room, source):
     fx = _twin(room, source)["fixtures"]
-    bad = {tuple(sorted((a["id"], b["id"]))) for i, a in enumerate(fx) for b in fx[i + 1:]
-           if _overlap(a, b) and not _allowed(a, b)}
+    bad = {
+        tuple(sorted((a["id"], b["id"])))
+        for i, a in enumerate(fx)
+        for b in fx[i + 1 :]
+        if _overlap(a, b) and not _allowed(a, b)
+    }
     if (room, source) == ("hero_kitchen", "scan") and bad == HERO_KNOWN_OVERLAPS:
         pytest.xfail(f"TWN-6: authored hero kitchen overlaps {sorted(bad)}")
     assert not bad

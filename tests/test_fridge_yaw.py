@@ -1,5 +1,6 @@
 """A fridge on a side wall: the expert's push after the hooked pull follows the fixture's yaw. u_kitchen_42's fridge
 stands at yaw +90 deg; the push used to be planned for a fridge at yaw 0, 1.5 m from the door, and failed 0 of 4."""
+
 import numpy as np
 import pytest
 

@@ -18,7 +18,9 @@ from arrival.twin.compile import compile_twin  # noqa: E402
 def source(tmp_path_factory):
     twin = compile_twin(load_room("hero_kitchen", "scans"))
     out = tmp_path_factory.mktemp("src")
-    collect(twin, ["counter_to_sink", "open_drawer"], 6, out, people=0, res=32, seed=4, exec_noise=0.02, log=lambda *_: None)
+    collect(
+        twin, ["counter_to_sink", "open_drawer"], 6, out, people=0, res=32, seed=4, exec_noise=0.02, log=lambda *_: None
+    )
     return out / "datasets" / "hero_kitchen_sim"
 
 
@@ -40,13 +42,18 @@ def test_family_filter_reindexes_validates_and_keeps_the_label(source, tmp_path)
     info = _info(res["dataset"])
     assert info["arrival_exec_noise_rad"] == 0.02  # still labelled as perturbed
     assert info["arrival_subset_rule"] == {"families": ["open_drawer"], "min_drawer_opening_m": None}
-    assert info["arrival_subset_source_episodes"] == len(_families(source)) and info["arrival_subset_dropped"]["family"] > 0
+    assert (
+        info["arrival_subset_source_episodes"] == len(_families(source))
+        and info["arrival_subset_dropped"]["family"] > 0
+    )
 
 
 def test_drawer_opening_floor_drops_only_marginal_drawers(source, tmp_path):
-    openings = [(json.loads(line).get("arrival_success_detail") or {}).get("qpos")
-                for line in (source / "meta" / "episodes.jsonl").read_text().splitlines()
-                if json.loads(line)["arrival_family"] == "open_drawer"]
+    openings = [
+        (json.loads(line).get("arrival_success_detail") or {}).get("qpos")
+        for line in (source / "meta" / "episodes.jsonl").read_text().splitlines()
+        if json.loads(line)["arrival_family"] == "open_drawer"
+    ]
     floor = sorted(openings)[len(openings) // 2]  # the median: about half the drawer pulls fall under it
     res = subset_dataset(source, tmp_path, min_drawer_opening=floor, log=lambda *_: None)
     dropped = res["dropped"]["drawer_opening"]

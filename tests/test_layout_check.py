@@ -38,14 +38,24 @@ def test_roomplan_fixtures_pass_and_declare_omissions(path):
 
 
 def test_oblique_wall_and_yawed_fixture_round_trip():
-    bundle = {"schema_version": "1", "room_id": "r", "units": "meters", "frame": "z_up",
-              "geometry_source": "authored_sample", "blocks_claims": [], "objects": [],
-              "walls": [{"id": "w0", "start": [0, 0], "end": [4, 0], "height": 2.4, "thickness": 0.1},
-                        {"id": "w1", "start": [4, 0], "end": [4, 3], "height": 2.4, "thickness": 0.1},
-                        {"id": "w2", "start": [4, 3], "end": [0, 0], "height": 2.4, "thickness": 0.1}],
-              "fixtures": [{"id": "bed1", "category": "bed", "size": [1.6, 2.0, 0.5], "position": [2, 1, 0.25],
-                            "yaw": 1.0},
-                           {"id": "thing", "category": "mystery", "size": [0.4, 0.3, 0.2], "position": [1, 1, 0.1]}]}
+    bundle = {
+        "schema_version": "1",
+        "room_id": "r",
+        "units": "meters",
+        "frame": "z_up",
+        "geometry_source": "authored_sample",
+        "blocks_claims": [],
+        "objects": [],
+        "walls": [
+            {"id": "w0", "start": [0, 0], "end": [4, 0], "height": 2.4, "thickness": 0.1},
+            {"id": "w1", "start": [4, 0], "end": [4, 3], "height": 2.4, "thickness": 0.1},
+            {"id": "w2", "start": [4, 3], "end": [0, 0], "height": 2.4, "thickness": 0.1},
+        ],
+        "fixtures": [
+            {"id": "bed1", "category": "bed", "size": [1.6, 2.0, 0.5], "position": [2, 1, 0.25], "yaw": 1.0},
+            {"id": "thing", "category": "mystery", "size": [0.4, 0.3, 0.2], "position": [1, 1, 0.1]},
+        ],
+    }
     twin = compile_twin(bundle)
     assert cl.check_layout(twin, _layout(twin))["ok"]
 
@@ -59,15 +69,23 @@ def _mutated(twin, fn):
 def test_checker_catches_each_defect(hero_twin):
     row = lambda lay: lay["main_group"]["bottom_row"]  # noqa: E731
     assert any("dropped" in e for e in _mutated(hero_twin, lambda l: row(l).pop()))
-    assert any("half-extent" in e for e in _mutated(hero_twin, lambda l: row(l)[0].update(
-        size=[v / 2 for v in row(l)[0]["size"]])))
-    assert any("5 cm" in e for e in _mutated(hero_twin, lambda l: row(l)[0].update(
-        pos=[row(l)[0]["pos"][0] + 0.06] + row(l)[0]["pos"][1:])))
+    assert any(
+        "half-extent" in e
+        for e in _mutated(hero_twin, lambda l: row(l)[0].update(size=[v / 2 for v in row(l)[0]["size"]]))
+    )
+    assert any(
+        "5 cm" in e
+        for e in _mutated(
+            hero_twin, lambda l: row(l)[0].update(pos=[row(l)[0]["pos"][0] + 0.06] + row(l)[0]["pos"][1:])
+        )
+    )
     assert any("z_rot" in e for e in _mutated(hero_twin, lambda l: row(l)[0].update(z_rot=0.7)))
-    assert any("ends" in e for e in _mutated(hero_twin, lambda l: l["room"]["walls"][0].update(
-        size=[0.02, 4.0, 2.4])))  # length and thickness swapped
-    assert any("thickness" in e for e in _mutated(hero_twin, lambda l: l["room"]["walls"][0].update(
-        size=[4.0, 0.3, 2.4])))
+    assert any(
+        "ends" in e for e in _mutated(hero_twin, lambda l: l["room"]["walls"][0].update(size=[0.02, 4.0, 2.4]))
+    )  # length and thickness swapped
+    assert any(
+        "thickness" in e for e in _mutated(hero_twin, lambda l: l["room"]["walls"][0].update(size=[4.0, 0.3, 2.4]))
+    )
     assert any("dropped" in e for e in _mutated(hero_twin, lambda l: l["room"]["walls"].pop()))
     assert any("ends" in e for e in _mutated(hero_twin, lambda l: l["room"]["walls"][0].update(pos=[3.0, 0.0, 1.2])))
     bad = copy.deepcopy(hero_twin)

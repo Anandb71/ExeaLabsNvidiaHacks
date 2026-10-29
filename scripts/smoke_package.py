@@ -11,6 +11,7 @@ The wheel ships only the `arrival` package. `scans/` and `configs/` live in the 
 installed copy needs --scans (the last check proves the failure without it is one clear line).
 Prints one line per check, exit 0 when all pass and 1 otherwise.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -27,9 +28,11 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 # Paths travel in the environment: setuptools' build hooks reinterpret sys.argv.
-BUILD_SNIPPET = ("import os; from setuptools import build_meta as b; d = os.environ['SMOKE_DIST']; "
-                 "os.chdir(os.environ['SMOKE_SRC']); s = b.build_sdist(d); w = b.build_wheel(d); "
-                 "print('BUILT', s, w)")
+BUILD_SNIPPET = (
+    "import os; from setuptools import build_meta as b; d = os.environ['SMOKE_DIST']; "
+    "os.chdir(os.environ['SMOKE_SRC']); s = b.build_sdist(d); w = b.build_wheel(d); "
+    "print('BUILT', s, w)"
+)
 
 
 def build(dist: Path, python: str = sys.executable) -> tuple[Path, Path]:
@@ -126,18 +129,51 @@ def main(argv: list[str] | None = None) -> int:
         report(r.returncode == 0 and "demo" in r.stdout, "python -m arrival --help", r.stderr[-300:])
 
         out = empty / "out"
-        r = run(py + ["-m", "arrival", "demo", "--room", "hero_kitchen", "--scans", str(REPO / "scans"),
-                      "--episodes", "1", "--videos", "none", "--out", str(out)], empty, env)
+        r = run(
+            py
+            + [
+                "-m",
+                "arrival",
+                "demo",
+                "--room",
+                "hero_kitchen",
+                "--scans",
+                str(REPO / "scans"),
+                "--episodes",
+                "1",
+                "--videos",
+                "none",
+                "--out",
+                str(out),
+            ],
+            empty,
+            env,
+        )
         report(r.returncode == 0, "arrival demo with --scans", r.stderr[-400:] + r.stdout[-300:])
         ds = out / "datasets" / "hero_kitchen"
         r = run(py + ["-m", "arrival", "validate", str(ds)], empty, env)
         report(r.returncode == 0, "arrival validate on that dataset", r.stderr[-400:] + r.stdout[-300:])
 
-        r = run(py + ["-m", "arrival", "demo", "--room", "hero_kitchen", "--episodes", "1", "--videos", "none",
-                      "--out", str(empty / "out2")], empty, env)
+        r = run(
+            py
+            + [
+                "-m",
+                "arrival",
+                "demo",
+                "--room",
+                "hero_kitchen",
+                "--episodes",
+                "1",
+                "--videos",
+                "none",
+                "--out",
+                str(empty / "out2"),
+            ],
+            empty,
+            env,
+        )
         one_line = r.returncode != 0 and "Traceback" not in r.stderr and "not found under" in (r.stderr + r.stdout)
-        report(one_line, "demo without --scans fails with one clear line (scans are not packaged)",
-               r.stderr[-300:])
+        report(one_line, "demo without --scans fails with one clear line (scans are not packaged)", r.stderr[-300:])
     return 1 if failed else 0
 
 

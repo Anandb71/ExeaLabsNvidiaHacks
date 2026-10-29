@@ -7,10 +7,11 @@ import pytest
 
 pytest.importorskip("mujoco")
 
+from conftest import SCANS  # noqa: E402
+
 from arrival.export.validate import validate  # noqa: E402
 from arrival.jobs.fanout import FanoutConfig, LocalBackend, NebiusBackendStub, marker_key, run_fanout  # noqa: E402
 from arrival.jobs.shards import ShardError  # noqa: E402
-from conftest import SCANS  # noqa: E402
 
 CFG = FanoutConfig("r1", 2, "hero_kitchen", "counter_to_sink,open_drawer", 4, 0, 32, 3, str(SCANS))
 quiet = lambda *_: None  # noqa: E731
@@ -93,29 +94,48 @@ def test_run_id_cannot_escape_scratch_or_storage(run_id):
         FanoutConfig(run_id, 2)
 
 
-@pytest.mark.parametrize("patch,name", [
-    ({"shards": 0}, "shards"), ({"shards": 1.5}, "shards"),
-    ({"episodes": 0}, "episodes"), ({"people": -1}, "people"),
-    ({"res": True}, "res"), ({"res": 50}, "res"), ({"res": 0}, "res"),
-    ({"seed": 1.2}, "seed"), ({"seed": -1}, "seed"),
-    ({"room": " "}, "room"), ({"families": "open_drawer,"}, "families"),
-    ({"scans": " "}, "scans"),
-])
+@pytest.mark.parametrize(
+    "patch,name",
+    [
+        ({"shards": 0}, "shards"),
+        ({"shards": 1.5}, "shards"),
+        ({"episodes": 0}, "episodes"),
+        ({"people": -1}, "people"),
+        ({"res": True}, "res"),
+        ({"res": 50}, "res"),
+        ({"res": 0}, "res"),
+        ({"seed": 1.2}, "seed"),
+        ({"seed": -1}, "seed"),
+        ({"room": " "}, "room"),
+        ({"families": "open_drawer,"}, "families"),
+        ({"scans": " "}, "scans"),
+    ],
+)
 def test_invalid_sim_settings_fail_before_submission(patch, name):
     with pytest.raises(ShardError, match=name):
         FanoutConfig(**{"run_id": "run", "shards": 2, **patch})
 
-@pytest.mark.parametrize("controls", [
-    {"parallel": 0}, {"parallel": -1}, {"parallel": True},
-    {"max_attempts": 0}, {"max_attempts": -1},
-    {"poll_seconds": -0.1}, {"poll_seconds": float("nan")}, {"poll_seconds": float("inf")},
-])
+
+@pytest.mark.parametrize(
+    "controls",
+    [
+        {"parallel": 0},
+        {"parallel": -1},
+        {"parallel": True},
+        {"max_attempts": 0},
+        {"max_attempts": -1},
+        {"poll_seconds": -0.1},
+        {"poll_seconds": float("nan")},
+        {"poll_seconds": float("inf")},
+    ],
+)
 def test_bad_fanout_controls_fail_before_submitting(controls, tmp_path):
     be = LocalBackend(tmp_path / "store", tmp_path / "scratch")
     with pytest.raises(ShardError):
         run_fanout(be, CFG, tmp_path / "out", **controls, log=quiet)
     assert be.submissions == []
     assert not be.exists("r1/run.json")
+
 
 def test_unknown_backend_state_does_not_count_as_a_failed_attempt(tmp_path):
     class UnknownBackend(LocalBackend):
@@ -127,8 +147,8 @@ def test_unknown_backend_state_does_not_count_as_a_failed_attempt(tmp_path):
         run_fanout(be, CFG, tmp_path / "out", poll_seconds=0, log=quiet)
     assert be.submissions == [(0, 1), (1, 1)]
 
-@pytest.mark.parametrize("marker", [b"{broken", b'{"shard": 1, "attempts": 1}',
-                                    b'{"shard": 0, "attempts": 0}'])
+
+@pytest.mark.parametrize("marker", [b"{broken", b'{"shard": 1, "attempts": 1}', b'{"shard": 0, "attempts": 0}'])
 def test_invalid_done_marker_cannot_skip_a_shard(tmp_path, marker):
     be = LocalBackend(tmp_path / "store", tmp_path / "scratch", command=lambda c, i, o: CMD_TRUE)
     be.put_object(marker_key(CFG, 0), marker)
@@ -143,6 +163,7 @@ def test_valid_marker_without_shard_dataset_is_not_skipped(tmp_path):
     with pytest.raises(ShardError, match="missing .*info.json"):
         run_fanout(be, CFG, tmp_path / "out", log=quiet)
     assert be.submissions == []
+
 
 def test_local_backend_refuses_another_shards_output(tmp_path):
     be = LocalBackend(tmp_path / "store", tmp_path / "scratch", command=lambda c, i, o: CMD_TRUE)
@@ -166,8 +187,15 @@ def test_sim_options_reach_every_shard_command():
     assert not {"--dart", "--base", "--exocentric"} & set(plain)  # defaults leave the command unchanged
 
 
-@pytest.mark.parametrize("patch,name", [({"dart": -0.1}, "dart"), ({"dart": float("nan")}, "dart"),
-                                        ({"base": "legs"}, "base"), ({"exocentric": 1}, "exocentric")])
+@pytest.mark.parametrize(
+    "patch,name",
+    [
+        ({"dart": -0.1}, "dart"),
+        ({"dart": float("nan")}, "dart"),
+        ({"base": "legs"}, "base"),
+        ({"exocentric": 1}, "exocentric"),
+    ],
+)
 def test_bad_sim_options_are_refused(patch, name):
     with pytest.raises(ShardError, match=name):
         FanoutConfig(**{"run_id": "run", "shards": 2, **patch})

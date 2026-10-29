@@ -37,8 +37,13 @@ def _room_page(out: Path, path: str = "/rooms/hero_kitchen") -> str:
         t.join(timeout=5)
 
 
-SIM = dict(arrival_physically_valid=True, arrival_generator="mujoco_scripted_ik", total_episodes=2,
-           arrival_successes=2, arrival_attempts=2)
+SIM = dict(
+    arrival_physically_valid=True,
+    arrival_generator="mujoco_scripted_ik",
+    total_episodes=2,
+    arrival_successes=2,
+    arrival_attempts=2,
+)
 DEMO = dict(arrival_physically_valid=False, arrival_generator="scripted_retarget", total_episodes=4)
 
 

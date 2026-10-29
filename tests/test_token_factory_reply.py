@@ -14,21 +14,26 @@ def reply(monkeypatch):
     monkeypatch.setenv("NEMOTRON_LIGHTNING_MODEL", "nvidia/lightning")
 
     def answer(body):
-        monkeypatch.setattr(token_factory.urllib.request, "urlopen",
-                            lambda req, timeout: io.BytesIO(json.dumps(body).encode()))
+        monkeypatch.setattr(
+            token_factory.urllib.request, "urlopen", lambda req, timeout: io.BytesIO(json.dumps(body).encode())
+        )
+
     return answer
 
 
 def test_a_reply_with_text_returns_it(reply):
-    reply({"choices": [{"message": {"content": "[\"Move the mug\"]"}, "finish_reason": "stop"}]})
-    assert token_factory.complete([{"role": "user", "content": "hi"}], role="lightning") == "[\"Move the mug\"]"
+    reply({"choices": [{"message": {"content": '["Move the mug"]'}, "finish_reason": "stop"}]})
+    assert token_factory.complete([{"role": "user", "content": "hi"}], role="lightning") == '["Move the mug"]'
 
 
-@pytest.mark.parametrize("body", [
-    {"choices": []},
-    {"choices": [{"message": {"role": "assistant", "content": None}, "finish_reason": "length"}]},
-    {"error": {"message": "upstream overloaded"}},
-])
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"choices": []},
+        {"choices": [{"message": {"role": "assistant", "content": None}, "finish_reason": "length"}]},
+        {"error": {"message": "upstream overloaded"}},
+    ],
+)
 def test_a_reply_with_no_text_says_so(reply, body):
     reply(body)
     with pytest.raises(ValueError, match="no message text"):

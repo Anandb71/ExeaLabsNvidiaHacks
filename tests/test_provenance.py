@@ -6,13 +6,12 @@ import json
 import subprocess
 
 import pytest
+from conftest import REPO, SCANS
 
-from arrival.export import provenance
+from arrival import provenance
 from arrival.scan import bundle as scan_bundle
 from arrival.scan import roomplan
 from arrival.twin.compile import compile_twin, place_default_objects, write_twin
-
-from conftest import REPO, SCANS
 
 HERO = SCANS / "hero_kitchen"
 
@@ -27,7 +26,9 @@ def test_twin_records_the_input_file_hash_and_a_bundle_hash():
     assert p["schema_version"] == 1
     assert p["input"]["file_sha256"] == _sha(HERO / "scan.json")
     assert len(p["input"]["bundle_sha256"]) == 64
-    assert p["generators"]["geometry"] == "authored_sample" and p["generators"]["twin_compiler"] == "arrival.twin.compile"
+    assert (
+        p["generators"]["geometry"] == "authored_sample" and p["generators"]["twin_compiler"] == "arrival.twin.compile"
+    )
 
 
 def test_changing_one_byte_of_the_scan_changes_both_hashes(tmp_path):
@@ -56,8 +57,9 @@ def test_bundle_hash_ignores_the_input_hash_field():
 
 def test_git_sha_matches_the_checkout():
     try:
-        head = subprocess.run(["git", "-C", str(REPO), "rev-parse", "HEAD"], capture_output=True, text=True,
-                              check=True).stdout.strip()
+        head = subprocess.run(
+            ["git", "-C", str(REPO), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+        ).stdout.strip()
     except (OSError, subprocess.CalledProcessError):
         pytest.skip("no git checkout")
     state = provenance.git_state()
@@ -78,8 +80,11 @@ def test_default_objects_are_labelled_synthetic_with_their_seed():
     placed = place_default_objects(twin, seed=7)
     assert placed and {o["provenance"] for o in placed} == {"default_synthetic"}
     assert twin["provenance"]["seeds"] == {"default_objects": 7}
-    assert twin["provenance"]["generators"]["objects"] == {"detected": 0, "authored": 0,
-                                                            "default_synthetic": len(placed)}
+    assert twin["provenance"]["generators"]["objects"] == {
+        "detected": 0,
+        "authored": 0,
+        "default_synthetic": len(placed),
+    }
 
 
 def test_authored_objects_stay_authored_and_nothing_is_called_detected():

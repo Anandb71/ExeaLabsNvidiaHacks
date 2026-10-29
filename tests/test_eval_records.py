@@ -9,11 +9,21 @@ from arrival.eval import harness
 from arrival.eval.manifest import digest, load_manifest, make_manifest
 
 
-@pytest.mark.parametrize("options", [
-    {"episodes": True}, {"episodes": 0}, {"people": False}, {"res": 1.5},
-    {"seed": "7"}, {"holdout": 1}, {"families": [""]},
-    {"families": ["open_drawer", "open_drawer"]}, {"base": "sideways"}, {"arm": "unknown"},
-])
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"episodes": True},
+        {"episodes": 0},
+        {"people": False},
+        {"res": 1.5},
+        {"seed": "7"},
+        {"holdout": 1},
+        {"families": [""]},
+        {"families": ["open_drawer", "open_drawer"]},
+        {"base": "sideways"},
+        {"arm": "unknown"},
+    ],
+)
 def test_manifest_creation_rejects_bad_controls_before_task_generation(options):
     args = {"twin": {}, "families": ["open_drawer"], "episodes": 1}
     args.update(options)
@@ -37,11 +47,19 @@ def rollouts(monkeypatch):
 
     def episode(env, policy, task):
         contact = task["task_id"].endswith("0001")
-        return {"states": np.zeros((5, 8)), "success": True, "ik_error": None,
-                "detail": {"in_target": True},
-                "safety": {"human_contact": contact, "min_human_distance_m": -0.01 if contact else 0.5,
-                           "arm_contact_steps": 2 if contact else 0, "arm_contact_max_depth_m": 0.002 if contact else 0,
-                           "arm_contact_worst": ["link1", "counter"] if contact else None}}
+        return {
+            "states": np.zeros((5, 8)),
+            "success": True,
+            "ik_error": None,
+            "detail": {"in_target": True},
+            "safety": {
+                "human_contact": contact,
+                "min_human_distance_m": -0.01 if contact else 0.5,
+                "arm_contact_steps": 2 if contact else 0,
+                "arm_contact_max_depth_m": 0.002 if contact else 0,
+                "arm_contact_worst": ["link1", "counter"] if contact else None,
+            },
+        }
 
     monkeypatch.setattr(harness, "SimEnv", Env)
     monkeypatch.setattr(harness, "run_episode", episode)
@@ -54,16 +72,26 @@ def records(report):
 
 
 def test_replay_preserves_trials_and_keeps_checkpoint_runs_separate(hero_twin, tmp_path, monkeypatch, rollouts):
-    first = harness.evaluate(hero_twin, ["open_drawer", "counter_to_sink"], 2, holdout=True, people=1,
-                             out_dir=tmp_path, policy_name="vla", checkpoint_id="base", log=lambda *_: None)
+    first = harness.evaluate(
+        hero_twin,
+        ["open_drawer", "counter_to_sink"],
+        2,
+        holdout=True,
+        people=1,
+        out_dir=tmp_path,
+        policy_name="vla",
+        checkpoint_id="base",
+        log=lambda *_: None,
+    )
     original = first["path"].read_bytes()
     before = copy.deepcopy(rollouts)
     frozen = load_manifest(first["manifest_path"])
     monkeypatch.setattr("arrival.sim.tasks.make_tasks", lambda *a, **k: pytest.fail("replay resampled tasks"))
     monkeypatch.setattr("arrival.sim.tasks.finish_task", lambda *a: pytest.fail("replay rewrote tasks"))
     rollouts.clear()
-    second = harness.evaluate(manifest=frozen, policy_name="vla", checkpoint_id="room-tuned",
-                              out_dir=tmp_path, log=lambda *_: None)
+    second = harness.evaluate(
+        manifest=frozen, policy_name="vla", checkpoint_id="room-tuned", out_dir=tmp_path, log=lambda *_: None
+    )
     assert rollouts == before
     assert first["manifest_id"] == second["manifest_id"]
     assert first["run_id"] != second["run_id"] and first["path"] != second["path"]
@@ -139,9 +167,16 @@ def test_first_server_failure_leaves_an_incomplete_run(hero_twin, tmp_path, monk
 
     monkeypatch.setattr(harness, "run_episode", fail)
     with pytest.raises(OSError, match="server stopped"):
-        harness.evaluate(hero_twin, ["open_drawer"], 2, policy_name="vla", checkpoint_id="base",
-                         out_dir=tmp_path, log=lambda *_: None)
-    run, = (tmp_path / "eval").iterdir()
+        harness.evaluate(
+            hero_twin,
+            ["open_drawer"],
+            2,
+            policy_name="vla",
+            checkpoint_id="base",
+            out_dir=tmp_path,
+            log=lambda *_: None,
+        )
+    (run,) = (tmp_path / "eval").iterdir()
     assert (run / "manifest.json").is_file() and not (run / "report.json").exists()
     rows = [json.loads(line) for line in (run / "episodes.jsonl").read_text().splitlines()]
     assert len(rows) == 1 and rows[0]["error"] == "OSError: server stopped"
@@ -191,8 +226,7 @@ def test_manifest_identity_cannot_be_rehashed_to_hide_invalid_values(hero_twin, 
         validate_manifest(frozen)
 
 
-@pytest.mark.parametrize("field,value", [("people", True), ("holdout", 0), ("seed", "7"),
-                                         ("instruction", "  ")])
+@pytest.mark.parametrize("field,value", [("people", True), ("holdout", 0), ("seed", "7"), ("instruction", "  ")])
 def test_rehashed_manifest_still_rejects_invalid_trial_types(hero_twin, tmp_path, rollouts, field, value):
     frozen = make_manifest(hero_twin, ["open_drawer"], 1, people=1, log=lambda *_: None)
     frozen["tasks"][0][field] = value
@@ -226,8 +260,7 @@ def test_cost_reader_includes_legacy_and_complete_runs_only(hero_twin, tmp_path,
     from arrival.eval.cost import collect_rows, markdown
 
     report = harness.evaluate(hero_twin, ["open_drawer"], 1, out_dir=tmp_path, log=lambda *_: None)
-    legacy = {k: v for k, v in json.loads(report["path"].read_text()).items()
-              if k not in ("run_id", "checkpoint_id")}
+    legacy = {k: v for k, v in json.loads(report["path"].read_text()).items() if k not in ("run_id", "checkpoint_id")}
     (tmp_path / "eval" / "old_scripted.json").write_text(json.dumps(legacy))
     rows = collect_rows(tmp_path)
     assert len(rows) == 4

@@ -8,9 +8,21 @@ import numpy as np
 from arrival.sim.robot import HOME
 
 
-def solve(model, data, target_pos, R_t, q0, qadr: list[int], dofadr: list[int],
-          iters: int = 200, damping: float = 0.05, tol: float = 2e-3,
-          rest=HOME, k_rest: float = 0.2, fixed: tuple[list[int], np.ndarray] | None = None) -> tuple[np.ndarray, float]:
+def solve(
+    model,
+    data,
+    target_pos,
+    R_t,
+    q0,
+    qadr: list[int],
+    dofadr: list[int],
+    iters: int = 200,
+    damping: float = 0.05,
+    tol: float = 2e-3,
+    rest=HOME,
+    k_rest: float = 0.2,
+    fixed: tuple[list[int], np.ndarray] | None = None,
+) -> tuple[np.ndarray, float]:
     """Returns (q, position error). Works on a scratch MjData; R_t is the target eef rotation matrix.
 
     The redundant DoF are pulled toward `rest` (gain k_rest) through the Jacobian nullspace, so the elbow/wrist
@@ -37,7 +49,7 @@ def solve(model, data, target_pos, R_t, q0, qadr: list[int], dofadr: list[int],
         J = np.vstack([jp[:, dofadr], jr[:, dofadr]])
         e = np.concatenate([ep, 0.5 * er])
         q = d.qpos[qadr].copy()
-        dq = J.T @ np.linalg.solve(J @ J.T + damping ** 2 * np.eye(6), e)
+        dq = J.T @ np.linalg.solve(J @ J.T + damping**2 * np.eye(6), e)
         dq += k_rest * (np.eye(len(qadr)) - np.linalg.pinv(J) @ J) @ (np.asarray(rest) - q)
         q_new = np.clip(q + dq, lo, hi)
         if err < tol and np.linalg.norm(er) < 0.02 and np.abs(q_new - q).max() < 1e-4:

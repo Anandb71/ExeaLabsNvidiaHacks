@@ -1,9 +1,9 @@
 """scripts/check_site.py against a --base with no server: one line and exit 1, not one refused connection per path."""
+
 import importlib.util
 import urllib.error
 
 import pytest
-
 from conftest import REPO
 
 _spec = importlib.util.spec_from_file_location("check_site", REPO / "scripts" / "check_site.py")

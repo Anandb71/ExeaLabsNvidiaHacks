@@ -60,8 +60,9 @@ def validate_reply(data) -> dict:
     return out
 
 
-def search(query: str, search_depth: str = "basic", include_answer: bool = True,
-           max_results: int = 5, timeout: float = 30.0) -> dict:
+def search(
+    query: str, search_depth: str = "basic", include_answer: bool = True, max_results: int = 5, timeout: float = 30.0
+) -> dict:
     """Execute a web search using the Tavily Search API.
 
     Returns the parsed JSON dictionary from Tavily containing 'query', 'answer',

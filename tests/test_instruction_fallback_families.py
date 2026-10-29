@@ -36,7 +36,13 @@ def test_added_fallbacks_are_the_sim_wordings():
 
 
 def test_eval_split_with_generated_wordings_runs_offline(hero_twin, offline):
-    tasks = make_tasks(hero_twin, ["close_drawer", "open_fridge"], 2, split="eval", use_generated_instructions=True,
-                       log=lambda *_: None)
+    tasks = make_tasks(
+        hero_twin,
+        ["close_drawer", "open_fridge"],
+        2,
+        split="eval",
+        use_generated_instructions=True,
+        log=lambda *_: None,
+    )
     assert [t["instruction"] for t in tasks] == ["Push the drawer on the counter b back in.", "Get the fridge open."]
     assert {t["instruction_source"] for t in tasks} == {"template_fallback"}

@@ -2,7 +2,7 @@
 PY ?= python
 OUT ?= out
 
-.PHONY: install test sim validate demo serve lint docs-check package-smoke clean site check-site train eval-policy serve-policy
+.PHONY: install test sim validate demo serve lint format docs-check package-smoke clean site check-site train eval-policy serve-policy
 
 install:
 	$(PY) -m pip install -e ".[dev,sim,lint]"
@@ -25,6 +25,11 @@ demo:
 
 lint:
 	$(PY) -m ruff check .
+	$(PY) -m ruff format --check .
+
+format:
+	$(PY) -m ruff check --fix .
+	$(PY) -m ruff format .
 
 docs-check:
 	$(PY) scripts/check_docs.py

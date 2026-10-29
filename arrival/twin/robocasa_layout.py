@@ -23,13 +23,43 @@ from __future__ import annotations
 import math
 
 # RoboCasa's scene_builder.FIXTURES keys (robocasa 1.0.1), so an unknown type becomes an explicit box, not an error.
-ROBOCASA_TYPES = frozenset({
-    "hinge_cabinet", "single_cabinet", "open_cabinet", "panel_cabinet", "housing_cabinet", "drawer", "counter",
-    "stove", "stove_wide", "stovetop", "oven", "microwave", "hood", "sink", "fridge_french_door",
-    "fridge_side_by_side", "fridge_bottom_freezer", "dishwasher", "wall", "floor", "box", "accessory",
-    "paper_towel", "dish_rack", "stool", "coffee_machine", "toaster", "toaster_oven", "blender", "stand_mixer",
-    "electric_kettle", "wall_accessory", "window",
-})
+ROBOCASA_TYPES = frozenset(
+    {
+        "hinge_cabinet",
+        "single_cabinet",
+        "open_cabinet",
+        "panel_cabinet",
+        "housing_cabinet",
+        "drawer",
+        "counter",
+        "stove",
+        "stove_wide",
+        "stovetop",
+        "oven",
+        "microwave",
+        "hood",
+        "sink",
+        "fridge_french_door",
+        "fridge_side_by_side",
+        "fridge_bottom_freezer",
+        "dishwasher",
+        "wall",
+        "floor",
+        "box",
+        "accessory",
+        "paper_towel",
+        "dish_rack",
+        "stool",
+        "coffee_machine",
+        "toaster",
+        "toaster_oven",
+        "blender",
+        "stand_mixer",
+        "electric_kettle",
+        "wall_accessory",
+        "window",
+    }
+)
 FRONT_FLIP = math.pi  # twin yaw 0 faces +y; RoboCasa z_rot 0 faces -y
 SINK_DOOR_TH = 0.015  # Counter._place_interior_obj adds this to the overhang ("thickness of cabinet doors")
 TWIN_ONLY_KEYS = ("island",)  # twin flags no RoboCasa fixture constructor accepts
@@ -62,8 +92,13 @@ def wall_side(row: dict, center: tuple[float, float]) -> str | None:
 def _wall(row: dict, center: tuple[float, float]) -> dict:
     side = wall_side(row, center)
     if side is None:  # RoboCasa walls only face the four axes: keep an oblique wall as an explicit box
-        return {"name": row["name"], "type": "box", "size": _r(row["size"]), "pos": _r(row["pos"]),
-                "z_rot": row["z_rot"]}
+        return {
+            "name": row["name"],
+            "type": "box",
+            "size": _r(row["size"]),
+            "pos": _r(row["pos"]),
+            "z_rot": row["z_rot"],
+        }
     sx, sy, h = row["size"]
     along_x = side in ("back", "front")
     length, th = (sx, sy) if along_x else (sy, sx)
@@ -71,8 +106,14 @@ def _wall(row: dict, center: tuple[float, float]) -> dict:
     out = {"back": (0, 1), "front": (0, -1), "right": (1, 0), "left": (-1, 0)}[side]
     face = [x - out[0] * th / 2, y - out[1] * th / 2, z]  # RoboCasa pushes the slab outward by its half thickness
     # default_wall_th 0: RoboCasa would otherwise add 2 cm to each half length; the twin's wall is exact.
-    return {"name": row["name"], "type": "wall", "wall_side": side, "size": _r([length / 2, h / 2, th / 2]),
-            "pos": _r(face), "default_wall_th": 0.0}
+    return {
+        "name": row["name"],
+        "type": "wall",
+        "wall_side": side,
+        "size": _r([length / 2, h / 2, th / 2]),
+        "pos": _r(face),
+        "default_wall_th": 0.0,
+    }
 
 
 def _floor(row: dict) -> dict:
@@ -108,15 +149,29 @@ def robocasa_layout(layout: dict, origin_offsets: dict | None = None, overhang: 
         out_room["floor"] = [_floor(f) for f in floors]
     doc: dict = {"room": out_room}
 
-    rows = [dict(r) for k, g in layout.items() if k != "room"
-            for key, v in g.items() if not key.startswith("group_") for r in v]
+    rows = [
+        dict(r)
+        for k, g in layout.items()
+        if k != "room"
+        for key, v in g.items()
+        if not key.startswith("group_")
+        for r in v
+    ]
     by_name = {r["name"]: r for r in rows}
     hosts: dict[str, str] = {}  # sink -> counter that holds it
     for r in rows:
         if r["type"] == "sink":
-            host = next((c for c in rows if c["type"] == "counter" and _contains(c, r["pos"])
-                         and abs(_wrap(c.get("z_rot", 0.0) - r.get("z_rot", 0.0))) < 1e-3
-                         and c["name"] not in hosts.values()), None)
+            host = next(
+                (
+                    c
+                    for c in rows
+                    if c["type"] == "counter"
+                    and _contains(c, r["pos"])
+                    and abs(_wrap(c.get("z_rot", 0.0) - r.get("z_rot", 0.0))) < 1e-3
+                    and c["name"] not in hosts.values()
+                ),
+                None,
+            )
             if host is None:
                 notes.append(f"sink {r['name']}: no counter under it, placed on its own (no counter opening)")
             else:

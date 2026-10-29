@@ -4,12 +4,28 @@ from pathlib import Path
 import pytest
 
 from arrival import cli
+from arrival.twin.compile import roomplan_twin
 
 
 def _ns(tmp_path, **kw):
-    d = dict(room="nope_room", scans="scans", out=str(tmp_path), families="counter_to_sink", episodes=1, people=0,
-             policy="scripted", res=32, seed=0, save_preview=False, planner="rule", split="train",
-             instructions="template", tavily=False, holdout=False, query=None)
+    d = dict(
+        room="nope_room",
+        scans="scans",
+        out=str(tmp_path),
+        families="counter_to_sink",
+        episodes=1,
+        people=0,
+        policy="scripted",
+        res=32,
+        seed=0,
+        save_preview=False,
+        planner="rule",
+        split="train",
+        instructions="template",
+        tavily=False,
+        holdout=False,
+        query=None,
+    )
     d.update(kw)
     return argparse.Namespace(**d)
 
@@ -45,8 +61,10 @@ def test_sim_negative_people_or_seed_is_a_usage_error_and_keeps_the_old_dataset(
     old = tmp_path / "datasets" / "hero_kitchen_sim" / "meta" / "info.json"
     old.parent.mkdir(parents=True)
     old.write_text("{}")
-    assert cli.main(["sim", flag, "-1", "--episodes", "1", "--families", "open_drawer",
-                     "--out", str(tmp_path)]) == cli.EXIT_USAGE
+    assert (
+        cli.main(["sim", flag, "-1", "--episodes", "1", "--families", "open_drawer", "--out", str(tmp_path)])
+        == cli.EXIT_USAGE
+    )
     assert f"{flag} must be >= 0" in capsys.readouterr().err
     assert old.is_file()
 
@@ -60,8 +78,10 @@ def test_sim_tavily_without_the_vlm_planner_is_a_usage_error(tmp_path, capsys, m
         raise AssertionError("research ran")
 
     monkeypatch.setattr("arrival.tasks.tavily_research.TavilyResearchAgent", no_lookup)
-    assert cli.main(["sim", "--tavily", "--episodes", "1", "--families", "open_drawer",
-                     "--out", str(tmp_path)]) == cli.EXIT_USAGE
+    assert (
+        cli.main(["sim", "--tavily", "--episodes", "1", "--families", "open_drawer", "--out", str(tmp_path)])
+        == cli.EXIT_USAGE
+    )
     assert "--tavily needs --planner vlm" in capsys.readouterr().err
     assert not (tmp_path / "datasets").exists()
 
@@ -92,8 +112,10 @@ def test_sim_vla_not_configured_is_usage_error(tmp_path, capsys, monkeypatch):
 
 
 def test_fanout_reports_invalid_merged_dataset(tmp_path, capsys, monkeypatch):
-    monkeypatch.setattr("arrival.jobs.fanout.run_fanout",
-                        lambda rec, cfg, out: {"dataset": str(tmp_path / "ds"), "ran": [0], "skipped": []})
+    monkeypatch.setattr(
+        "arrival.jobs.fanout.run_fanout",
+        lambda rec, cfg, out: {"dataset": str(tmp_path / "ds"), "ran": [0], "skipped": []},
+    )
     monkeypatch.setattr("arrival.export.validate.validate", lambda d: ["meta/info.json: missing"])
     a = _ns(tmp_path, room="hero_kitchen", backend="local", run_id="r", shards=1)
     assert cli.cmd_fanout(a) == cli.EXIT_INVALID
@@ -117,7 +139,9 @@ def _room(tmp_path):
 
 def _twin(tmp_path, scans):
     pytest.importorskip("mujoco")
-    fams, twin = cli._sim_args(_ns(tmp_path / "out", base="fixed", arm="procedural", room="hero_kitchen", scans=str(scans)))
+    fams, twin = cli._sim_args(
+        _ns(tmp_path / "out", base="fixed", arm="procedural", room="hero_kitchen", scans=str(scans))
+    )
     return twin
 
 
@@ -143,9 +167,11 @@ def test_a_room_with_only_a_roomplan_export_is_built_like_demo_from_roomplan(tmp
     scans = tmp_path / "scans"
     (scans / "kitchen_real_01").mkdir(parents=True)
     rp = scans / "kitchen_real_01" / "roomplan.json"
-    shutil.copy(Path(cli.__file__).resolve().parents[1] / "tests" / "fixtures" / "roomplan" / "kitchen_real_01.json", rp)
+    shutil.copy(
+        Path(cli.__file__).resolve().parents[1] / "tests" / "fixtures" / "roomplan" / "kitchen_real_01.json", rp
+    )
     twin = cli._load_twin("kitchen_real_01", tmp_path / "out", scans)
-    assert twin == cli.roomplan_twin(rp, "kitchen_real_01")  # what demo --from-roomplan writes (seed 0)
+    assert twin == roomplan_twin(rp, "kitchen_real_01")  # what demo --from-roomplan writes (seed 0)
     assert twin["objects"] and twin["provenance"]["seeds"]["default_objects"] == 0
     cached = tmp_path / "out" / "twins" / "kitchen_real_01" / "twin.json"
     cached.parent.mkdir(parents=True)
@@ -167,6 +193,7 @@ def test_sim_exits_1_when_every_task_errors(tmp_path, capsys, monkeypatch):
     assert cli.cmd_sim(_ns(tmp_path, room="hero_kitchen")) == cli.EXIT_INVALID
     assert "every task errored" in capsys.readouterr().err
 
+
 def test_cost_cli_runs_and_reports(tmp_path, capsys):
     parser = cli.build_parser()
     args = parser.parse_args(["cost", "--out", str(tmp_path)])
@@ -176,13 +203,17 @@ def test_cost_cli_runs_and_reports(tmp_path, capsys):
     assert "| source | room | family |" in out
     assert "| dollars | usd | measured | note |" in out
 
+
 @pytest.mark.parametrize("cmd", ["cmd_sim", "cmd_eval"])
-@pytest.mark.parametrize("kw,expected_err", [
-    ({"people": -1}, "--people must be >= 0"),
-    ({"seed": -1}, "--seed must be >= 0"),
-    ({"res": 50}, "--res must be a positive multiple of 16"),
-    ({"res": 0}, "--res must be a positive multiple of 16"),
-])
+@pytest.mark.parametrize(
+    "kw,expected_err",
+    [
+        ({"people": -1}, "--people must be >= 0"),
+        ({"seed": -1}, "--seed must be >= 0"),
+        ({"res": 50}, "--res must be a positive multiple of 16"),
+        ({"res": 0}, "--res must be a positive multiple of 16"),
+    ],
+)
 def test_sim_eval_numerical_bounds(tmp_path, capsys, cmd, kw, expected_err):
     pytest.importorskip("mujoco")
     ns = _ns(tmp_path, **kw)
@@ -237,9 +268,11 @@ def test_fanout_unknown_family_is_usage_error_before_any_shard(tmp_path, capsys,
 def test_fanout_accepts_all_families(tmp_path, monkeypatch):
     pytest.importorskip("mujoco")
     seen = []
+
     def fake_run(rec, cfg, out):
         seen.append(cfg.families)
         return {"dataset": tmp_path, "ran": [0], "skipped": []}
+
     monkeypatch.setattr("arrival.jobs.fanout.run_fanout", fake_run)
     monkeypatch.setattr("arrival.export.validate.validate", lambda d: [])
     ns = _ns(tmp_path, room="hero_kitchen", backend="local", run_id="r", shards=1, families="all")
@@ -265,26 +298,32 @@ def test_retarget_missing_room_is_usage_error(tmp_path, capsys):
     assert "no scan for room 'no_such_room'" in err
 
 
-@pytest.mark.parametrize("args,expected_msg", [
-    (["--attempts", "0"], "--attempts must be >= 1"),
-    (["--attempts", "-2"], "--attempts must be >= 1"),
-    (["--seed", "-1"], "--seed must be >= 0"),
-    (["--res", "0"], "--res must be a positive multiple of 16"),
-    (["--res", "50"], "--res must be a positive multiple of 16"),
-])
+@pytest.mark.parametrize(
+    "args,expected_msg",
+    [
+        (["--attempts", "0"], "--attempts must be >= 1"),
+        (["--attempts", "-2"], "--attempts must be >= 1"),
+        (["--seed", "-1"], "--seed must be >= 0"),
+        (["--res", "0"], "--res must be a positive multiple of 16"),
+        (["--res", "50"], "--res must be a positive multiple of 16"),
+    ],
+)
 def test_retarget_numerical_bounds(tmp_path, capsys, args, expected_msg):
     pytest.importorskip("mujoco")
     assert cli.main(["retarget", *args, "--out", str(tmp_path)]) == cli.EXIT_USAGE
     assert expected_msg in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("args,expected_msg", [
-    (["--method", "se3", "--family", "open_drawer"], "--method se3 currently supports 'counter_to_sink' only"),
-    (["--method", "se3", "--baseline"], "--baseline is only supported with --method seed_replay"),
-    (["--method", "seed_replay", "--source", "dummy.json"], "--source is only supported with --method se3"),
-    (["--method", "seed_replay", "--teleop", "p3"], "--teleop is only supported with --method se3"),
-    (["--method", "seed_replay", "--family", "bogus"], "unknown family 'bogus'"),
-])
+@pytest.mark.parametrize(
+    "args,expected_msg",
+    [
+        (["--method", "se3", "--family", "open_drawer"], "--method se3 currently supports 'counter_to_sink' only"),
+        (["--method", "se3", "--baseline"], "--baseline is only supported with --method seed_replay"),
+        (["--method", "seed_replay", "--source", "dummy.json"], "--source is only supported with --method se3"),
+        (["--method", "seed_replay", "--teleop", "p3"], "--teleop is only supported with --method se3"),
+        (["--method", "seed_replay", "--family", "bogus"], "unknown family 'bogus'"),
+    ],
+)
 def test_retarget_method_mismatches(tmp_path, capsys, args, expected_msg):
     pytest.importorskip("mujoco")
     assert cli.main(["retarget", *args, "--out", str(tmp_path)]) == cli.EXIT_USAGE
@@ -316,8 +355,23 @@ def test_retarget_se3_dispatch(tmp_path, capsys, monkeypatch):
         return {"report_data": {"attempts": attempts, "successes": attempts, "rows": []}}
 
     monkeypatch.setattr("arrival.generate.se3_retarget.generate", fake_generate)
-    rc = cli.main(["retarget", "--room", "hero_kitchen", "--method", "se3",
-                  "--attempts", "3", "--seed", "5", "--res", "32", "--out", str(tmp_path)])
+    rc = cli.main(
+        [
+            "retarget",
+            "--room",
+            "hero_kitchen",
+            "--method",
+            "se3",
+            "--attempts",
+            "3",
+            "--seed",
+            "5",
+            "--res",
+            "32",
+            "--out",
+            str(tmp_path),
+        ]
+    )
     assert rc == cli.EXIT_OK
     assert called == [("hero_kitchen", 3, 5, 32)]
     out = capsys.readouterr().out
@@ -333,9 +387,26 @@ def test_retarget_seed_replay_dispatch(tmp_path, capsys, monkeypatch):
         return {"report_data": {"attempts": attempts, "successes": attempts, "rows": []}}
 
     monkeypatch.setattr("arrival.generate.retarget.retarget", fake_retarget)
-    rc = cli.main(["retarget", "--room", "hero_kitchen", "--method", "seed_replay",
-                  "--family", "counter_to_sink", "--attempts", "4", "--seed", "2",
-                  "--res", "64", "--baseline", "--out", str(tmp_path)])
+    rc = cli.main(
+        [
+            "retarget",
+            "--room",
+            "hero_kitchen",
+            "--method",
+            "seed_replay",
+            "--family",
+            "counter_to_sink",
+            "--attempts",
+            "4",
+            "--seed",
+            "2",
+            "--res",
+            "64",
+            "--baseline",
+            "--out",
+            str(tmp_path),
+        ]
+    )
     assert rc == cli.EXIT_OK
     assert called == [("hero_kitchen", 4, 2, 64, "counter_to_sink", True)]
     out = capsys.readouterr().out

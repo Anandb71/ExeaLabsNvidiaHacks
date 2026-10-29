@@ -12,14 +12,15 @@ import sys
 from pathlib import Path
 
 from arrival.jobs.limits import Limits
-from arrival.jobs.worker import _read_status, process
+from arrival.jobs.queue import read_status
+from arrival.jobs.worker import process
 
 
 def main(argv: list[str] | None = None) -> int:
     job_dir, out_dir, raw = (argv if argv is not None else sys.argv[1:])[:3]
     opts = json.loads(raw)
     limits = Limits(**opts.pop("limits", {}))
-    status = _read_status(Path(job_dir))
+    status = read_status(Path(job_dir))
     if status is None:
         print(f"[work] {job_dir}: no readable status.json", file=sys.stderr)
         return 3

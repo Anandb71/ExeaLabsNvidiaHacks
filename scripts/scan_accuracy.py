@@ -60,8 +60,10 @@ def main(argv: list[str] | None = None) -> int:
             if r["error_m"] is None:
                 print(f"  {key:<20} tape {r['measured_m']:.3f} m  twin n/a  FAIL")
             else:
-                print(f"  {key:<20} tape {r['measured_m']:.3f} m  twin {r['twin_m']:.3f} m  "
-                      f"error {r['error_m'] * 100:+.1f} cm  {'ok' if r['ok'] else 'FAIL'}")
+                print(
+                    f"  {key:<20} tape {r['measured_m']:.3f} m  twin {r['twin_m']:.3f} m  "
+                    f"error {r['error_m'] * 100:+.1f} cm  {'ok' if r['ok'] else 'FAIL'}"
+                )
         failed += not res["ok"]
     print(f"{measured} room(s) measured, {failed} failing")
     return 1 if failed else 0

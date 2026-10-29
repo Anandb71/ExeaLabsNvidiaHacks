@@ -8,10 +8,28 @@ from __future__ import annotations
 import math
 import random
 
-from arrival.catalog.objects import object_spec
+from arrival.catalog.categories import object_spec
 from arrival.scan.bundle import ScanBundleError
-from arrival.scan.roomplan import PORTALS
+from arrival.scan.roomplan import PORTALS, segment_distance
 from arrival.sim import people, robot
+from arrival.sim.geometry import (
+    DRAWER_W,
+    REVEAL,
+    counter_span,
+    door_hinge_x,
+    door_w,
+    drawer_x,
+    drawers_at_right,
+    fridge_door_frame,
+    fridge_mirror,
+    front_span,
+    has_door,
+    has_drawers,
+    host_of,
+    is_table,
+    sinks_in,
+    upper_doors,
+)
 from arrival.twin.compile import COUNTER_HEIGHT, is_counter_host, to_local
 
 LIGHT = {"dim": 0.35, "neutral": 0.7, "bright": 1.0}
@@ -22,20 +40,27 @@ TOP_T = 0.04
 MIN_HALF = 0.0005  # smallest box half-extent written: MuJoCo refuses a size of 0 or less
 CARCASS_H = 0.70  # cabinet body below the counter top (sink basin sits between this and the top)
 DRAWER = 'contype="2" conaffinity="2"'  # moving parts collide with the robot, not with their carcass
-APPLIANCES = ("fridge", "stove", "dishwasher")  # floor-standing: counters are trimmed where they run into one
 VIS = 'contype="0" conaffinity="0" group="2"'
 FRONT, GAP = "0.70 0.55 0.40 1", "0.10 0.09 0.08 1"
 STEEL, DARK, SPLASH = "0.75 0.77 0.80 1", "0.08 0.08 0.09 1", "0.88 0.86 0.81 1"
-TOP, FURNITURE = "0.82 0.82 0.8 1", "0.46 0.44 0.42 1"  # counter top; the solid box a scanned fixture without a model gets
-REVEAL, INSET, FRONT_T, KICK = 0.003, 0.015, 0.018, 0.10
-UPPER_Z0, UPPER_H, UPPER_D, UPPER_DOOR_MAX = 1.56, 0.60, 0.32, 0.60  # wall cabinets over a counter run; the wrist
+TOP, FURNITURE = (
+    "0.82 0.82 0.8 1",
+    "0.46 0.44 0.42 1",
+)  # counter top; the solid box a scanned fixture without a model gets
+INSET, FRONT_T, KICK = 0.015, 0.018, 0.10
+UPPER_Z0, UPPER_H, UPPER_D = 1.56, 0.60, 0.32  # wall cabinets over a counter run; the wrist
 # reaches 1.50 m over the back of the counter when it drops into the sink, so the cabinets start above that
 DOOR_FLAT = 1.5  # bottom-hinged doors (oven, dishwasher) stop just short of horizontal
 TOP = "0.82 0.82 0.8 1"
 WALL_MIN_T = 0.05  # a wall is drawn at least this thick
 # doors, windows and openings (portals): white trim, a wood leaf, sky-tinted glass, a dark recess with shaded returns
-TRIM, LEAF, GLASS, RECESS, RETURN = ("0.96 0.95 0.92 1", "0.58 0.43 0.30 1", "0.62 0.74 0.84 1", "0.16 0.15 0.14 1",
-                                     "0.80 0.78 0.73 1")
+TRIM, LEAF, GLASS, RECESS, RETURN = (
+    "0.96 0.95 0.92 1",
+    "0.58 0.43 0.30 1",
+    "0.62 0.74 0.84 1",
+    "0.16 0.15 0.14 1",
+    "0.80 0.78 0.73 1",
+)
 # attached by colour in build_mjcf
 MATERIALS = {FRONT: "wood", TOP: "stone", SPLASH: "panel", WALL: "paint", LEAF: "wood"}
 RACK_Z, RACK_OUT = 0.52, 0.45  # dishwasher upper rack: tray height and how far it slides out over the open door
@@ -50,8 +75,10 @@ KNOB_R, KNOB_Z, KNOB_IN = 0.025, 1.0, 0.07  # door knob: radius, height above th
 def _box(name, pos, size, rgba, extra=""):
     label = f'name="{name}" ' if name else ""
     half = [max(s / 2, MIN_HALF) for s in size]  # a counter squeezed by neighbours can leave a zero-width panel
-    return (f'<geom {label}type="box" pos="{pos[0]:.4f} {pos[1]:.4f} {pos[2]:.4f}" '
-            f'size="{half[0]:.4f} {half[1]:.4f} {half[2]:.4f}" rgba="{rgba}" {extra}/>')
+    return (
+        f'<geom {label}type="box" pos="{pos[0]:.4f} {pos[1]:.4f} {pos[2]:.4f}" '
+        f'size="{half[0]:.4f} {half[1]:.4f} {half[2]:.4f}" rgba="{rgba}" {extra}/>'
+    )
 
 
 def _vbox(pos, size, rgba):
@@ -60,8 +87,13 @@ def _vbox(pos, size, rgba):
 
 def _rbox(name, x0, x1, y0, y1, z0, z1, rgba, extra="", o=(0.0, 0.0, 0.0)):
     """Box from coordinate ranges, expressed relative to origin o."""
-    return _box(name, ((x0 + x1) / 2 - o[0], (y0 + y1) / 2 - o[1], (z0 + z1) / 2 - o[2]),
-                (x1 - x0, y1 - y0, z1 - z0), rgba, extra)
+    return _box(
+        name,
+        ((x0 + x1) / 2 - o[0], (y0 + y1) / 2 - o[1], (z0 + z1) / 2 - o[2]),
+        (x1 - x0, y1 - y0, z1 - z0),
+        rgba,
+        extra,
+    )
 
 
 def _vr(x0, x1, y0, y1, z0, z1, rgba, o=(0.0, 0.0, 0.0)):
@@ -72,163 +104,6 @@ def _vr(x0, x1, y0, y1, z0, z1, rgba, o=(0.0, 0.0, 0.0)):
 def _vcyl(rgba, r, a, b, kind="cylinder"):
     f = " ".join(f"{v:.4f}" for v in (*a, *b))
     return f'<geom type="{kind}" fromto="{f}" size="{r}" rgba="{rgba}" {VIS}/>'
-
-
-def _sinks_in(counter: dict, sinks: list[dict]) -> list[dict]:
-    sx, sy, _ = counter["size"]
-    inside = []
-    for sink in sinks:
-        x, y = to_local(sink["position"], counter)
-        if abs(x) < sx / 2 and abs(y) < sy / 2:
-            inside.append(sink)
-    return inside
-
-
-def _host_of(s: dict, fixtures: list[dict]) -> dict | None:
-    """The counter or counter-height cabinet a sink is set into, if any."""
-    return next((f for f in fixtures if is_counter_host(f) and _sinks_in(f, [s])), None)
-
-
-def _footprint_box(f: dict, c: dict) -> tuple[float, float, float, float]:
-    """(x0, x1, y0, y1): the bounding box of fixture f's footprint in counter c's local frame."""
-    hx, hy = f["size"][0] / 2, f["size"][1] / 2
-    yaw = f.get("yaw", 0.0)
-    co, si = math.cos(yaw), math.sin(yaw)
-    pts = [to_local((f["position"][0] + co * dx - si * dy, f["position"][1] + si * dx + co * dy), c)
-           for dx in (-hx, hx) for dy in (-hy, hy)]
-    return min(p[0] for p in pts), max(p[0] for p in pts), min(p[1] for p in pts), max(p[1] for p in pts)
-
-
-def _span(c: dict, fixtures: list[dict]) -> tuple[float, float]:
-    """Local x-extent of a counter, trimmed at an end that runs into a fridge/stove footprint.
-    Appliances wholly inside the span are left alone (the twin data should not place them there; TWN-6)."""
-    sx, sy = c["size"][0], c["size"][1]
-    x0, x1 = -sx / 2, sx / 2
-    for f in fixtures:
-        if not f["type"].startswith(APPLIANCES):
-            continue
-        ax0, ax1, ay0, ay1 = _footprint_box(f, c)
-        if ay1 <= -sy / 2 or ay0 >= sy / 2:
-            continue
-        if ax0 <= x0 < ax1:
-            x0 = ax1
-        elif ax0 < x1 <= ax1:
-            x1 = ax0
-    return x0, x1
-
-
-FRONT_COVER = 0.05  # m: a fixture standing within this of a cabinet's front face covers that part of it
-FRONT_END = 0.02  # m: a cover reaching this close to an end of the front covers it to that end
-MIN_DOOR_W = 0.30  # narrowest cabinet door drawn; a cabinet too narrow for one beside the drawers gets no drawers
-
-
-def front_span(c: dict, fixtures: list[dict]) -> tuple[float, float]:
-    """Local x-extent of a cabinet's front that no other fixture stands against. Where two runs meet in a corner,
-    the cabinet on the other wall stands against the end of this one's front, and that blind part can hold no door
-    or drawer: kitchen_real_01's corner cabinet drew its door there, and the neighbour stopped it at 0.8 deg."""
-    sx, sy = c["size"][0], c["size"][1]
-    x0, x1 = -sx / 2, sx / 2
-    for f in fixtures:
-        if f["id"] == c["id"]:
-            continue
-        ax0, ax1, ay0, ay1 = _footprint_box(f, c)
-        if ay1 <= sy / 2 + 0.01 or ay0 >= sy / 2 + FRONT_COVER:
-            continue  # flush with the front (the same run), behind it, or clear of it
-        lo, hi = max(ax0, x0), min(ax1, x1)
-        if hi - lo <= 0.01:
-            continue
-        # a scanned neighbour stops a hair short of the shared end (kitchen_real_01: 1e-4 m), so "at the end" is
-        # within FRONT_END of it; a cover in the middle of the front is left alone
-        if lo <= x0 + FRONT_END:
-            x0 = hi
-        elif hi >= x1 - FRONT_END:
-            x1 = lo
-    return x0, x1
-
-
-def drawers_at_right(c: dict, fixtures: list[dict]) -> bool:
-    """True when a blind corner takes the right end of the front, where the door's hinge would go. A door hinged
-    beside the neighbouring run turns its handle side into it: on kitchen_real_01's corner cabinet the hand met the
-    neighbour with the door at 59 deg. The drawer stack then takes that end and the door the open left end, still
-    hinged on its right edge, so it swings away from the corner."""
-    x0, x1 = front_span(c, fixtures)
-    sx = c["size"][0]
-    return x1 < sx / 2 - 1e-6 and x0 <= -sx / 2 + 1e-6
-
-
-def drawer_x(c: dict, fixtures: list[dict]) -> float:
-    """Local x of the drawer stack: left quarter, or the middle if a fridge/stove in the same run overlaps the
-    left quarter. Judged in the counter's frame, so a run on any wall gets the same layout. The stack stays on the
-    open front (front_span), against a blind corner at its right end (drawers_at_right)."""
-    x0, x1 = front_span(c, fixtures)
-    if drawers_at_right(c, fixtures):
-        return x1 - DRAWER_W / 2
-    x = -c["size"][0] / 4
-    for f in fixtures:
-        if not f["type"].startswith(APPLIANCES):
-            continue
-        rel = float(f.get("yaw", 0.0)) - float(c.get("yaw", 0.0))
-        co, si = abs(math.cos(rel)), abs(math.sin(rel))
-        lx, ly = to_local(f["position"], c)
-        if abs(ly) > (c["size"][1] + si * f["size"][0] + co * f["size"][1]) / 2:
-            continue  # across the room, not in this run
-        if abs(lx - x) < (co * f["size"][0] + si * f["size"][1]) / 2 + DRAWER_W / 2:
-            x = 0.0
-            break
-    return max(x, x0 + DRAWER_W / 2)
-
-
-DRAWER_W = 0.5
-
-
-def _door_beside_drawers(c: dict, fixtures: list[dict]) -> tuple[float, float]:
-    """(left, hinge) local x of the door beside the drawer stack: the right half of the open front, shrunk so it never
-    covers the stack, or with drawers_at_right the open front left of the stack."""
-    x0, x1 = front_span(c, fixtures)
-    dx = drawer_x(c, fixtures)
-    if drawers_at_right(c, fixtures):
-        return x0 + 0.02, dx - DRAWER_W / 2 - REVEAL + 0.001  # the panel ends at the stack's reveal
-    return max((x0 + x1) / 2 + 0.02, dx + DRAWER_W / 2 + 0.02), x1 - 0.02
-
-
-def has_drawers(c: dict, fixtures: list[dict]) -> bool:
-    """False when the open front cannot hold the drawer stack and a door of MIN_DOOR_W beside it (kitchen_real_01's
-    0.43 m cabinet gave the door a width of -0.07 m). Such a cabinet gets one door across its open front."""
-    x0, x1 = front_span(c, fixtures)
-    dx = drawer_x(c, fixtures)
-    left, hinge = _door_beside_drawers(c, fixtures)
-    return x0 - 1e-6 <= dx - DRAWER_W / 2 and dx + DRAWER_W / 2 <= x1 + 1e-6 and hinge - left >= MIN_DOOR_W - 1e-6
-
-
-def has_door(c: dict, fixtures: list[dict]) -> bool:
-    return door_w(c, fixtures) >= MIN_DOOR_W - 1e-6
-
-
-def front_stand(c: dict, family: str, fixtures: list[dict]) -> tuple[float, float]:
-    """Where the base stands for a drawer or door task: local x along the run, and distance out from the front."""
-    if family in ("open_drawer", "close_drawer"):
-        return drawer_x(c, fixtures), 0.72
-    # just left of the handle (away from the hinge), outside the door's swing, far enough out that the far end of
-    # the handle arc stays within reach of the tilted-down grasp
-    return door_hinge_x(c, fixtures) - door_w(c, fixtures) + 0.06 - 0.1, 0.65
-
-
-def door_hinge_x(c: dict, fixtures: list[dict]) -> float:
-    """Local x of the cabinet door's hinge, on the door's right edge: 2 cm in from the right end of the open front,
-    or beside the drawer stack when it holds that end (drawers_at_right)."""
-    if has_drawers(c, fixtures):
-        return _door_beside_drawers(c, fixtures)[1]
-    return front_span(c, fixtures)[1] - 0.02
-
-
-def door_w(c: dict, fixtures: list[dict]) -> float:
-    """Cabinet door width: right half of the open front, shrunk so it never covers the drawer stack (or left of the
-    stack, drawers_at_right), or the whole open front on a cabinet without drawers."""
-    if has_drawers(c, fixtures):
-        left, hinge = _door_beside_drawers(c, fixtures)
-        return hinge - left
-    x0, x1 = front_span(c, fixtures)
-    return (x1 - 0.02) - (x0 + 0.02)
 
 
 def _sink_visuals(hx, hw, hd, sy, h) -> list[str]:
@@ -252,23 +127,13 @@ def _sink_visuals(hx, hw, hd, sy, h) -> list[str]:
 
 def _faucet_lever_xml(sid: str, hx: float, y0: float, h: float) -> str:
     """Single-lever mixer handle on the faucet column: hinge `{sid}_faucet`, q > 0 lifts the lever (water on)."""
-    return (f'<body name="{sid}_faucet_lever" pos="{hx + 0.012:.4f} {y0:.4f} {h + 0.19:.4f}">'
-            f'<joint name="{sid}_faucet" type="hinge" axis="0 -1 0" range="0 1.2" damping="0.5" frictionloss="0.05"/>'
-            f'<inertial pos="0 0 0" mass="0.05" diaginertia="1e-5 1e-5 1e-5"/>'  # balanced on its cartridge: it stays
-            f'<geom name="{sid}_faucet_handle" type="capsule" size="0.006" fromto="0 0 0 0.05 0 0.01" rgba="{STEEL}" priority="1" friction="2.0 0.05 0.001" condim="6" '
-            f'{DRAWER}/><site name="{sid}_faucet_handle" pos="0.04 0 0.008" size="0.005"/></body>')
-
-
-def upper_doors(c: dict, fixtures: list[dict] = ()) -> list[tuple[float, float, bool]]:
-    """(x_left, x_right, hinge_on_left) per wall-cabinet door over a counter run. Tables, islands and low
-    counters get none."""
-    if c.get("default_config_name") == "dining" or c.get("island") or c["size"][2] < 0.8:
-        return []
-    x0, x1 = _span(c, list(fixtures))
-    x0, x1 = x0 + 0.03, x1 - 0.03  # a reveal at each end keeps the run inside the walls (wall boxes are 5 cm thick)
-    n = max(1, math.ceil((x1 - x0) / UPPER_DOOR_MAX))
-    w = (x1 - x0) / n
-    return [(x0 + k * w, x0 + (k + 1) * w, k % 2 == 0) for k in range(n)]
+    return (
+        f'<body name="{sid}_faucet_lever" pos="{hx + 0.012:.4f} {y0:.4f} {h + 0.19:.4f}">'
+        f'<joint name="{sid}_faucet" type="hinge" axis="0 -1 0" range="0 1.2" damping="0.5" frictionloss="0.05"/>'
+        f'<inertial pos="0 0 0" mass="0.05" diaginertia="1e-5 1e-5 1e-5"/>'  # balanced on its cartridge: it stays
+        f'<geom name="{sid}_faucet_handle" type="capsule" size="0.006" fromto="0 0 0 0.05 0 0.01" rgba="{STEEL}" priority="1" friction="2.0 0.05 0.001" condim="6" '
+        f'{DRAWER}/><site name="{sid}_faucet_handle" pos="0.04 0 0.008" size="0.005"/></body>'
+    )
 
 
 def _upper_cabinet_xml(cid: str, c: dict, fixtures: list[dict]) -> str:
@@ -279,8 +144,14 @@ def _upper_cabinet_xml(cid: str, c: dict, fixtures: list[dict]) -> str:
     yb, yf = -sy / 2 + 0.01, -sy / 2 + 0.01 + UPPER_D
     x0, x1 = doors[0][0], doors[-1][1]
     zc = UPPER_Z0 + UPPER_H / 2
-    g = [_box(f"{cid}_upper", ((x0 + x1) / 2, (yb + yf - 0.02) / 2, zc), (x1 - x0, yf - 0.02 - yb, UPPER_H),
-              "0.55 0.42 0.3 1")]
+    g = [
+        _box(
+            f"{cid}_upper",
+            ((x0 + x1) / 2, (yb + yf - 0.02) / 2, zc),
+            (x1 - x0, yf - 0.02 - yb, UPPER_H),
+            "0.55 0.42 0.3 1",
+        )
+    ]
     for k, (xa, xb, left) in enumerate(doors):
         dw = xb - xa - 0.04 - REVEAL
         hx = xa + 0.02 if left else xb - 0.02
@@ -293,18 +164,14 @@ def _upper_cabinet_xml(cid: str, c: dict, fixtures: list[dict]) -> str:
             f'frictionloss="0.2"/><inertial pos="{px:.4f} 0 0" mass="1.5" diaginertia="0.03 0.03 0.03"/>'
             + _box(f"{cid}_upper_door{k}_panel", (px, 0.0, 0), (dw, 0.02, UPPER_H - 0.02), FRONT, DRAWER)
             + f'<geom name="{cid}_upper_door{k}_handle" type="capsule" size="0.012" fromto="{hxh:.4f} 0.05 {za:.3f} '
-              f'{hxh:.4f} 0.05 {zb:.3f}" rgba="{STEEL}" {DRAWER}/>'
+            f'{hxh:.4f} 0.05 {zb:.3f}" rgba="{STEEL}" {DRAWER}/>'
             + "".join(_vcyl(STEEL, 0.005, (hxh, 0.009, z), (hxh, 0.05, z)) for z in (za + 0.01, zb - 0.01))
-            + f'<site name="{cid}_upper_door{k}_handle" pos="{hxh:.4f} 0.05 {(za + zb) / 2:.3f}" size="0.01"/></body>')
+            + f'<site name="{cid}_upper_door{k}_handle" pos="{hxh:.4f} 0.05 {(za + zb) / 2:.3f}" size="0.01"/></body>'
+        )
     return "".join(g)
 
 
 TABLE_LEG = 0.05  # square leg side (m)
-
-
-def is_table(f: dict) -> bool:
-    """A scanned table: compiled as a counter for RoboCasa (default_config_name "dining") but built as a table."""
-    return f.get("type") == "counter" and f.get("default_config_name") == "dining"
 
 
 def table_xml(f: dict) -> str:
@@ -314,8 +181,10 @@ def table_xml(f: dict) -> str:
     wood = "0.62 0.47 0.33 1"
     g = [_box(f"{fid}_top", (0, 0, h - TOP_T / 2), (sx, sy, TOP_T), wood)]
     lx, ly, lh = sx / 2 - 0.06 - TABLE_LEG / 2, sy / 2 - 0.06 - TABLE_LEG / 2, h - TOP_T
-    g += [_box(f"{fid}_leg{k}", (px, py, lh / 2), (TABLE_LEG, TABLE_LEG, lh), "0.35 0.27 0.2 1")
-          for k, (px, py) in enumerate(((-lx, -ly), (lx, -ly), (-lx, ly), (lx, ly)))]
+    g += [
+        _box(f"{fid}_leg{k}", (px, py, lh / 2), (TABLE_LEG, TABLE_LEG, lh), "0.35 0.27 0.2 1")
+        for k, (px, py) in enumerate(((-lx, -ly), (lx, -ly), (-lx, ly), (lx, ly)))
+    ]
     return f'<body name="{fid}" pos="{cx} {cy} 0" euler="0 0 {yaw}">' + "".join(g) + "</body>"
 
 
@@ -326,10 +195,10 @@ def counter_xml(c: dict, sinks: list[dict], fixtures: list[dict] = ()) -> str:
     fixtures = list(fixtures)
     (cx, cy, _), (sx, sy, h) = c["position"], c["size"]
     cid, yaw = c["id"], c.get("yaw", 0.0)
-    x0, x1 = _span(c, fixtures)
+    x0, x1 = counter_span(c, fixtures)
     xm, xw = (x0 + x1) / 2, x1 - x0
     g = [_box(f"{cid}_carcass", (xm, 0, CARCASS_H / 2), (xw, sy - 0.04, CARCASS_H), "0.55 0.42 0.3 1")]
-    holes = [(to_local(s["position"], c)[0], s["size"][0], s["size"][1], s) for s in _sinks_in(c, sinks)]
+    holes = [(to_local(s["position"], c)[0], s["size"][0], s["size"][1], s) for s in sinks_in(c, sinks)]
     zt = h - TOP_T / 2
     if not holes:
         g.append(_box(f"{cid}_top", (xm, 0, zt), (xw, sy, TOP_T), TOP))
@@ -360,12 +229,15 @@ def counter_xml(c: dict, sinks: list[dict], fixtures: list[dict] = ()) -> str:
     def bar_standoffs(x, za, zb, o=(0.0, 0.0, 0.0), face=yb):
         return "".join(
             _vcyl(STEEL, 0.005, (x - o[0], face - 0.001 - o[1], z - o[2]), (x - o[0], yb_bar - o[1], z - o[2]))
-            for z in (za, zb))
+            for z in (za, zb)
+        )
 
     def vbar(x, za, zb):
         """Fixed-front handle: steel capsule on two standoffs at za, zb."""
-        return (f'<geom type="capsule" fromto="{x:.4f} {yb_bar:.4f} {za - 0.01:.4f} {x:.4f} {yb_bar:.4f} '
-                f'{zb + 0.01:.4f}" size="0.012" rgba="{STEEL}" {VIS}/>' + bar_standoffs(x, za, zb))
+        return (
+            f'<geom type="capsule" fromto="{x:.4f} {yb_bar:.4f} {za - 0.01:.4f} {x:.4f} {yb_bar:.4f} '
+            f'{zb + 0.01:.4f}" size="0.012" rgba="{STEEL}" {VIS}/>' + bar_standoffs(x, za, zb)
+        )
 
     if drawers:
         g.append(_vr(da + r2, db - r2, ya, yb, KICK + REVEAL, KICK + 0.227, FRONT))
@@ -393,12 +265,13 @@ def counter_xml(c: dict, sinks: list[dict], fixtures: list[dict] = ()) -> str:
             + _rbox(f"{cid}_drawer{k}_front", da + r2, db - r2, ya, yb, z0, z1, "0.65 0.5 0.36 1", hid, o)
             + _box(f"{cid}_drawer{k}_tray", (0, -0.2, -0.07), (DRAWER_W - 0.04, 0.38, 0.02), "0.6 0.46 0.33 1", DRAWER)
             + f'<geom name="{cid}_drawer{k}_handle" type="capsule" size="0.012" fromto="0 0.07 -0.05 0 0.07 0.05" '
-              f'rgba="{STEEL}" {DRAWER}/>'
+            f'rgba="{STEEL}" {DRAWER}/>'
             + _box(None, (0, 0.035, 0.04), (0.02, 0.07, 0.02), "0.3 0.3 0.3 1", hid)
             + _box(None, (0, 0.035, -0.04), (0.02, 0.07, 0.02), "0.3 0.3 0.3 1", hid)
             + _vr(da + r2, db - r2, ya, yb, z0, z1, FRONT, o)
             + bar_standoffs(dx, dz - 0.04, dz + 0.04, o)
-            + f'<site name="{cid}_drawer{k}_handle" pos="0 0.07 0.0" size="0.01"/></body>')
+            + f'<site name="{cid}_drawer{k}_handle" pos="0 0.07 0.0" size="0.01"/></body>'
+        )
     if door:
         dw = door_w(c, fixtures)
         hinge = (door_hinge_x(c, fixtures), front + 0.01, 0.36)
@@ -409,10 +282,11 @@ def counter_xml(c: dict, sinks: list[dict], fixtures: list[dict] = ()) -> str:
             f'<inertial pos="{-dw / 2:.3f} 0 0" mass="2" diaginertia="0.05 0.05 0.05"/>'
             + _rbox(f"{cid}_door_panel", pl + r2, pr - r2, ya, yb, zlo, zf - REVEAL, "0.65 0.5 0.36 1", hid, hinge)
             + f'<geom name="{cid}_door_handle" type="capsule" size="0.012" fromto="{hx_:.3f} 0.05 0.1 '
-              f'{hx_:.3f} 0.05 0.25" rgba="{STEEL}" {DRAWER}/>'
+            f'{hx_:.3f} 0.05 0.25" rgba="{STEEL}" {DRAWER}/>'
             + _vr(pl + r2, pr - r2, ya, yb, zlo, zf - REVEAL, FRONT, hinge)
             + "".join(_vcyl(STEEL, 0.005, (hx_, yb - hinge[1] - 0.001, z), (hx_, 0.05, z)) for z in (0.11, 0.24))
-            + f'<site name="{cid}_door_handle" pos="{hx_:.3f} 0.05 0.17" size="0.01"/></body>')
+            + f'<site name="{cid}_door_handle" pos="{hx_:.3f} 0.05 0.17" size="0.01"/></body>'
+        )
     return "".join(body) + "</body>"
 
 
@@ -437,8 +311,14 @@ def _basin_xml(sid: str, hx: float, hw: float, hd: float, sy: float, h: float) -
     wall_h = h - bz0
     steel = "0.6 0.62 0.65 1"
     g = [_box(f"{sid}_bottom", (hx, 0, bz0), (hw, hd, 0.02), steel)]
-    for k, (px, py, wx, wy) in enumerate([(hx - hw / 2 + bt / 2, 0, bt, hd), (hx + hw / 2 - bt / 2, 0, bt, hd),
-                                          (hx, hd / 2 - bt / 2, hw, bt), (hx, -hd / 2 + bt / 2, hw, bt)]):
+    for k, (px, py, wx, wy) in enumerate(
+        [
+            (hx - hw / 2 + bt / 2, 0, bt, hd),
+            (hx + hw / 2 - bt / 2, 0, bt, hd),
+            (hx, hd / 2 - bt / 2, hw, bt),
+            (hx, -hd / 2 + bt / 2, hw, bt),
+        ]
+    ):
         g.append(_box(f"{sid}_wall{k}", (px, py, bz0 + wall_h / 2), (wx, wy, wall_h), steel))
     g += _sink_visuals(hx, hw, hd, sy, h)
     g.append(_faucet_lever_xml(sid, hx, -sy / 2 + 0.04, h))
@@ -461,8 +341,11 @@ def furniture_xml(f: dict) -> str:
     """Any scanned fixture without its own model (tall or wall-hung storage, chair, bed, sofa, TV, ...): one
     solid box at its scanned size and height, so the arm, the base and the walkers cannot pass through it."""
     (cx, cy, cz), (sx, sy, sz) = f["position"], f["size"]
-    return (f'<body name="{f["id"]}" pos="{cx} {cy} {cz}" euler="0 0 {f.get("yaw", 0.0)}">'
-            + _box(f'{f["id"]}_box', (0, 0, 0), (sx, sy, sz), FURNITURE) + "</body>")
+    return (
+        f'<body name="{f["id"]}" pos="{cx} {cy} {cz}" euler="0 0 {f.get("yaw", 0.0)}">'
+        + _box(f"{f['id']}_box", (0, 0, 0), (sx, sy, sz), FURNITURE)
+        + "</body>"
+    )
 
 
 def stove_xml(f: dict) -> str:
@@ -471,8 +354,10 @@ def stove_xml(f: dict) -> str:
     ctop, ys = sz + 0.02, sy / 2
     burners = [(-0.17, -0.13), (0.17, -0.13), (-0.17, 0.13), (0.17, 0.13)]
     g = [_box(f"{sid}_box", (0, 0, sz / 2), (sx, sy, sz), "0.15 0.15 0.16 1")]
-    g += [_box(f"{sid}_burner{k}", (bx, by, sz + 0.003), (0.16, 0.16, 0.006), "0.35 0.1 0.08 1", 'group="3"')
-          for k, (bx, by) in enumerate(burners)]
+    g += [
+        _box(f"{sid}_burner{k}", (bx, by, sz + 0.003), (0.16, 0.16, 0.006), "0.35 0.1 0.08 1", 'group="3"')
+        for k, (bx, by) in enumerate(burners)
+    ]
     g.append(_vr(-sx / 2, sx / 2, -ys, ys, sz, ctop, DARK))
     for bx, by in burners:
         g.append(_vcyl("0.45 0.46 0.48 1", 0.085, (bx, by, ctop + 0.0005), (bx, by, ctop + 0.0015)))
@@ -483,31 +368,44 @@ def stove_xml(f: dict) -> str:
     g.append(_vr(-sx / 2, sx / 2, ys, ys + 0.012, sz - 0.10, sz - 0.02, "0.2 0.2 0.21 1"))
     for kx in (-0.27, -0.09, 0.09, 0.27):
         g.append(_vcyl(STEEL, 0.018, (kx, ys + 0.011, sz - 0.06), (kx, ys + 0.03, sz - 0.06)))
-    g.append(_flap_door_xml(f"{sid}_oven_door", (0, ys + 0.016, 0.12), sx - 0.06, sz - 0.24, 6.0, "0.3 0.31 0.33 1",
-                            window=(sx - 0.16, 0.12, sz - 0.44)))
+    g.append(
+        _flap_door_xml(
+            f"{sid}_oven_door",
+            (0, ys + 0.016, 0.12),
+            sx - 0.06,
+            sz - 0.24,
+            6.0,
+            "0.3 0.31 0.33 1",
+            window=(sx - 0.16, 0.12, sz - 0.44),
+        )
+    )
     g.append(_vr(-sx / 2, sx / 2, ys, ys + 0.003, 0, 0.10, DARK))
     g.append(_vr(-sx / 2 - 0.05, sx / 2 + 0.05, -ys - 0.059, -ys + 0.010, ctop - 0.001, ctop + 0.448, SPLASH))
     return f'<body name="{sid}" pos="{cx} {cy} 0" euler="0 0 {f.get("yaw", 0)}">' + "".join(g) + "</body>"
 
 
-def _flap_door_xml(name: str, pivot, width: float, height: float, mass: float, rgba: str, window=None,
-                   handle_dz: float = 0.03) -> str:
+def _flap_door_xml(
+    name: str, pivot, width: float, height: float, mass: float, rgba: str, window=None, handle_dz: float = 0.03
+) -> str:
     """Bottom-hinged door (oven, dishwasher) in the parent's frame: body `name`, joint `name`, handle bar and
     site `name_handle` near the top edge. q > 0 swings the top edge forward (+y) and down to DOOR_FLAT. The
     panel sits 8 mm behind the hinge line so gravity holds it shut at q = 0."""
     zh = height - handle_dz
-    g = [f'<body name="{name}" pos="{pivot[0]:.4f} {pivot[1]:.4f} {pivot[2]:.4f}">'
-         f'<joint name="{name}" type="hinge" axis="-1 0 0" range="0 {DOOR_FLAT}" damping="4" frictionloss="0.8"/>'
-         f'<inertial pos="0 -0.008 {height / 2:.4f}" mass="{mass}" diaginertia="{mass / 20:.3f} {mass / 20:.3f} '
-         f'{mass / 60:.3f}"/>'
-         + _box(f"{name}_panel", (0, -0.0085, height / 2), (width, 0.015, height), rgba, DRAWER)]
+    g = [
+        f'<body name="{name}" pos="{pivot[0]:.4f} {pivot[1]:.4f} {pivot[2]:.4f}">'
+        f'<joint name="{name}" type="hinge" axis="-1 0 0" range="0 {DOOR_FLAT}" damping="4" frictionloss="0.8"/>'
+        f'<inertial pos="0 -0.008 {height / 2:.4f}" mass="{mass}" diaginertia="{mass / 20:.3f} {mass / 20:.3f} '
+        f'{mass / 60:.3f}"/>' + _box(f"{name}_panel", (0, -0.0085, height / 2), (width, 0.015, height), rgba, DRAWER)
+    ]
     if window:
         ww, z0, z1 = window
         g.append(_vr(-ww / 2, ww / 2, 0.0, 0.002, z0, z1, DARK))
     for x in (-0.22, 0.22):
         g.append(_vcyl(STEEL, 0.005, (x, 0.0, zh), (x, 0.041, zh)))
-    g.append(f'<geom name="{name}_handle" type="capsule" size="0.012" fromto="-0.26 0.041 {zh:.4f} 0.26 0.041 {zh:.4f}" '
-             f'rgba="{STEEL}" {DRAWER}/><site name="{name}_handle" pos="0 0.041 {zh:.4f}" size="0.01"/></body>')
+    g.append(
+        f'<geom name="{name}_handle" type="capsule" size="0.012" fromto="-0.26 0.041 {zh:.4f} 0.26 0.041 {zh:.4f}" '
+        f'rgba="{STEEL}" {DRAWER}/><site name="{name}_handle" pos="0 0.041 {zh:.4f}" size="0.01"/></body>'
+    )
     return "".join(g)
 
 
@@ -518,21 +416,31 @@ def dishwasher_xml(f: dict) -> str:
     (cx, cy, _), (sx, sy, h) = f["position"], f["size"]
     fid, ys = f["id"], sy / 2
     shell, t = "0.55 0.56 0.58 1", 0.03
-    g = [_box(f"{fid}_bottom", (0, -0.01, 0.04), (sx, sy - 0.02, 0.08), shell),
-         _box(f"{fid}_top", (0, -0.01, h - t / 2), (sx, sy - 0.02, t), shell),
-         _box(f"{fid}_back", (0, -ys + t / 2, h / 2), (sx, t, h), shell),
-         _box(f"{fid}_left", (-sx / 2 + t / 2, -0.01, h / 2), (t, sy - 0.02, h), shell),
-         _box(f"{fid}_right", (sx / 2 - t / 2, -0.01, h / 2), (t, sy - 0.02, h), shell),
-         _vr(-sx / 2, sx / 2, ys - 0.012, ys + 0.004, h - 0.08, h - 0.01, "0.2 0.2 0.21 1"),
-         _vr(-sx / 2, sx / 2, ys - 0.01, ys + 0.003, 0, 0.08, DARK),
-         _flap_door_xml(f"{fid}_door", (0, ys + 0.006, 0.08), sx - 0.04, h - 0.18, 5.0, STEEL, handle_dz=0.05)]
+    g = [
+        _box(f"{fid}_bottom", (0, -0.01, 0.04), (sx, sy - 0.02, 0.08), shell),
+        _box(f"{fid}_top", (0, -0.01, h - t / 2), (sx, sy - 0.02, t), shell),
+        _box(f"{fid}_back", (0, -ys + t / 2, h / 2), (sx, t, h), shell),
+        _box(f"{fid}_left", (-sx / 2 + t / 2, -0.01, h / 2), (t, sy - 0.02, h), shell),
+        _box(f"{fid}_right", (sx / 2 - t / 2, -0.01, h / 2), (t, sy - 0.02, h), shell),
+        _vr(-sx / 2, sx / 2, ys - 0.012, ys + 0.004, h - 0.08, h - 0.01, "0.2 0.2 0.21 1"),
+        _vr(-sx / 2, sx / 2, ys - 0.01, ys + 0.003, 0, 0.08, DARK),
+        _flap_door_xml(f"{fid}_door", (0, ys + 0.006, 0.08), sx - 0.04, h - 0.18, 5.0, STEEL, handle_dz=0.05),
+    ]
     rw, rd, rail = sx - 2 * t - 0.06, sy - 0.12, 0.04
-    rack = [f'<body name="{fid}_rack" pos="0 0 {RACK_Z}">'
-            f'<joint name="{fid}_rack" type="slide" axis="0 1 0" range="0 {RACK_OUT}" damping="5" frictionloss="0.5"/>'
-            f'<inertial pos="0 0 0.01" mass="1.2" diaginertia="0.02 0.02 0.02"/>'
-            + _box(f"{fid}_rack_tray", (0, 0, 0), (rw, rd, 0.02), "0.7 0.72 0.75 1", DRAWER)]
-    for k, (px, py, wx, wy) in enumerate([(0, rd / 2 - 0.005, rw, 0.01), (0, -rd / 2 + 0.005, rw, 0.01),
-                                          (rw / 2 - 0.005, 0, 0.01, rd), (-rw / 2 + 0.005, 0, 0.01, rd)]):
+    rack = [
+        f'<body name="{fid}_rack" pos="0 0 {RACK_Z}">'
+        f'<joint name="{fid}_rack" type="slide" axis="0 1 0" range="0 {RACK_OUT}" damping="5" frictionloss="0.5"/>'
+        f'<inertial pos="0 0 0.01" mass="1.2" diaginertia="0.02 0.02 0.02"/>'
+        + _box(f"{fid}_rack_tray", (0, 0, 0), (rw, rd, 0.02), "0.7 0.72 0.75 1", DRAWER)
+    ]
+    for k, (px, py, wx, wy) in enumerate(
+        [
+            (0, rd / 2 - 0.005, rw, 0.01),
+            (0, -rd / 2 + 0.005, rw, 0.01),
+            (rw / 2 - 0.005, 0, 0.01, rd),
+            (-rw / 2 + 0.005, 0, 0.01, rd),
+        ]
+    ):
         rack.append(_box(f"{fid}_rack_rail{k}", (px, py, 0.01 + rail / 2), (wx, wy, rail), "0.7 0.72 0.75 1", DRAWER))
     g.append("".join(rack) + "</body>")
     return f'<body name="{fid}" pos="{cx} {cy} 0" euler="0 0 {f.get("yaw", 0)}">' + "".join(g) + "</body>"
@@ -543,34 +451,24 @@ def microwave_xml(f: dict) -> str:
     control panel takes the right 30% of the front."""
     (cx, cy, cz), (sx, sy, h) = f["position"], f["size"]
     fid, ys, dw = f["id"], sy / 2, sx * 0.7 - 0.02
-    g = [_box(f"{fid}_box", (0, -0.01, h / 2), (sx, sy - 0.02, h), "0.25 0.25 0.27 1"),
-         _vr(sx / 2 - sx * 0.3 + 0.01, sx / 2 - 0.01, ys - 0.012, ys - 0.004, 0.03, h - 0.03, "0.12 0.12 0.13 1"),
-         f'<body name="{fid}_door" pos="{-sx / 2 + 0.01:.4f} {ys - 0.008:.4f} {h / 2:.4f}">'
-         f'<joint name="{fid}_door" type="hinge" axis="0 0 1" range="0 1.9" damping="0.5" frictionloss="0.1"/>'
-         f'<inertial pos="{dw / 2:.4f} 0 0" mass="1.0" diaginertia="0.01 0.01 0.01"/>'
-         + _box(f"{fid}_door_panel", (dw / 2, 0.0, 0), (dw, 0.016, h - 0.02), "0.2 0.2 0.22 1", DRAWER)
-         + _vr(0.03, dw - 0.05, 0.008, 0.010, -h / 2 + 0.04, h / 2 - 0.04, DARK)
-         + f'<geom name="{fid}_door_handle" type="capsule" size="0.008" fromto="{dw - 0.025:.4f} 0.035 {-h / 2 + 0.04:.3f} '
-           f'{dw - 0.025:.4f} 0.035 {h / 2 - 0.04:.3f}" rgba="{STEEL}" {DRAWER}/>'
-         + "".join(_vcyl(STEEL, 0.004, (dw - 0.025, 0.008, z), (dw - 0.025, 0.035, z)) for z in (-h / 2 + 0.05, h / 2 - 0.05))
-         + f'<site name="{fid}_door_handle" pos="{dw - 0.025:.4f} 0.035 0" size="0.008"/></body>']
-    return f'<body name="{fid}" pos="{cx} {cy} {cz - h / 2:.4f}" euler="0 0 {f.get("yaw", 0)}">' + "".join(g) + "</body>"
-
-
-def fridge_mirror(f: dict) -> int:
-    """+1 for the default left-hinged fridge, -1 when the fixture says `hinge: "right"` (the door is the mirror
-    image in the fixture's x: hinge on the right edge, free edge on the left, swinging the other way)."""
-    return -1 if f.get("hinge") == "right" else 1
-
-
-def fridge_door_frame(f: dict) -> dict:
-    """The fridge door in the fixture's frame: hinge xy (left edge, just behind the front), the panel's length
-    along local +x when closed, the handle in the door's frame, and the front face's local y. people.py drives
-    the door from these numbers, so they live in one place."""
-    sx, sy, h = f["size"]
-    m = fridge_mirror(f)
-    return {"hinge": (-m * sx / 2, sy / 2 - 0.03), "length": sx, "handle": (m * (sx - 0.07), 0.09, h * 0.57),
-            "front": sy / 2, "mirror": m}
+    g = [
+        _box(f"{fid}_box", (0, -0.01, h / 2), (sx, sy - 0.02, h), "0.25 0.25 0.27 1"),
+        _vr(sx / 2 - sx * 0.3 + 0.01, sx / 2 - 0.01, ys - 0.012, ys - 0.004, 0.03, h - 0.03, "0.12 0.12 0.13 1"),
+        f'<body name="{fid}_door" pos="{-sx / 2 + 0.01:.4f} {ys - 0.008:.4f} {h / 2:.4f}">'
+        f'<joint name="{fid}_door" type="hinge" axis="0 0 1" range="0 1.9" damping="0.5" frictionloss="0.1"/>'
+        f'<inertial pos="{dw / 2:.4f} 0 0" mass="1.0" diaginertia="0.01 0.01 0.01"/>'
+        + _box(f"{fid}_door_panel", (dw / 2, 0.0, 0), (dw, 0.016, h - 0.02), "0.2 0.2 0.22 1", DRAWER)
+        + _vr(0.03, dw - 0.05, 0.008, 0.010, -h / 2 + 0.04, h / 2 - 0.04, DARK)
+        + f'<geom name="{fid}_door_handle" type="capsule" size="0.008" fromto="{dw - 0.025:.4f} 0.035 {-h / 2 + 0.04:.3f} '
+        f'{dw - 0.025:.4f} 0.035 {h / 2 - 0.04:.3f}" rgba="{STEEL}" {DRAWER}/>'
+        + "".join(
+            _vcyl(STEEL, 0.004, (dw - 0.025, 0.008, z), (dw - 0.025, 0.035, z)) for z in (-h / 2 + 0.05, h / 2 - 0.05)
+        )
+        + f'<site name="{fid}_door_handle" pos="{dw - 0.025:.4f} 0.035 0" size="0.008"/></body>',
+    ]
+    return (
+        f'<body name="{fid}" pos="{cx} {cy} {cz - h / 2:.4f}" euler="0 0 {f.get("yaw", 0)}">' + "".join(g) + "</body>"
+    )
 
 
 def fridge_xml(f: dict) -> str:
@@ -583,42 +481,57 @@ def fridge_xml(f: dict) -> str:
     hx, hy, hz = fridge_door_frame(f)["handle"]
     m = fridge_mirror(f)
     px = m * sx / 2  # panel centre along x from the hinge
-    vis = (_vr(-fx, fx, yd, sy / 2 + 0.02, 0.02, zf, "0.9 0.9 0.92 1")
-           + "".join(_vcyl(STEEL, 0.005, (x, sy / 2 + 0.019, zb), (x, sy / 2 + 0.06, zb)) for x in (-0.22, 0.22))
-           + _vcyl(STEEL, 0.012, (-0.26, sy / 2 + 0.06, zb), (0.26, sy / 2 + 0.06, zb), "capsule")
-           + _vr(-sx / 2 + 0.01, sx / 2 - 0.01, sy / 2 - 0.06, yd - 0.002, 0.01, h - 0.01, DARK))
-    return (f'<body name="{fid}" pos="{cx} {cy} 0" euler="0 0 {yaw}">'
-            + _box(f"{fid}_box", (0, -0.03, h / 2), (sx, sy - 0.06, h), "0.85 0.86 0.88 1") + vis
-            + f'<body name="{fid}_door" pos="{-m * sx / 2:.3f} {yd:.3f} 0">'
-              f'<joint name="{fid}_door" type="hinge" axis="0 0 {m}" range="0 2.0" damping="3" frictionloss="0.3"/>'
-              f'<inertial pos="{px:.3f} 0.02 {h * 0.6:.3f}" mass="4" diaginertia="0.3 0.3 0.3"/>'
-            + _box(f"{fid}_door_panel", (px, 0.025, h * 0.62), (sx - 0.01, 0.05, h * 0.74), "0.9 0.9 0.92 1", DRAWER)
-            + _box(f"{fid}_freezer_panel", (px, 0.025, h * 0.12), (sx - 0.01, 0.05, h * 0.22), "0.9 0.9 0.92 1",
-                   f'{DRAWER} group="3"')
-            + f'<geom name="{fid}_door_handle" type="capsule" size="0.015" fromto="{hx:.3f} {hy} {h * 0.45:.3f} '
-              f'{hx:.3f} {hy} {h * 0.7:.3f}" rgba="{STEEL}" {DRAWER}/>'
-            + "".join(_vcyl(STEEL, 0.005, (hx, 0.049, h * k), (hx, hy, h * k)) for k in (0.46, 0.69))
-            + f'<site name="{fid}_door_handle" pos="{hx:.3f} {hy} {hz:.3f}" size="0.01"/>'
-            + "</body></body>")
+    vis = (
+        _vr(-fx, fx, yd, sy / 2 + 0.02, 0.02, zf, "0.9 0.9 0.92 1")
+        + "".join(_vcyl(STEEL, 0.005, (x, sy / 2 + 0.019, zb), (x, sy / 2 + 0.06, zb)) for x in (-0.22, 0.22))
+        + _vcyl(STEEL, 0.012, (-0.26, sy / 2 + 0.06, zb), (0.26, sy / 2 + 0.06, zb), "capsule")
+        + _vr(-sx / 2 + 0.01, sx / 2 - 0.01, sy / 2 - 0.06, yd - 0.002, 0.01, h - 0.01, DARK)
+    )
+    return (
+        f'<body name="{fid}" pos="{cx} {cy} 0" euler="0 0 {yaw}">'
+        + _box(f"{fid}_box", (0, -0.03, h / 2), (sx, sy - 0.06, h), "0.85 0.86 0.88 1")
+        + vis
+        + f'<body name="{fid}_door" pos="{-m * sx / 2:.3f} {yd:.3f} 0">'
+        f'<joint name="{fid}_door" type="hinge" axis="0 0 {m}" range="0 2.0" damping="3" frictionloss="0.3"/>'
+        f'<inertial pos="{px:.3f} 0.02 {h * 0.6:.3f}" mass="4" diaginertia="0.3 0.3 0.3"/>'
+        + _box(f"{fid}_door_panel", (px, 0.025, h * 0.62), (sx - 0.01, 0.05, h * 0.74), "0.9 0.9 0.92 1", DRAWER)
+        + _box(
+            f"{fid}_freezer_panel",
+            (px, 0.025, h * 0.12),
+            (sx - 0.01, 0.05, h * 0.22),
+            "0.9 0.9 0.92 1",
+            f'{DRAWER} group="3"',
+        )
+        + f'<geom name="{fid}_door_handle" type="capsule" size="0.015" fromto="{hx:.3f} {hy} {h * 0.45:.3f} '
+        f'{hx:.3f} {hy} {h * 0.7:.3f}" rgba="{STEEL}" {DRAWER}/>'
+        + "".join(_vcyl(STEEL, 0.005, (hx, 0.049, h * k), (hx, hy, h * k)) for k in (0.46, 0.69))
+        + f'<site name="{fid}_door_handle" pos="{hx:.3f} {hy} {hz:.3f}" size="0.01"/>'
+        + "</body></body>"
+    )
 
 
 BOWL_WALL = 0.016  # wall thickness, wider than the 12 mm the closed pads leave, so they squeeze it at any rim angle
 PLATE_RIM, PLATE_FLOOR = 0.018, 0.005  # a thick rolled rim the closed pads (12 mm apart) can squeeze; thin floor
 
 
-def _ring_geoms(oid: str, radius: float, height: float, wall: float, mass: float, rgba: str, col: str,
-                floor: float | None = None) -> list[str]:
+def _ring_geoms(
+    oid: str, radius: float, height: float, wall: float, mass: float, rgba: str, col: str, floor: float | None = None
+) -> list[str]:
     """Open-top container: a bottom disc (`floor` thick, default the wall) and an octagon of wall panels."""
     floor = wall if floor is None else floor
-    g = [f'<geom name="{oid}" type="cylinder" size="{radius - wall:.4f} {floor / 2:.4f}" '
-         f'pos="0 0 {-height / 2 + floor / 2:.4f}" mass="{0.4 * mass:.4f}" rgba="{rgba}" {col}/>']
+    g = [
+        f'<geom name="{oid}" type="cylinder" size="{radius - wall:.4f} {floor / 2:.4f}" '
+        f'pos="0 0 {-height / 2 + floor / 2:.4f}" mass="{0.4 * mass:.4f}" rgba="{rgba}" {col}/>'
+    ]
     r = radius - wall / 2
     half = r * math.tan(math.pi / 8) + 0.002
     for k in range(8):
         a = k * math.pi / 4
-        g.append(f'<geom name="{oid}_wall{k}" type="box" size="{half:.4f} {wall / 2:.4f} {height / 2:.4f}" '
-                 f'pos="{r * math.cos(a):.4f} {r * math.sin(a):.4f} 0" euler="0 0 {a + math.pi / 2:.4f}" '
-                 f'mass="{0.6 * mass / 8:.4f}" rgba="{rgba}" {col}/>')
+        g.append(
+            f'<geom name="{oid}_wall{k}" type="box" size="{half:.4f} {wall / 2:.4f} {height / 2:.4f}" '
+            f'pos="{r * math.cos(a):.4f} {r * math.sin(a):.4f} 0" euler="0 0 {a + math.pi / 2:.4f}" '
+            f'mass="{0.6 * mass / 8:.4f}" rgba="{rgba}" {col}/>'
+        )
     return g
 
 
@@ -641,23 +554,43 @@ def object_xml(o: dict, pos) -> str:
             r = min(r, 0.035)  # the body has to fit the 10 cm gripper opening with room for the pads
         g = [f'<geom name="{oid}" type="cylinder" size="{r:.4f} {sz / 2:.4f}" mass="{m}" rgba="{rgba}" {col}/>']
         if cid == "mug":
-            g += [_box(None, p, sz_, rgba, f'mass="0" {VIS}') for p, sz_ in  # handle: looks only, weighs nothing
-                  (((r + 0.014, 0, 0), (0.01, 0.012, sz * 0.5)), ((r + 0.007, 0, sz * 0.25), (0.016, 0.012, 0.01)),
-                   ((r + 0.007, 0, -sz * 0.25), (0.016, 0.012, 0.01)))]
+            g += [
+                _box(None, p, sz_, rgba, f'mass="0" {VIS}')
+                for p, sz_ in (  # handle: looks only, weighs nothing
+                    ((r + 0.014, 0, 0), (0.01, 0.012, sz * 0.5)),
+                    ((r + 0.007, 0, sz * 0.25), (0.016, 0.012, 0.01)),
+                    ((r + 0.007, 0, -sz * 0.25), (0.016, 0.012, 0.01)),
+                )
+            ]
     elif shape == "sphere":
         g = [f'<geom name="{oid}" type="sphere" size="{r:.4f}" mass="{m}" rgba="{rgba}" {col}/>']
     elif shape == "bottle":
-        g = [f'<geom name="{oid}" type="cylinder" size="{r:.4f} {0.375 * sz:.4f}" pos="0 0 {-0.125 * sz:.4f}" '
-             f'mass="{0.9 * m:.4f}" rgba="{rgba}" {col}/>',
-             f'<geom name="{oid}_neck" type="cylinder" size="{0.42 * r:.4f} {0.125 * sz:.4f}" pos="0 0 {0.375 * sz:.4f}" '
-             f'mass="{0.1 * m:.4f}" rgba="{rgba}" {col}/>']
+        g = [
+            f'<geom name="{oid}" type="cylinder" size="{r:.4f} {0.375 * sz:.4f}" pos="0 0 {-0.125 * sz:.4f}" '
+            f'mass="{0.9 * m:.4f}" rgba="{rgba}" {col}/>',
+            f'<geom name="{oid}_neck" type="cylinder" size="{0.42 * r:.4f} {0.125 * sz:.4f}" pos="0 0 {0.375 * sz:.4f}" '
+            f'mass="{0.1 * m:.4f}" rgba="{rgba}" {col}/>',
+        ]
     elif shape == "pan":
         g = _ring_geoms(oid, r, sz, 0.005, 0.8 * m, rgba, col)
-        g.append(_box(f"{oid}_handle", (r + 0.08, 0, sz / 2 - 0.008), (0.16, 0.025, 0.012), rgba, f'mass="{0.2 * m:.4f}" {col}'))
+        g.append(
+            _box(
+                f"{oid}_handle",
+                (r + 0.08, 0, sz / 2 - 0.008),
+                (0.16, 0.025, 0.012),
+                rgba,
+                f'mass="{0.2 * m:.4f}" {col}',
+            )
+        )
     else:
-        g = [f'<geom name="{oid}" type="box" size="{sx / 2:.4f} {sy / 2:.4f} {sz / 2:.4f}" mass="{m}" rgba="{rgba}" {col}/>']
-    return (f'<body name="{oid}" pos="{pos[0]:.4f} {pos[1]:.4f} {pos[2]:.4f}"><freejoint name="{oid}"/>'
-            + "".join(g) + "</body>")
+        g = [
+            f'<geom name="{oid}" type="box" size="{sx / 2:.4f} {sy / 2:.4f} {sz / 2:.4f}" mass="{m}" rgba="{rgba}" {col}/>'
+        ]
+    return (
+        f'<body name="{oid}" pos="{pos[0]:.4f} {pos[1]:.4f} {pos[2]:.4f}"><freejoint name="{oid}"/>'
+        + "".join(g)
+        + "</body>"
+    )
 
 
 def part_names(twin: dict) -> list[dict]:
@@ -679,10 +612,10 @@ def part_names(twin: dict) -> list[dict]:
                 add(fid, f"{fid}_door", "hinge", 1.2)
             for k in range(len(upper_doors(f, fx))):
                 add(fid, f"{fid}_upper_door{k}", "hinge", 1.2)
-            for s in _sinks_in(f, sinks)[:1]:
-                add(s["id"], f'{s["id"]}_faucet', "hinge", 1.0)
+            for s in sinks_in(f, sinks)[:1]:
+                add(s["id"], f"{s['id']}_faucet", "hinge", 1.0)
         elif t == "sink":
-            if _host_of(f, fx) is None:
+            if host_of(f, fx) is None:
                 add(fid, f"{fid}_faucet", "hinge", 1.0)
         elif t.startswith("fridge"):
             add(fid, f"{fid}_door", "hinge", 1.2)
@@ -696,15 +629,6 @@ def part_names(twin: dict) -> list[dict]:
     return parts
 
 
-def _seg_dist(p, w: dict) -> float:
-    """Horizontal distance from point p to a wall's segment."""
-    (x0, y0), (x1, y1) = w["start"], w["end"]
-    dx, dy = x1 - x0, y1 - y0
-    n = dx * dx + dy * dy
-    t = 0.0 if n < 1e-12 else min(max(((p[0] - x0) * dx + (p[1] - y0) * dy) / n, 0.0), 1.0)
-    return math.hypot(p[0] - x0 - t * dx, p[1] - y0 - t * dy)
-
-
 def portal_wall(p: dict, walls: list[dict]) -> dict | None:
     """The wall a door, window or opening is drawn on: the one its `wall_id` names, else (an export without
     `parentIdentifier`, or a parent that is not one of the walls) the wall whose segment passes nearest its centre,
@@ -713,7 +637,7 @@ def portal_wall(p: dict, walls: list[dict]) -> dict | None:
         for w in walls:
             if w["id"] == p["wall_id"]:
                 return w
-    d, i = min(((_seg_dist(p["position"], w), i) for i, w in enumerate(walls)), default=(math.inf, -1))
+    d, i = min(((segment_distance(p["position"], w), i) for i, w in enumerate(walls)), default=(math.inf, -1))
     return walls[i] if d <= PORTAL_SNAP else None
 
 
@@ -742,14 +666,19 @@ def portal_xml(kind: str, k: int, p: dict, wall: dict, room_center=None) -> list
     sill = kind == "window" or (kind == "opening" and z0 > 0.0)
     trim = RETURN if kind == "opening" else TRIM
     zs = z0 + b if sill else z0  # foot of the jambs and of the infill
-    parts = [("jamb0", u0, u0 + b, zs, z1, "frame", trim), ("jamb1", u1 - b, u1, zs, z1, "frame", trim),
-             ("head", u0 + b, u1 - b, z1 - b, z1, "frame", trim)]
+    parts = [
+        ("jamb0", u0, u0 + b, zs, z1, "frame", trim),
+        ("jamb1", u1 - b, u1, zs, z1, "frame", trim),
+        ("head", u0 + b, u1 - b, z1 - b, z1, "frame", trim),
+    ]
     if sill:
         parts.append(("sill", u0, u1, z0, zs, "sill" if kind == "window" else "frame", trim))
     if kind == "window":
         um = (u0 + u1) / 2
-        parts += [("pane", u0 + b, u1 - b, zs, z1 - b, "pane", GLASS),
-                  ("mullion", um - b / 4, um + b / 4, zs, z1 - b, "frame", TRIM)]
+        parts += [
+            ("pane", u0 + b, u1 - b, zs, z1 - b, "pane", GLASS),
+            ("mullion", um - b / 4, um + b / 4, zs, z1 - b, "frame", TRIM),
+        ]
     elif closed:
         parts.append(("leaf", u0 + b, u1 - b, z0, z1 - b, "leaf", LEAF))
     else:
@@ -761,13 +690,22 @@ def portal_xml(kind: str, k: int, p: dict, wall: dict, room_center=None) -> list
 
     g = []
     for part, ua, ub, za, zb, proud, rgba in parts:
-        g.append(_box(f"{kind}{k}_{part}", (*on_line((ua + ub) / 2), (za + zb) / 2),
-                      (ub - ua, 2 * (half_t + PROUD[proud]), zb - za), rgba, f'euler="0 0 {yaw}" {VIS}'))
+        g.append(
+            _box(
+                f"{kind}{k}_{part}",
+                (*on_line((ua + ub) / 2), (za + zb) / 2),
+                (ub - ua, 2 * (half_t + PROUD[proud]), zb - za),
+                rgba,
+                f'euler="0 0 {yaw}" {VIS}',
+            )
+        )
     if closed:  # one bar through the wall makes a knob on each face, by the latch jamb
         (kx, ky), r = on_line(max(u1 - b - KNOB_IN, (u0 + u1) / 2)), half_t + PROUD["knob"]
         kz = z0 + min(KNOB_Z, (z1 - b - z0) / 2)
-        g.append(f'<geom name="{kind}{k}_knob" type="cylinder" fromto="{kx + uy * r:.4f} {ky - ux * r:.4f} {kz:.4f} '
-                 f'{kx - uy * r:.4f} {ky + ux * r:.4f} {kz:.4f}" size="{KNOB_R}" rgba="{STEEL}" {VIS}/>')
+        g.append(
+            f'<geom name="{kind}{k}_knob" type="cylinder" fromto="{kx + uy * r:.4f} {ky - ux * r:.4f} {kz:.4f} '
+            f'{kx - uy * r:.4f} {ky + ux * r:.4f} {kz:.4f}" size="{KNOB_R}" rgba="{STEEL}" {VIS}/>'
+        )
     elif kind == "door":
         # Only static world geoms: no bodies, mass, joints, sites or collision masks are added.
         nx, ny = -uy, ux
@@ -777,14 +715,23 @@ def portal_xml(kind: str, k: int, p: dict, wall: dict, room_center=None) -> list
         hx, hy = on_line(hinge_u)
         width, thickness = u1 - u0 - 2 * b, 0.04
         leaf_yaw = math.atan2(ny, nx)
-        g.append(_box(f"{kind}{k}_leaf", (hx + nx * width / 2, hy + ny * width / 2, (z0 + z1 - b) / 2),
-                      (width, thickness, z1 - b - z0), LEAF, f'euler="0 0 {leaf_yaw}" {VIS}'))
+        g.append(
+            _box(
+                f"{kind}{k}_leaf",
+                (hx + nx * width / 2, hy + ny * width / 2, (z0 + z1 - b) / 2),
+                (width, thickness, z1 - b - z0),
+                LEAF,
+                f'euler="0 0 {leaf_yaw}" {VIS}',
+            )
+        )
         latch = max(width - KNOB_IN, width / 2)
         kx, ky = hx + nx * latch, hy + ny * latch
         kz, r = z0 + min(KNOB_Z, (z1 - b - z0) / 2), thickness / 2 + PROUD["knob"]
-        g.append(f'<geom name="{kind}{k}_knob" type="cylinder" '
-                 f'fromto="{kx + ux * r:.4f} {ky + uy * r:.4f} {kz:.4f} '
-                 f'{kx - ux * r:.4f} {ky - uy * r:.4f} {kz:.4f}" size="{KNOB_R}" rgba="{STEEL}" {VIS}/>')
+        g.append(
+            f'<geom name="{kind}{k}_knob" type="cylinder" '
+            f'fromto="{kx + ux * r:.4f} {ky + uy * r:.4f} {kz:.4f} '
+            f'{kx - ux * r:.4f} {ky - uy * r:.4f} {kz:.4f}" size="{KNOB_R}" rgba="{STEEL}" {VIS}/>'
+        )
     return g
 
 
@@ -808,7 +755,7 @@ def assets_xml() -> str:
     plank-grain wood for cabinet fronts, speckled stone for counter tops, glossy boards for the backsplash
     (a 2d texture is projected along a box's local z, so a vertical face only varies along x)."""
     return (
-        '<asset>'
+        "<asset>"
         '<texture name="floor_tile" type="2d" builtin="flat" mark="edge" rgb1="0.68 0.61 0.53" '
         'markrgb="0.42 0.38 0.34" width="128" height="128"/>'
         '<material name="floor" texture="floor_tile" texuniform="true" texrepeat="3 3" '
@@ -826,7 +773,8 @@ def assets_xml() -> str:
         '<material name="panel" texture="panel_lines" texuniform="true" texrepeat="8 8" '
         'specular="0.5" shininess="0.5"/>'
         '<material name="paint" specular="0.05" shininess="0.05"/>'
-        '</asset>')
+        "</asset>"
+    )
 
 
 def lights_xml(lighting: str, cx: float, cy: float, y_front: float, seed: int | None = None) -> tuple[str, float]:
@@ -843,19 +791,27 @@ def lights_xml(lighting: str, cx: float, cy: float, y_front: float, seed: int | 
     spec = " ".join(f"{0.4 * li * c:.3f}" for c in kc)
     fill = " ".join(f"{0.3 * li * c:.3f}" for c in COOL)
     window = " ".join(f"{0.25 * li * c:.3f}" for c in WARM)
-    return (f'<light name="key" pos="{kx:.3f} {ky:.3f} 2.35" dir="0 0 -1" cutoff="80" exponent="1" '
-            f'diffuse="{key}" specular="{spec}" castshadow="true"/>'
-            f'<light name="fill" directional="true" pos="{cx:.3f} {y_front:.3f} 2.0" dir="0 -0.6 -1" '
-            f'diffuse="{fill}" specular="0 0 0" castshadow="false"/>'
-            f'<light name="window" directional="true" pos="{cx + side * 2:.3f} {cy:.3f} 1.6" '
-            f'dir="{-side * 0.8:.1f} 0 -0.45" diffuse="{window}" specular="0 0 0" castshadow="false"/>'), li
+    return (
+        f'<light name="key" pos="{kx:.3f} {ky:.3f} 2.35" dir="0 0 -1" cutoff="80" exponent="1" '
+        f'diffuse="{key}" specular="{spec}" castshadow="true"/>'
+        f'<light name="fill" directional="true" pos="{cx:.3f} {y_front:.3f} 2.0" dir="0 -0.6 -1" '
+        f'diffuse="{fill}" specular="0 0 0" castshadow="false"/>'
+        f'<light name="window" directional="true" pos="{cx + side * 2:.3f} {cy:.3f} 1.6" '
+        f'dir="{-side * 0.8:.1f} 0 -0.45" diffuse="{window}" specular="0 0 0" castshadow="false"/>'
+    ), li
 
 
 def arm_parts(arm: str, base_pos, base_yaw_deg: float, mobile: bool = False) -> dict[str, str]:
     """MJCF fragments for the chosen arm: `procedural` (robot.py) or `menagerie` (the Franka asset, menagerie.py)."""
     if arm == "procedural":
-        return {"meshdir": "", "defaults": "", "assets": "", "body": robot.arm_xml(tuple(base_pos), base_yaw_deg, mobile=mobile),
-                "actuators": robot.actuators_xml(mobile=mobile), "contact": ""}
+        return {
+            "meshdir": "",
+            "defaults": "",
+            "assets": "",
+            "body": robot.arm_xml(tuple(base_pos), base_yaw_deg, mobile=mobile),
+            "actuators": robot.actuators_xml(mobile=mobile),
+            "contact": "",
+        }
     if arm == "menagerie":
         from arrival.sim import menagerie
 
@@ -880,8 +836,11 @@ def overview_camera_xml(xs, ys, base_pos, base_yaw_deg: float, fixtures=()) -> s
 
     def clear(x, y):
         inside = lo[0] <= x <= hi[0] and lo[1] <= y <= hi[1]
-        return inside and all(not (abs(lx) < f["size"][0] / 2 + 0.15 and abs(ly) < f["size"][1] / 2 + 0.15)
-                              for f in fixtures for lx, ly in [to_local((x, y), f)])
+        return inside and all(
+            not (abs(lx) < f["size"][0] / 2 + 0.15 and abs(ly) < f["size"][1] / 2 + 0.15)
+            for f in fixtures
+            for lx, ly in [to_local((x, y), f)]
+        )
 
     spots = [(base_pos[0] - fx * d, base_pos[1] - fy * d) for d in (OVERVIEW_BACK - 0.1 * i for i in range(19))]
     x, y = next((p for p in spots if clear(*p)), (None, None))
@@ -893,9 +852,18 @@ def overview_camera_xml(xs, ys, base_pos, base_yaw_deg: float, fixtures=()) -> s
     return f'<camera name="overview" pos="{x:.4f} {y:.4f} 2.2" xyaxes="{axes}" fovy="80"/>'
 
 
-def build_mjcf(twin: dict, base_pos, base_yaw_deg: float = -90.0, object_pos: dict | None = None,
-               lighting: str = "neutral", n_people: int = 0, seed: int | None = None, people_seed: int = 0,
-               base: str = "fixed", arm: str = "procedural") -> str:
+def build_mjcf(
+    twin: dict,
+    base_pos,
+    base_yaw_deg: float = -90.0,
+    object_pos: dict | None = None,
+    lighting: str = "neutral",
+    n_people: int = 0,
+    seed: int | None = None,
+    people_seed: int = 0,
+    base: str = "fixed",
+    arm: str = "procedural",
+) -> str:
     """Returns an MJCF string. object_pos overrides {object_id: [x, y, z]} start positions.
     seed jitters the lights within the lighting label (None gives the nominal lights); people_seed picks the walkers' bodies.
     base="mobile" gives the pedestal planar joints and actuators (MAN-3); "fixed" is the string main always built.
@@ -911,16 +879,18 @@ def build_mjcf(twin: dict, base_pos, base_yaw_deg: float = -90.0, object_pos: di
         (x0, y0), (x1, y1) = w["start"], w["end"]
         L = math.hypot(x1 - x0, y1 - y0)
         yaw = math.atan2(y1 - y0, x1 - x0)
-        world.append(f'<geom name="{w["id"]}" type="box" pos="{(x0 + x1) / 2} {(y0 + y1) / 2} {w["height"] / 2}" '
-                     f'size="{L / 2} {max(w["thickness"], WALL_MIN_T) / 2} {w["height"] / 2}" euler="0 0 {yaw}" '
-                     f'rgba="{WALL}"/>')
+        world.append(
+            f'<geom name="{w["id"]}" type="box" pos="{(x0 + x1) / 2} {(y0 + y1) / 2} {w["height"] / 2}" '
+            f'size="{L / 2} {max(w["thickness"], WALL_MIN_T) / 2} {w["height"] / 2}" euler="0 0 {yaw}" '
+            f'rgba="{WALL}"/>'
+        )
     world += portals_xml(twin)
     for f in fx:
         t = f["type"]
         if is_counter_host(f):
             world.append(table_xml(f) if is_table(f) else counter_xml(f, sinks, fx))
         elif t == "sink":
-            if _host_of(f, fx) is None:  # set into a counter or cabinet, the basin is cut by counter_xml
+            if host_of(f, fx) is None:  # set into a counter or cabinet, the basin is cut by counter_xml
                 world.append(sink_unit_xml(f))
         elif t.startswith("fridge"):
             world.append(fridge_xml(f))
@@ -945,17 +915,17 @@ def build_mjcf(twin: dict, base_pos, base_yaw_deg: float = -90.0, object_pos: di
         body = body.replace(f'rgba="{rgba}"', f'rgba="{rgba}" material="{mat}"')
     meshdir = f' meshdir="{a["meshdir"]}"' if a["meshdir"] else ""
     assets = assets_xml().replace("</asset>", a["assets"] + "</asset>")
-    return f"""<mujoco model="{twin['room_id']}_sim">
+    return f"""<mujoco model="{twin["room_id"]}_sim">
 <compiler angle="radian" autolimits="true"{meshdir}/>
 <option timestep="0.002" cone="elliptic" impratio="10" integrator="implicitfast"/>
 <visual><global offwidth="640" offheight="480"/><headlight ambient="{0.15 * li:.3f} {0.15 * li:.3f} {0.15 * li:.3f}" diffuse="{0.1 * li:.3f} {0.1 * li:.3f} {0.1 * li:.3f}" specular="0 0 0"/><quality shadowsize="2048"/></visual>
 {assets}
-<default><geom friction="1.0 0.01 0.001"/>{a['defaults']}</default>
+<default><geom friction="1.0 0.01 0.001"/>{a["defaults"]}</default>
 <worldbody>
 {lights}
 <geom name="floor" type="plane" pos="{cx} {cy} 0" size="{max(xs)} {max(ys)} 0.1" material="floor"/>
 {overview_camera_xml(xs, ys, base_pos, base_yaw_deg, twin["fixtures"])}
 {body}
-</worldbody>{a['contact']}
-<actuator>{a['actuators']}</actuator>
+</worldbody>{a["contact"]}
+<actuator>{a["actuators"]}</actuator>
 </mujoco>"""

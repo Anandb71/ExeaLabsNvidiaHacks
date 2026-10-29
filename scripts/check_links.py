@@ -8,6 +8,7 @@ that GitHub-style anchor exists. `http(s):` and `mailto:` links are skipped (not
 network). Prints one line per problem; exit 0 when clean, 1 otherwise.
 scripts/check_docs.py covers commands and code references in the main docs; this covers all links.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -30,8 +31,9 @@ EXTERNAL = re.compile(r"^(?:[A-Za-z][A-Za-z0-9+.\-]*:|//)")
 def markdown_files(root: Path) -> list[Path]:
     """Tracked .md files when `root` is a git checkout, else every .md outside the usual junk dirs."""
     try:
-        out = subprocess.run(["git", "-C", str(root), "ls-files", "-z", "--", "*.md"], capture_output=True,
-                             check=True).stdout.decode()
+        out = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z", "--", "*.md"], capture_output=True, check=True
+        ).stdout.decode()
         files = [root / p for p in out.split("\0") if p]
         if files:
             return sorted(f for f in files if f.is_file())

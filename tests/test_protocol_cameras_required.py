@@ -2,6 +2,7 @@
 sim env renders both, and decode_request (mock server and GR00T shim) answers a request without either with a 400.
 encode_request used to send an ego-only request anyway, so the gap only showed up as that 400 from the server; it now
 refuses the observation with a ProtocolError that names the missing camera, before anything is sent."""
+
 import json
 import threading
 import urllib.error
@@ -54,8 +55,12 @@ def test_shim_answers_400_to_an_ego_only_request_and_never_calls_the_policy():
             return {"single_arm": np.zeros((1, 4, 7)), "gripper": np.zeros((1, 4, 1))}, {}
 
     def post(body):
-        req = urllib.request.Request(f"http://127.0.0.1:{srv.server_address[1]}/act", data=json.dumps(body).encode(),
-                                     method="POST", headers={"Content-Type": "application/json"})
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{srv.server_address[1]}/act",
+            data=json.dumps(body).encode(),
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
         return urllib.request.urlopen(req, timeout=5)
 
     full = encode_request(_obs(*VIDEO_KEYS), "open the drawer")

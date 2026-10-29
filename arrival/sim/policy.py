@@ -10,15 +10,16 @@ from __future__ import annotations
 import hashlib
 import itertools
 import json
-import re
 import urllib.request
 from pathlib import Path
 
 import numpy as np
 
 from arrival.sim import ik
-from arrival.sim.scene import fridge_mirror
-from arrival.sim.robot import BASE_SPEED, BASE_TURN, FINGER_OPEN, HAND, HOME
+from arrival.sim.geometry import fridge_mirror
+from arrival.sim.robot import BASE_SPEED, BASE_TURN, FINGER_OPEN, FPS, HAND, HOME
+from arrival.sim.stand import front
+from arrival.sim.tasks import SIM_FAMILIES, room_families
 
 MINJERK_PEAK = 1.875  # peak over mean speed of a min-jerk move: sizes a base drive so it never exceeds BASE_SPEED
 STOP_CLEAR = 0.7  # the base waits while a person is this close ahead of it (0.12 pedestal + 0.17 torso + margin)
@@ -29,6 +30,9 @@ DRIVE_LANE = 0.6  # ...and within this of the drive line. Driving, the robot rea
 
 
 class Policy:
+    """What run_episode drives: `reset(env, task)` before an episode, then `act(obs)` once per control step for 7 arm
+    joint targets and a gripper opening (ScriptedExpert, VLAClient)."""
+
     def reset(self, env, task: dict) -> None:  # noqa: D401
         pass
 
@@ -64,10 +68,18 @@ DOOR_SIDE_YAWS = (0.0, -0.4, 0.4)  # rad the hand turns from the panel's directi
 FLAP_OUT = 0.12  # m: how far out along the door normal the hand backs off after letting a flap door go
 FAUCET_UNDER, FAUCET_PUSH = 0.045, 0.05  # m: closed fingers start this far below the lever tip, then travel up this far
 FLAP_TILTS = (0.0, 0.35, 0.7, 1.35)  # rad below the door's horizontal for the hand on a flap-door bar; chosen per task
-ROLL_TRIES = (0.0, 0.2, -0.2, 0.4, -0.4)  # rad of wrist roll about the tool axis tried when a plan parks a joint on its stop
+ROLL_TRIES = (
+    0.0,
+    0.2,
+    -0.2,
+    0.4,
+    -0.4,
+)  # rad of wrist roll about the tool axis tried when a plan parks a joint on its stop
 MAX_REPLANS = 35  # (yaw, roll) combinations a re-plan may try
 YAW_TRIES = (0.0, 0.15, -0.15, 0.3, -0.3, 0.5, -0.5)  # rad of grasp yaw about the vertical, likewise
-LIMIT_PLAN_STEPS = 38  # a plan with a joint on its stop longer than this is re-planned off the stops (quality flags at 40)
+LIMIT_PLAN_STEPS = (
+    38  # a plan with a joint on its stop longer than this is re-planned off the stops (quality flags at 40)
+)
 REPLAN_ACCEPT_STEPS = 30  # a re-plan this clear of the stops is taken at once; a longer one only as the best of all
 FLAP_RELEASE = 0.5  # rad; a bottom-hinged door is let go here and falls to its flat stop (its handle swings
 # toward the base as it opens, and past this angle the wrist would have to fold back under the arm)
@@ -92,333 +104,444 @@ class ScriptedExpert(Policy):
         x = env.data.site("eef").xmat.reshape(3, 3)[:, 0]
         return yaw + np.pi if np.cos(yaw - np.arctan2(x[1], x[0])) < -0.5 else yaw
 
+    _FAMILY_PLANS = {
+        "counter_to_sink": "_pick_and_place",
+        "counter_to_counter": "_pick_and_place",
+        "move_on_table": "_pick_and_place",
+        "open_drawer": "_open_drawer",
+        "put_in_drawer": "_put_in_drawer",
+        "wipe_counter": "_wipe_counter",
+        "close_drawer": "_close_drawer",
+        "close_door": "_close_door",
+        "open_door": "_open_door",
+        "open_fridge": "_open_fridge",
+        "open_oven": "_open_flap_door",
+        "open_dishwasher": "_open_flap_door",
+        "turn_on_faucet": "_turn_on_faucet",
+        "load_dishwasher": "_dishwasher_pick_place",
+        "unload_dishwasher": "_dishwasher_pick_place",
+    }
+
     def _waypoints(self, env, task: dict) -> list[tuple]:
         """(pos, R, gripper, steps[, via[, base]]) list. base is a room-frame (x, y, yaw) the base stands at for
-        that waypoint (None: where it already is); pos None keeps the arm's joints while the base drives."""
+        that waypoint (None: where it already is); pos None keeps the arm's joints while the base drives.
+        o and c, passed to each family's plan, are the gripper's open and closed targets."""
         fam, o, c = task["family"], getattr(env, "finger_open", FINGER_OPEN), 0.0
         if fam == "counter_to_counter" and env.drive_to is not None:
             return self._drive_and_place(env, task, o, c)
-        if fam in ("counter_to_sink", "counter_to_counter", "move_on_table"):
-            p = env.body_pos(task["object_id"])
-            gz = p[2] + min(0.01, env.obj_half_h(task["object_id"]) * 0.2)
-            tgt = env.place_point(task)
-            g = env.grasp(task["object_id"])
-            yaw = env.run_yaw()  # fingers close across the counter, whichever wall it stands on
-            if g is not None:  # rim or handle grasp: same xy offset at the set-down, eef kept at its height over the body
-                p = p + np.array([g["off"][0], g["off"][1], 0.0])
-                tgt = tgt + np.array([g["off"][0], g["off"][1], g["z"] - env.body_pos(task["object_id"])[2]])
-                gz, yaw = g["z"], g["yaw"]
-            R = ik.down(self._grip_yaw(env, yaw))
-            s = self.seg_steps
-            lift = [((p[0], p[1], gz + 0.22), R, c, s)]
-            if g is not None:  # a wide object tips in the pads as it leaves the counter: lift it in short steps
-                lift = [((p[0], p[1], gz + dz), R, c, s, dz < 0.22) for dz in (0.03, 0.08, 0.15, 0.22)]
-            return [((p[0], p[1], gz + 0.18), R, o, s), ((p[0], p[1], gz + 0.02), R, o, s),
-                    ((p[0], p[1], gz), R, o, s // 2), ((p[0], p[1], gz), R, c, self.hold_steps)] + lift + [
-                    ((tgt[0], tgt[1], gz + 0.22), R, c, 2 * s),
-                    ((tgt[0], tgt[1], tgt[2]), R, c, s), ((tgt[0], tgt[1], tgt[2]), R, o, self.hold_steps),
-                    ((tgt[0], tgt[1], tgt[2] + 0.2), R, o, s)]
-        if fam == "open_drawer":
-            h, axis = env.site_pos(task["handle"]), env.pull_axis(task)
-            R = ik.down(self._grip_yaw(env, np.arctan2(axis[1], axis[0])))  # fingers close across the pull axis
-            h = h + np.array([0, 0, 0.0])
-            pre = h + np.array([0, 0, 0.12])
-            s = self.seg_steps
-            return [(pre, R, o, s), (h + 0.005 * axis, R, o, s), (h + 0.005 * axis, R, c, self.hold_steps)] + [
-                (h + (0.005 + 0.32 * k / 6) * axis, R, c, s // 2, k < 6) for k in range(1, 7)] + [
-                (h + 0.325 * axis, R, o, self.hold_steps), (h + 0.325 * axis + np.array([0, 0, 0.15]), R, o, s)]
-        if fam == "put_in_drawer":
-            # hand parallel to the counter front (yaw 90) so its long side stays clear of the overhang; the drop into
-            # the drawer is a chain of short via-point steps, because one long joint-space move bows back over the
-            # counter top and the fingers lose the mug on the slab
-            p = env.body_pos(task["object_id"])
-            gz = p[2] + min(0.01, env.obj_half_h(task["object_id"]) * 0.2)
-            tgt = env.drawer_place_point(task)
-            R = ik.down(self._grip_yaw(env, env.run_yaw() + np.pi / 2))
-            s = self.seg_steps
-            lift = gz + 0.15
-            n_steps = int(np.ceil((lift - tgt[2]) / 0.1))
-            zs = np.linspace(lift, tgt[2], n_steps + 1)[1:]
-            descent = [((tgt[0], tgt[1], z), R, c, s // 2, k < n_steps - 1) for k, z in enumerate(zs)]
-            return [((p[0], p[1], gz + 0.18), R, o, s), ((p[0], p[1], gz + 0.02), R, o, s),
-                    ((p[0], p[1], gz), R, o, s // 2), ((p[0], p[1], gz), R, c, self.hold_steps),
-                    ((p[0], p[1], lift), R, c, s), ((tgt[0], tgt[1], lift), R, c, 2 * s)] + descent + [
-                    ((tgt[0], tgt[1], tgt[2]), R, o, self.hold_steps), ((tgt[0], tgt[1], tgt[2] + 0.15), R, o, s)]
-        if fam == "wipe_counter":
-            # pinch the sponge across its short side, press it to the top and make two strokes along the counter
-            p = env.body_pos(task["object_id"])
-            top = env.place_point_top(task)
-            hh = env.obj_half_h(task["object_id"])
-            g = env.grasp(task["object_id"])
-            R = ik.down(self._grip_yaw(env, env.run_yaw() if g is None else g["yaw"]))
-            s = self.seg_steps
-            gz, press = p[2], top + hh - 0.004
-            if g is not None:  # the spatula: the pinch already has the pad tips over the top, so it is not pressed lower
-                gz = press = g["z"]
-            u = np.array([np.cos(env.run_yaw()), np.sin(env.run_yaw())])  # strokes run along the counter
-            strokes = [(p[0] + d * u[0], p[1] + d * u[1], press) for d in (0.15, -0.15, 0.15, -0.15)]
-            return [((p[0], p[1], gz + 0.15), R, o, s), ((p[0], p[1], gz), R, o, s),
-                    ((p[0], p[1], gz), R, c, self.hold_steps), ((p[0], p[1], press), R, c, s // 2)] + [
-                    (w, R, c, s, k < 3) for k, w in enumerate(strokes)] + [
-                    ((p[0], p[1], press), R, c, s), ((p[0], p[1], press), R, o, self.hold_steps),
-                    ((p[0], p[1], press + 0.15), R, o, s)]
-        if fam == "close_drawer":
-            # push the handle bar from outside with the closed fingers until the front meets the carcass
-            h, axis = env.site_pos(task["handle"]), env.pull_axis(task)
-            R = ik.down(self._grip_yaw(env, np.arctan2(axis[1], axis[0])))
-            touch = h + 0.025 * axis  # closed finger block (6 mm half) against the bar (12 mm radius)
-            s = self.seg_steps
-            shut = touch - float(self.open_at) * axis
-            return [(touch + 0.12 * axis + np.array([0, 0, 0.1]), R, c, s), (touch + 0.03 * axis, R, c, s)] + [
-                (touch + (0.03 - (0.03 + float(self.open_at)) * k / 4) * axis, R, c, s // 2, k < 4) for k in range(1, 5)] + [
-                (shut + 0.1 * axis, R, o, s)]
-        if fam == "close_door":
-            # push the handle bar back along its arc from the outside, hand nearly vertical as in open_door. The door
-            # starts open past where its outer face turns toward the base, so the hand first reaches round the free
-            # edge and pushes from the side; that reach folds the shoulder back over the panel and cannot follow the
-            # bar to closed without joint 2 on its -1.76 rad stop. At DOOR_SWITCH the hand lifts off, goes back to
-            # its start pose and pushes the rest of the way from in front
-            hinge, h, _ = env.door_geometry(task)
-            r = np.linalg.norm((h - hinge)[:2])
-            a_open = np.arctan2(*(h - hinge)[[1, 0]])
-            a_mid = a_open + float(self.open_at) - DOOR_SWITCH
-            a_end = a_open + float(self.open_at) + np.radians(3)  # a little past closed so the latch gap closes
-            s, up = self.seg_steps, np.array([0, 0, 1.0])
-            hand = getattr(env, "hand", HAND)
-            grasp = np.array([0, 0, hand["door_z"]])
-            start = (env.site_pos("eef"), env.data.site("eef").xmat.reshape(3, 3).copy())
+        if fam not in self._FAMILY_PLANS:
+            raise ValueError(f"unknown family {fam}")
+        return getattr(self, self._FAMILY_PLANS[fam])(env, task, o, c)
 
-            def pt(a):
-                return hinge + np.array([r * np.cos(a), r * np.sin(a), h[2] - hinge[2]]) + grasp
+    def _pick_and_place(self, env, task: dict, o: float, c: float) -> list[tuple]:
+        """Pick the object by its body (or rim or handle) and set it down at the place point."""
+        p = env.body_pos(task["object_id"])
+        gz = p[2] + min(0.01, env.obj_half_h(task["object_id"]) * 0.2)
+        tgt = env.place_point(task)
+        g = env.grasp(task["object_id"])
+        yaw = env.run_yaw()  # fingers close across the counter, whichever wall it stands on
+        if g is not None:  # rim or handle grasp: same xy offset at the set-down, eef kept at its height over the body
+            p = p + np.array([g["off"][0], g["off"][1], 0.0])
+            tgt = tgt + np.array([g["off"][0], g["off"][1], g["z"] - env.body_pos(task["object_id"])[2]])
+            gz, yaw = g["z"], g["yaw"]
+        R = ik.down(self._grip_yaw(env, yaw))
+        s = self.seg_steps
+        lift = [((p[0], p[1], gz + 0.22), R, c, s)]
+        if g is not None:  # a wide object tips in the pads as it leaves the counter: lift it in short steps
+            lift = [((p[0], p[1], gz + dz), R, c, s, dz < 0.22) for dz in (0.03, 0.08, 0.15, 0.22)]
+        return (
+            [
+                ((p[0], p[1], gz + 0.18), R, o, s),
+                ((p[0], p[1], gz + 0.02), R, o, s),
+                ((p[0], p[1], gz), R, o, s // 2),
+                ((p[0], p[1], gz), R, c, self.hold_steps),
+            ]
+            + lift
+            + [
+                ((tgt[0], tgt[1], gz + 0.22), R, c, 2 * s),
+                ((tgt[0], tgt[1], tgt[2]), R, c, s),
+                ((tgt[0], tgt[1], tgt[2]), R, o, self.hold_steps),
+                ((tgt[0], tgt[1], tgt[2] + 0.2), R, o, s),
+            ]
+        )
 
-            def nrm(a):
-                return -np.array([-np.sin(a), np.cos(a), 0.0])
+    def _open_drawer(self, env, task: dict, o: float, c: float) -> list[tuple]:
+        """Grip the drawer handle across the pull axis and pull the drawer out in short steps."""
+        h, axis = env.site_pos(task["handle"]), env.pull_axis(task)
+        R = ik.down(self._grip_yaw(env, np.arctan2(axis[1], axis[0])))  # fingers close across the pull axis
+        h = h + np.array([0, 0, 0.0])
+        pre = h + np.array([0, 0, 0.12])
+        s = self.seg_steps
+        return (
+            [(pre, R, o, s), (h + 0.005 * axis, R, o, s), (h + 0.005 * axis, R, c, self.hold_steps)]
+            + [(h + (0.005 + 0.32 * k / 6) * axis, R, c, s // 2, k < 6) for k in range(1, 7)]
+            + [(h + 0.325 * axis, R, o, self.hold_steps), (h + 0.325 * axis + np.array([0, 0, 0.15]), R, o, s)]
+        )
 
-            def ori(a, a_ref, flip=False, yaw=0.0):
-                # fingers along the panel at a_ref in the heading that matches the start pose (or the other one),
-                # turned with the door from there and `yaw` more
-                along = np.array([-nrm(a_ref)[1], nrm(a_ref)[0], 0.0])
-                if (np.dot(along, start[1][:, 1]) < 0) != flip:
-                    along = -along
-                rot = a - a_ref + yaw
-                ax = np.array([np.cos(rot) * along[0] - np.sin(rot) * along[1],
-                               np.sin(rot) * along[0] + np.cos(rot) * along[1]])
-                return ik.tilted(nrm(a)[:2], ax, np.radians(10))
+    def _put_in_drawer(self, env, task: dict, o: float, c: float) -> list[tuple]:
+        """Pick the object and lower it onto the open drawer's tray in short via steps."""
+        # hand parallel to the counter front (yaw 90) so its long side stays clear of the overhang; the drop into
+        # the drawer is a chain of short via-point steps, because one long joint-space move bows back over the
+        # counter top and the fingers lose the mug on the slab
+        p = env.body_pos(task["object_id"])
+        gz = p[2] + min(0.01, env.obj_half_h(task["object_id"]) * 0.2)
+        tgt = env.drawer_place_point(task)
+        R = ik.down(self._grip_yaw(env, env.run_yaw() + np.pi / 2))
+        s = self.seg_steps
+        lift = gz + 0.15
+        n_steps = int(np.ceil((lift - tgt[2]) / 0.1))
+        zs = np.linspace(lift, tgt[2], n_steps + 1)[1:]
+        descent = [((tgt[0], tgt[1], z), R, c, s // 2, k < n_steps - 1) for k, z in enumerate(zs)]
+        return (
+            [
+                ((p[0], p[1], gz + 0.18), R, o, s),
+                ((p[0], p[1], gz + 0.02), R, o, s),
+                ((p[0], p[1], gz), R, o, s // 2),
+                ((p[0], p[1], gz), R, c, self.hold_steps),
+                ((p[0], p[1], lift), R, c, s),
+                ((tgt[0], tgt[1], lift), R, c, 2 * s),
+            ]
+            + descent
+            + [((tgt[0], tgt[1], tgt[2]), R, o, self.hold_steps), ((tgt[0], tgt[1], tgt[2] + 0.15), R, o, s)]
+        )
 
-            def plan(yaw, flip):
-                out = [(pt(a_open) + hand["door_push"] * nrm(a_open) + 0.15 * up, ori(a_open, a_open, yaw=yaw), c, s),
-                       (pt(a_open) + hand["door_push"] * nrm(a_open), ori(a_open, a_open, yaw=yaw), c, s)]
-                for k in range(1, 5):
-                    a = a_open + (a_mid - a_open) * k / 4
-                    out.append((pt(a) + hand["door_push"] * nrm(a), ori(a, a_open, yaw=yaw), c, s // 2, k < 4))
-                out += [(out[-1][0] + 0.15 * up, out[-1][1], c, s), (*start, c, s),
-                        (pt(a_mid) + 0.2 * nrm(a_mid) + 0.35 * up, ori(a_mid, a_mid, flip), c, s),
-                        (pt(a_mid) + 0.2 * nrm(a_mid), ori(a_mid, a_mid, flip), c, s),
-                        (pt(a_mid) + hand["door_push"] * nrm(a_mid), ori(a_mid, a_mid, flip), c, s)]
-                for k in range(1, 5):
-                    a = a_mid + (a_end - a_mid) * k / 4
-                    out.append((pt(a) + hand["door_push"] * nrm(a), ori(a, a_mid, flip), c, s // 2, k < 4))
-                out.append((out[-1][0] + 0.15 * up, out[-1][1], o, s))
-                return out
+    def _wipe_counter(self, env, task: dict, o: float, c: float) -> list[tuple]:
+        """Pick the sponge and stroke it along the counter pressed to the top."""
+        # pinch the sponge across its short side, press it to the top and make two strokes along the counter
+        p = env.body_pos(task["object_id"])
+        top = env.place_point_top(task)
+        hh = env.obj_half_h(task["object_id"])
+        g = env.grasp(task["object_id"])
+        R = ik.down(self._grip_yaw(env, env.run_yaw() if g is None else g["yaw"]))
+        s = self.seg_steps
+        gz, press = p[2], top + hh - 0.004
+        if g is not None:  # the spatula: the pinch already has the pad tips over the top, so it is not pressed lower
+            gz = press = g["z"]
+        u = np.array([np.cos(env.run_yaw()), np.sin(env.run_yaw())])  # strokes run along the counter
+        strokes = [(p[0] + d * u[0], p[1] + d * u[1], press) for d in (0.15, -0.15, 0.15, -0.15)]
+        return (
+            [
+                ((p[0], p[1], gz + 0.15), R, o, s),
+                ((p[0], p[1], gz), R, o, s),
+                ((p[0], p[1], gz), R, c, self.hold_steps),
+                ((p[0], p[1], press), R, c, s // 2),
+            ]
+            + [(w, R, c, s, k < 3) for k, w in enumerate(strokes)]
+            + [
+                ((p[0], p[1], press), R, c, s),
+                ((p[0], p[1], press), R, o, self.hold_steps),
+                ((p[0], p[1], press + 0.15), R, o, s),
+            ]
+        )
 
-            # the reach round the free edge can leave joint 7 on its +2.90 stop with the hand square to the panel, and
-            # which jaw heading reaches the bar from in front depends on how far the arm turns: plan the variants
-            # and keep the one reset() would, the smallest joint 7 peak among those within 5 mm of the best IK error
-            plans = [(wps, *self._plan(env, wps)[1:])
-                     for wps in (plan(yaw, flip) for yaw in DOOR_SIDE_YAWS for flip in (False, True))]
-            best_err = min(err for _, err, _ in plans)
-            return min((pl for pl in plans if pl[1] <= best_err + 0.005), key=lambda pl: pl[2])[0]
-        if fam == "open_door":
-            # The bar handle sits 2-3 cm below the counter-top overhang, so the hand comes down nearly vertical
-            # (15 deg tilt keeps the hand body clear of the slab) with the fingers closing along the panel.
-            # Segments interpolate in joint space, so the hand first goes out in front of the counter and high,
-            # then straight down in front, then in to the bar; a direct move from HOME sweeps through the slab.
-            hinge, h, _ = env.door_geometry(task)
-            r = np.linalg.norm((h - hinge)[:2])
-            a0 = np.arctan2(*(h - hinge)[[1, 0]])
-            s, up = self.seg_steps, np.array([0, 0, 1.0])
-            # Hold the bar near its top (the grasp fails from 0.115 up): a higher wrist reaches further along the arc,
-            # and with the tilt it keeps the elbow (link4) above the swinging panel, which is solid to its full drawn
-            # height (MAN-2).
-            grasp = np.array([0, 0, 0.09])
+    def _close_drawer(self, env, task: dict, o: float, c: float) -> list[tuple]:
+        """Push the open drawer shut from in front with the closed fingers."""
+        # push the handle bar from outside with the closed fingers until the front meets the carcass
+        h, axis = env.site_pos(task["handle"]), env.pull_axis(task)
+        R = ik.down(self._grip_yaw(env, np.arctan2(axis[1], axis[0])))
+        touch = h + 0.025 * axis  # closed finger block (6 mm half) against the bar (12 mm radius)
+        s = self.seg_steps
+        shut = touch - float(self.open_at) * axis
+        return (
+            [(touch + 0.12 * axis + np.array([0, 0, 0.1]), R, c, s), (touch + 0.03 * axis, R, c, s)]
+            + [(touch + (0.03 - (0.03 + float(self.open_at)) * k / 4) * axis, R, c, s // 2, k < 4) for k in range(1, 5)]
+            + [(shut + 0.1 * axis, R, o, s)]
+        )
 
-            def pt(a):
-                return hinge + np.array([r * np.cos(a), r * np.sin(a), h[2] - hinge[2]]) + grasp
+    def _close_door(self, env, task: dict, o: float, c: float) -> list[tuple]:
+        """Push the open cabinet door shut: first from the side, then from in front."""
+        # push the handle bar back along its arc from the outside, hand nearly vertical as in open_door. The door
+        # starts open past where its outer face turns toward the base, so the hand first reaches round the free
+        # edge and pushes from the side; that reach folds the shoulder back over the panel and cannot follow the
+        # bar to closed without joint 2 on its -1.76 rad stop. At DOOR_SWITCH the hand lifts off, goes back to
+        # its start pose and pushes the rest of the way from in front
+        hinge, h, _ = env.door_geometry(task)
+        r = np.linalg.norm((h - hinge)[:2])
+        a_open = np.arctan2(*(h - hinge)[[1, 0]])
+        a_mid = a_open + float(self.open_at) - DOOR_SWITCH
+        a_end = a_open + float(self.open_at) + np.radians(3)  # a little past closed so the latch gap closes
+        s, up = self.seg_steps, np.array([0, 0, 1.0])
+        hand = getattr(env, "hand", HAND)
+        grasp = np.array([0, 0, hand["door_z"]])
+        start = (env.site_pos("eef"), env.data.site("eef").xmat.reshape(3, 3).copy())
 
-            def nrm(a):  # outward normal of the panel at door angle a (swings outward, clockwise from above)
-                return -np.array([-np.sin(a), np.cos(a), 0.0])
+        def pt(a):
+            return hinge + np.array([r * np.cos(a), r * np.sin(a), h[2] - hinge[2]]) + grasp
 
-            along = np.array([-nrm(a0)[1], nrm(a0)[0], 0.0])
-            if np.dot(along, env.data.site("eef").xmat.reshape(3, 3)[:, 1]) < 0:
-                along = -along  # equivalent parallel-jaw grasp that does not spin the wrist half a turn
+        def nrm(a):
+            return -np.array([-np.sin(a), np.cos(a), 0.0])
 
-            def ori(a):
-                rot = DOOR_TURN * (a - a0)
-                ax = np.array([np.cos(rot) * along[0] - np.sin(rot) * along[1],
-                               np.sin(rot) * along[0] + np.cos(rot) * along[1]])
-                return ik.tilted(nrm(a)[:2], ax, np.radians(15))
+        def ori(a, a_ref, flip=False, yaw=0.0):
+            # fingers along the panel at a_ref in the heading that matches the start pose (or the other one),
+            # turned with the door from there and `yaw` more
+            along = np.array([-nrm(a_ref)[1], nrm(a_ref)[0], 0.0])
+            if (np.dot(along, start[1][:, 1]) < 0) != flip:
+                along = -along
+            rot = a - a_ref + yaw
+            ax = np.array(
+                [np.cos(rot) * along[0] - np.sin(rot) * along[1], np.sin(rot) * along[0] + np.cos(rot) * along[1]]
+            )
+            return ik.tilted(nrm(a)[:2], ax, np.radians(10))
 
-            n0, g = nrm(a0), pt(a0)
-            out = [(g + 0.2 * n0 + 0.35 * up, ori(a0), o, s), (g + 0.2 * n0, ori(a0), o, s),
-                   (g + 0.005 * n0, ori(a0), o, s), (g + 0.005 * n0, ori(a0), c, self.hold_steps)]
-            for k in range(1, 9):  # one smooth via-point pull: stop-and-go pulses let the bar slide off the pads
-                a = a0 - np.radians(80) * k / 8
-                out.append((pt(a) + 0.005 * nrm(a), ori(a), c, s // 2, k < 8))
-            out.append((out[-1][0], out[-1][1], o, self.hold_steps))
+        def plan(yaw, flip):
+            out = [
+                (pt(a_open) + hand["door_push"] * nrm(a_open) + 0.15 * up, ori(a_open, a_open, yaw=yaw), c, s),
+                (pt(a_open) + hand["door_push"] * nrm(a_open), ori(a_open, a_open, yaw=yaw), c, s),
+            ]
+            for k in range(1, 5):
+                a = a_open + (a_mid - a_open) * k / 4
+                out.append((pt(a) + hand["door_push"] * nrm(a), ori(a, a_open, yaw=yaw), c, s // 2, k < 4))
+            out += [
+                (out[-1][0] + 0.15 * up, out[-1][1], c, s),
+                (*start, c, s),
+                (pt(a_mid) + 0.2 * nrm(a_mid) + 0.35 * up, ori(a_mid, a_mid, flip), c, s),
+                (pt(a_mid) + 0.2 * nrm(a_mid), ori(a_mid, a_mid, flip), c, s),
+                (pt(a_mid) + hand["door_push"] * nrm(a_mid), ori(a_mid, a_mid, flip), c, s),
+            ]
+            for k in range(1, 5):
+                a = a_mid + (a_end - a_mid) * k / 4
+                out.append((pt(a) + hand["door_push"] * nrm(a), ori(a, a_mid, flip), c, s // 2, k < 4))
             out.append((out[-1][0] + 0.15 * up, out[-1][1], o, s))
             return out
-        if fam == "open_fridge":
-            # The door is hinged at the fixture's left and swings out into the room. From this base the arm can
-            # follow the bar's arc only to about 40 deg, so the plan has two parts: the fingers close round the
-            # vertical bar from beyond the free edge and pull to 40 deg, then slide off the bar's free side, round
-            # the free edge to the inside face and push the door on with the closed fingertips.
-            hinge, h, _ = env.door_geometry(task)
-            r = np.linalg.norm((h - hinge)[:2])
-            a0 = np.arctan2(*(h - hinge)[[1, 0]])
-            m = fridge_mirror(env.fx[task["fixture"]])  # -1: right-hinged, the whole plan is the mirror image
-            yaw = env.fx[task["fixture"]].get("yaw", 0.0)  # a fridge on a side wall turns the whole plan with it
-            qa = lambda q: yaw + (np.pi if m < 0 else 0.0) + m * q  # world heading of the panel at door angle q
-            s, up = self.seg_steps, np.array([0, 0, 1.0])
 
-            def along(a):  # from the hinge toward the free edge, panel heading a
-                return np.array([np.cos(a), np.sin(a), 0.0])
+        # the reach round the free edge can leave joint 7 on its +2.90 stop with the hand square to the panel, and
+        # which jaw heading reaches the bar from in front depends on how far the arm turns: plan the variants
+        # and keep the one reset() would, the smallest joint 7 peak among those within 5 mm of the best IK error
+        plans = [
+            (wps, *self._plan(env, wps)[1:])
+            for wps in (plan(yaw, flip) for yaw in DOOR_SIDE_YAWS for flip in (False, True))
+        ]
+        best_err = min(err for _, err, _ in plans)
+        return min((pl for pl in plans if pl[1] <= best_err + 0.005), key=lambda pl: pl[2])[0]
 
-            def nrm(a):  # outward normal of the panel (left: swings counter-clockwise from above; right: clockwise)
-                return m * np.array([-np.sin(a), np.cos(a), 0.0])
+    def _open_door(self, env, task: dict, o: float, c: float) -> list[tuple]:
+        """Grip the cabinet door's handle bar and swing it open along the handle's arc."""
+        # The bar handle sits 2-3 cm below the counter-top overhang, so the hand comes down nearly vertical
+        # (15 deg tilt keeps the hand body clear of the slab) with the fingers closing along the panel.
+        # Segments interpolate in joint space, so the hand first goes out in front of the counter and high,
+        # then straight down in front, then in to the bar; a direct move from HOME sweeps through the slab.
+        hinge, h, _ = env.door_geometry(task)
+        r = np.linalg.norm((h - hinge)[:2])
+        a0 = np.arctan2(*(h - hinge)[[1, 0]])
+        s, up = self.seg_steps, np.array([0, 0, 1.0])
+        # Hold the bar near its top (the grasp fails from 0.115 up): a higher wrist reaches further along the arc,
+        # and with the tilt it keeps the elbow (link4) above the swinging panel, which is solid to its full drawn
+        # height (MAN-2).
+        grasp = np.array([0, 0, 0.09])
 
-            def pt(a):
-                return hinge + (r + FRIDGE_HOOK_ALONG) * along(a) + FRIDGE_HOOK_OUT * nrm(a) + (h[2] - hinge[2]) * up
+        def pt(a):
+            return hinge + np.array([r * np.cos(a), r * np.sin(a), h[2] - hinge[2]]) + grasp
 
-            def ori(a):  # the other parallel-jaw heading: the first one starts joint 7 on its +2.90 stop
-                return ik.facing(-along(a0 + FRIDGE_TURN * (a - a0))[:2]) @ FRIDGE_FLIP
+        def nrm(a):  # outward normal of the panel at door angle a (swings outward, clockwise from above)
+            return -np.array([-np.sin(a), np.cos(a), 0.0])
 
-            def push(q):  # eef with the closed fingertips on the inside face at door angle q
-                return hinge + FRIDGE_PUSH_AT * along(qa(q)) - FRIDGE_PUSH_GAP * nrm(qa(q)) + (h[2] - hinge[2]) * up
+        along = np.array([-nrm(a0)[1], nrm(a0)[0], 0.0])
+        if np.dot(along, env.data.site("eef").xmat.reshape(3, 3)[:, 1]) < 0:
+            along = -along  # equivalent parallel-jaw grasp that does not spin the wrist half a turn
 
-            def pori(q):
-                return ik.facing(nrm(qa(q))[:2]) @ FRIDGE_PUSH_ROLL
+        def ori(a):
+            rot = DOOR_TURN * (a - a0)
+            ax = np.array(
+                [np.cos(rot) * along[0] - np.sin(rot) * along[1], np.sin(rot) * along[0] + np.cos(rot) * along[1]]
+            )
+            return ik.tilted(nrm(a)[:2], ax, np.radians(15))
 
-            d0, g = along(a0), pt(a0)
-            out = [(g + 0.25 * d0 + 0.15 * up, ori(a0), o, s), (g + 0.25 * d0, ori(a0), o, s),
-                   (g + 0.08 * d0, ori(a0), o, s, True), (g, ori(a0), o, s), (g, ori(a0), c, self.hold_steps)]
-            for k in range(1, 5):
-                a = a0 + m * FRIDGE_HOOK * k / 4
-                out.append((pt(a), ori(a), c, FRIDGE_PULL_STEPS, k < 4))
-            a, q1 = a0 + m * FRIDGE_HOOK, FRIDGE_HOOK
-            off = pt(a) + FRIDGE_CLEAR * along(a)
-            back = hinge - off
-            back[2] = 0.0
-            out += [(off, ori(a), c, s), (off + FRIDGE_SETTLE_IN * back / np.linalg.norm(back), ori(a), c, FRIDGE_SETTLE_STEPS)]
+        n0, g = nrm(a0), pt(a0)
+        out = [
+            (g + 0.2 * n0 + 0.35 * up, ori(a0), o, s),
+            (g + 0.2 * n0, ori(a0), o, s),
+            (g + 0.005 * n0, ori(a0), o, s),
+            (g + 0.005 * n0, ori(a0), c, self.hold_steps),
+        ]
+        for k in range(1, 9):  # one smooth via-point pull: stop-and-go pulses let the bar slide off the pads
+            a = a0 - np.radians(80) * k / 8
+            out.append((pt(a) + 0.005 * nrm(a), ori(a), c, s // 2, k < 8))
+        out.append((out[-1][0], out[-1][1], o, self.hold_steps))
+        out.append((out[-1][0] + 0.15 * up, out[-1][1], o, s))
+        return out
 
-            def rest(q1):
-                # Round the free edge to the inside face and push on, planned for the door at q1. Sliding off the
-                # bar knocks the door back by an amount that depends on the hinge side and the room (about 10 deg),
-                # and the rounding point is only FRIDGE_BACK behind the panel, so act() calls this again with the
-                # angle measured after FRIDGE_SETTLE_STEPS and replaces the nominal plan built here for FRIDGE_HOOK.
-                far = hinge + FRIDGE_FAR * along(qa(q1)) + (h[2] - hinge[2]) * up  # clear of the free edge
-                wps = [(far - FRIDGE_BACK * nrm(qa(q1)), pori(q1), c, s, True),
-                       (push(q1) - FRIDGE_BACK * nrm(qa(q1)), pori(q1), c, s)]
-                start = min(q1 - np.radians(3), FRIDGE_PUSH_END)
-                for k in range(7):
-                    q = start + (FRIDGE_PUSH_END - start) * k / 6
-                    wps.append((push(q), pori(q), c, FRIDGE_PULL_STEPS, k < 6))
-                q = FRIDGE_PUSH_END
-                return wps + [(push(q) - 0.12 * nrm(qa(q)), pori(q), c, s),
-                              (push(q) - 0.12 * nrm(qa(q)) + 0.1 * up, pori(q), c, s)]
+    def _open_fridge(self, env, task: dict, o: float, c: float) -> list[tuple]:
+        """Grip the fridge handle and swing the door open along its arc."""
+        # The door is hinged at the fixture's left and swings out into the room. From this base the arm can
+        # follow the bar's arc only to about 40 deg, so the plan has two parts: the fingers close round the
+        # vertical bar from beyond the free edge and pull to 40 deg, then slide off the bar's free side, round
+        # the free edge to the inside face and push the door on with the closed fingertips.
+        hinge, h, _ = env.door_geometry(task)
+        r = np.linalg.norm((h - hinge)[:2])
+        a0 = np.arctan2(*(h - hinge)[[1, 0]])
+        m = fridge_mirror(env.fx[task["fixture"]])  # -1: right-hinged, the whole plan is the mirror image
+        yaw = env.fx[task["fixture"]].get("yaw", 0.0)  # a fridge on a side wall turns the whole plan with it
+        qa = lambda q: yaw + (np.pi if m < 0 else 0.0) + m * q  # world heading of the panel at door angle q
+        s, up = self.seg_steps, np.array([0, 0, 1.0])
 
-            self.fridge_replan = (sum(w[3] for w in out), rest, f'{task["fixture"]}_door')
-            return out + rest(q1)
-        if fam in ("open_oven", "open_dishwasher"):
-            # The bar sits on the outside of a bottom-hinged door, so a top-down grasp would put the hand body in
-            # the panel as soon as the door tilts. The hand points into the panel with the fingers closing across
-            # the bar vertically, and that frame turns with the door; at FLAP_RELEASE the gripper opens and gravity
-            # takes the door to its flat stop.
-            pivot, h, _ = env.flap_geometry(task)
-            hand = getattr(env, "hand", HAND)  # pad and wrist geometry of the arm that is loaded
-            n = env.pull_axis(task)  # outward normal of the closed panel
-            s, up = self.seg_steps, np.array([0, 0, 1.0])
-            a = np.cross(up, n)  # hinge axis direction
-            rel = h - pivot
+        def along(a):  # from the hinge toward the free edge, panel heading a
+            return np.array([np.cos(a), np.sin(a), 0.0])
 
-            def pt(q):
-                """Handle position after the door turns q about the hinge (top edge forward and down)."""
-                return pivot + rel * np.cos(q) + np.cross(a, rel) * np.sin(q) + a * np.dot(a, rel) * (1 - np.cos(q))
+        def nrm(a):  # outward normal of the panel (left: swings counter-clockwise from above; right: clockwise)
+            return m * np.array([-np.sin(a), np.cos(a), 0.0])
 
-            def nrm(q):
-                return n * np.cos(q) - up * np.sin(q)
+        def pt(a):
+            return hinge + (r + FRIDGE_HOOK_ALONG) * along(a) + FRIDGE_HOOK_OUT * nrm(a) + (h[2] - hinge[2]) * up
 
-            def ori(q, tilt):
-                # pointing into the panel and `tilt` below the door's horizontal, fingers closing along the door's
-                # up direction tilted the same way; a bigger tilt keeps the wrist higher and closer to the base
-                nq, uq = nrm(q), up * np.cos(q) + n * np.sin(q)
-                z = -nq * np.cos(tilt) - uq * np.sin(tilt)
-                y = uq * np.cos(tilt) - nq * np.sin(tilt)
-                if np.dot(y, env.data.site("eef").xmat.reshape(3, 3)[:, 1]) < 0:
-                    y = -y
-                return np.column_stack([np.cross(y, z), y, z])
+        def ori(a):  # the other parallel-jaw heading: the first one starts joint 7 on its +2.90 stop
+            return ik.facing(-along(a0 + FRIDGE_TURN * (a - a0))[:2]) @ FRIDGE_FLIP
 
-            # sign check for pt: the handle must move outward (+n) as q grows
-            if np.dot(pt(0.3) - pt(0.0), n) < 0:
-                a = -a
+        def push(q):  # eef with the closed fingertips on the inside face at door angle q
+            return hinge + FRIDGE_PUSH_AT * along(qa(q)) - FRIDGE_PUSH_GAP * nrm(qa(q)) + (h[2] - hinge[2]) * up
 
-            def chain(tilt):
-                # the hand keeps the grasp orientation through the pull and the round bar turns between the pads:
-                # turning with the door pitches the hand up as the bar swings in, which the wrist reaches only with
-                # joint 5 or joint 2 on its stop
-                R = ori(0, tilt)
-                out = [(pt(0) + 0.18 * n + 0.05 * up, R, o, s), (pt(0) + hand["flap_bar"] * n, R, o, s),
-                       (pt(0) + hand["flap_bar"] * n, R, c, self.hold_steps)]
-                for k in range(1, 9):
-                    q = FLAP_RELEASE * k / 8
-                    out.append((pt(q) + hand["flap_bar"] * nrm(q), R, c, s // 2, k < 8))
-                q = FLAP_RELEASE
-                out.append((pt(q) + hand["flap_bar"] * nrm(q), R, o, self.hold_steps))
-                out.append((pt(q) + FLAP_OUT * nrm(q) + hand["flap_up"] * up, R, o, s))
-                return out
+        def pori(q):
+            return ik.facing(nrm(qa(q))[:2]) @ FRIDGE_PUSH_ROLL
 
-            # which tilt reaches depends on the bar's height and distance (oven bars sit higher than dishwasher
-            # bars), so take the candidate whose whole chain has the smallest IK residual; an arm may rule out a tilt
-            # whose hand body meets the fixture, which IK does not see (menagerie.HAND)
-            tilts = hand.get("flap_tilts", {}).get(fam, FLAP_TILTS)
-            return min((chain(t) for t in tilts), key=lambda wps: self._chain_error(env, wps))
-        if fam == "turn_on_faucet":
-            # push the lever tip up from below with the closed fingers: hand horizontal, pointing at the wall
-            tip = env.site_pos(task["handle"])
-            n = env.pull_axis(task)  # the counter front direction; the lever sits at the back of the counter
-            R = ik.facing(-n)
-            if np.dot(R[:, 1], env.data.site("eef").xmat.reshape(3, 3)[:, 1]) < 0:
-                R = R @ np.diag([-1, -1, 1])  # same grasp, half a turn less wrist roll
-            s = self.seg_steps
-            # the tip rises at most 3.8 cm over the lever's 1.2 rad range, so the push stops short of driving it
-            # into the stop: 5 cm of hand travel from 3.5 cm below the tip lands the lever near 0.9 rad
-            under = tip - np.array([0, 0, FAUCET_UNDER])
-            lift = FAUCET_PUSH
-            return [(under + 0.12 * n + np.array([0, 0, 0.06]), R, c, s), (under + 0.12 * n, R, c, s),
-                    (under, R, c, s)] + [(under + np.array([0, 0, lift * k / 3]), R, c, s // 2, k < 3) for k in (1, 2, 3)] + [
-                    (under + np.array([0, 0, lift]) + 0.12 * n, R, c, s)]
-        if fam in ("load_dishwasher", "unload_dishwasher"):
-            # pick by the body as for counter_to_sink; the set-down into the rack (or onto the counter) is a chain of
-            # short via-point steps like put_in_drawer, so the joint-space path does not bow through the rack rails
-            p = env.body_pos(task["object_id"])
-            gz = p[2] + min(0.01, env.obj_half_h(task["object_id"]) * 0.2)
-            tgt = env.rack_place_point(task) if fam == "load_dishwasher" else env.counter_place_point(task)
-            R = ik.down(self._grip_yaw(env, env.run_yaw()))
-            s = self.seg_steps
-            lift = max(gz, tgt[2]) + 0.15
-            n_steps = max(1, int(np.ceil((lift - tgt[2]) / 0.1)))
-            zs = np.linspace(lift, tgt[2], n_steps + 1)[1:]
-            descent = [((tgt[0], tgt[1], z), R, c, s // 2, k < n_steps - 1) for k, z in enumerate(zs)]
-            # the approach to an object low in the rack is the same kind of chain: one long joint-space move from
-            # HOME dips the hand onto the dishwasher's top edge on the way down
-            n_app = max(1, int(np.ceil((lift - gz - 0.02) / 0.1)))
-            zs = np.linspace(lift, gz + 0.02, n_app + 1)[1:]
-            approach = [((p[0], p[1], z), R, o, s // 2, k < n_app - 1) for k, z in enumerate(zs)]
-            rise = [((p[0], p[1], z), R, c, s // 2, k < n_app - 1) for k, z in enumerate(zs[::-1])]  # same pace up
-            return [((p[0], p[1], lift), R, o, s)] + approach + [
-                    ((p[0], p[1], gz), R, o, s // 2), ((p[0], p[1], gz), R, c, self.hold_steps)] + rise + [
-                    ((p[0], p[1], lift), R, c, s // 2), ((tgt[0], tgt[1], lift), R, c, 2 * s)] + descent + [
-                    ((tgt[0], tgt[1], tgt[2]), R, o, self.hold_steps), ((tgt[0], tgt[1], tgt[2] + 0.15), R, o, s)]
-        raise ValueError(f"unknown family {fam}")
+        d0, g = along(a0), pt(a0)
+        out = [
+            (g + 0.25 * d0 + 0.15 * up, ori(a0), o, s),
+            (g + 0.25 * d0, ori(a0), o, s),
+            (g + 0.08 * d0, ori(a0), o, s, True),
+            (g, ori(a0), o, s),
+            (g, ori(a0), c, self.hold_steps),
+        ]
+        for k in range(1, 5):
+            a = a0 + m * FRIDGE_HOOK * k / 4
+            out.append((pt(a), ori(a), c, FRIDGE_PULL_STEPS, k < 4))
+        a, q1 = a0 + m * FRIDGE_HOOK, FRIDGE_HOOK
+        off = pt(a) + FRIDGE_CLEAR * along(a)
+        back = hinge - off
+        back[2] = 0.0
+        out += [
+            (off, ori(a), c, s),
+            (off + FRIDGE_SETTLE_IN * back / np.linalg.norm(back), ori(a), c, FRIDGE_SETTLE_STEPS),
+        ]
+
+        def rest(q1):
+            # Round the free edge to the inside face and push on, planned for the door at q1. Sliding off the
+            # bar knocks the door back by an amount that depends on the hinge side and the room (about 10 deg),
+            # and the rounding point is only FRIDGE_BACK behind the panel, so act() calls this again with the
+            # angle measured after FRIDGE_SETTLE_STEPS and replaces the nominal plan built here for FRIDGE_HOOK.
+            far = hinge + FRIDGE_FAR * along(qa(q1)) + (h[2] - hinge[2]) * up  # clear of the free edge
+            wps = [
+                (far - FRIDGE_BACK * nrm(qa(q1)), pori(q1), c, s, True),
+                (push(q1) - FRIDGE_BACK * nrm(qa(q1)), pori(q1), c, s),
+            ]
+            start = min(q1 - np.radians(3), FRIDGE_PUSH_END)
+            for k in range(7):
+                q = start + (FRIDGE_PUSH_END - start) * k / 6
+                wps.append((push(q), pori(q), c, FRIDGE_PULL_STEPS, k < 6))
+            q = FRIDGE_PUSH_END
+            return wps + [
+                (push(q) - 0.12 * nrm(qa(q)), pori(q), c, s),
+                (push(q) - 0.12 * nrm(qa(q)) + 0.1 * up, pori(q), c, s),
+            ]
+
+        self.fridge_replan = (sum(w[3] for w in out), rest, f"{task['fixture']}_door")
+        return out + rest(q1)
+
+    def _open_flap_door(self, env, task: dict, o: float, c: float) -> list[tuple]:
+        """Pull a bottom-hinged door (oven, dishwasher) down by its bar and let it fall open."""
+        fam = task["family"]
+        # The bar sits on the outside of a bottom-hinged door, so a top-down grasp would put the hand body in
+        # the panel as soon as the door tilts. The hand points into the panel with the fingers closing across
+        # the bar vertically, and that frame turns with the door; at FLAP_RELEASE the gripper opens and gravity
+        # takes the door to its flat stop.
+        pivot, h, _ = env.flap_geometry(task)
+        hand = getattr(env, "hand", HAND)  # pad and wrist geometry of the arm that is loaded
+        n = env.pull_axis(task)  # outward normal of the closed panel
+        s, up = self.seg_steps, np.array([0, 0, 1.0])
+        a = np.cross(up, n)  # hinge axis direction
+        rel = h - pivot
+
+        def pt(q):
+            """Handle position after the door turns q about the hinge (top edge forward and down)."""
+            return pivot + rel * np.cos(q) + np.cross(a, rel) * np.sin(q) + a * np.dot(a, rel) * (1 - np.cos(q))
+
+        def nrm(q):
+            return n * np.cos(q) - up * np.sin(q)
+
+        def ori(q, tilt):
+            # pointing into the panel and `tilt` below the door's horizontal, fingers closing along the door's
+            # up direction tilted the same way; a bigger tilt keeps the wrist higher and closer to the base
+            nq, uq = nrm(q), up * np.cos(q) + n * np.sin(q)
+            z = -nq * np.cos(tilt) - uq * np.sin(tilt)
+            y = uq * np.cos(tilt) - nq * np.sin(tilt)
+            if np.dot(y, env.data.site("eef").xmat.reshape(3, 3)[:, 1]) < 0:
+                y = -y
+            return np.column_stack([np.cross(y, z), y, z])
+
+        # sign check for pt: the handle must move outward (+n) as q grows
+        if np.dot(pt(0.3) - pt(0.0), n) < 0:
+            a = -a
+
+        def chain(tilt):
+            # the hand keeps the grasp orientation through the pull and the round bar turns between the pads:
+            # turning with the door pitches the hand up as the bar swings in, which the wrist reaches only with
+            # joint 5 or joint 2 on its stop
+            R = ori(0, tilt)
+            out = [
+                (pt(0) + 0.18 * n + 0.05 * up, R, o, s),
+                (pt(0) + hand["flap_bar"] * n, R, o, s),
+                (pt(0) + hand["flap_bar"] * n, R, c, self.hold_steps),
+            ]
+            for k in range(1, 9):
+                q = FLAP_RELEASE * k / 8
+                out.append((pt(q) + hand["flap_bar"] * nrm(q), R, c, s // 2, k < 8))
+            q = FLAP_RELEASE
+            out.append((pt(q) + hand["flap_bar"] * nrm(q), R, o, self.hold_steps))
+            out.append((pt(q) + FLAP_OUT * nrm(q) + hand["flap_up"] * up, R, o, s))
+            return out
+
+        # which tilt reaches depends on the bar's height and distance (oven bars sit higher than dishwasher
+        # bars), so take the candidate whose whole chain has the smallest IK residual; an arm may rule out a tilt
+        # whose hand body meets the fixture, which IK does not see (menagerie.HAND)
+        tilts = hand.get("flap_tilts", {}).get(fam, FLAP_TILTS)
+        return min((chain(t) for t in tilts), key=lambda wps: self._chain_error(env, wps))
+
+    def _turn_on_faucet(self, env, task: dict, o: float, c: float) -> list[tuple]:
+        """Lift the faucet lever from under it at the back of the counter."""
+        # push the lever tip up from below with the closed fingers: hand horizontal, pointing at the wall
+        tip = env.site_pos(task["handle"])
+        n = env.pull_axis(task)  # the counter front direction; the lever sits at the back of the counter
+        R = ik.facing(-n)
+        if np.dot(R[:, 1], env.data.site("eef").xmat.reshape(3, 3)[:, 1]) < 0:
+            R = R @ np.diag([-1, -1, 1])  # same grasp, half a turn less wrist roll
+        s = self.seg_steps
+        # the tip rises at most 3.8 cm over the lever's 1.2 rad range, so the push stops short of driving it
+        # into the stop: 5 cm of hand travel from 3.5 cm below the tip lands the lever near 0.9 rad
+        under = tip - np.array([0, 0, FAUCET_UNDER])
+        lift = FAUCET_PUSH
+        return (
+            [(under + 0.12 * n + np.array([0, 0, 0.06]), R, c, s), (under + 0.12 * n, R, c, s), (under, R, c, s)]
+            + [(under + np.array([0, 0, lift * k / 3]), R, c, s // 2, k < 3) for k in (1, 2, 3)]
+            + [(under + np.array([0, 0, lift]) + 0.12 * n, R, c, s)]
+        )
+
+    def _dishwasher_pick_place(self, env, task: dict, o: float, c: float) -> list[tuple]:
+        """Load or unload the dishwasher: pick by the body and set down in short via steps."""
+        fam = task["family"]
+        # pick by the body as for counter_to_sink; the set-down into the rack (or onto the counter) is a chain of
+        # short via-point steps like put_in_drawer, so the joint-space path does not bow through the rack rails
+        p = env.body_pos(task["object_id"])
+        gz = p[2] + min(0.01, env.obj_half_h(task["object_id"]) * 0.2)
+        tgt = env.rack_place_point(task) if fam == "load_dishwasher" else env.counter_place_point(task)
+        R = ik.down(self._grip_yaw(env, env.run_yaw()))
+        s = self.seg_steps
+        lift = max(gz, tgt[2]) + 0.15
+        n_steps = max(1, int(np.ceil((lift - tgt[2]) / 0.1)))
+        zs = np.linspace(lift, tgt[2], n_steps + 1)[1:]
+        descent = [((tgt[0], tgt[1], z), R, c, s // 2, k < n_steps - 1) for k, z in enumerate(zs)]
+        # the approach to an object low in the rack is the same kind of chain: one long joint-space move from
+        # HOME dips the hand onto the dishwasher's top edge on the way down
+        n_app = max(1, int(np.ceil((lift - gz - 0.02) / 0.1)))
+        zs = np.linspace(lift, gz + 0.02, n_app + 1)[1:]
+        approach = [((p[0], p[1], z), R, o, s // 2, k < n_app - 1) for k, z in enumerate(zs)]
+        rise = [((p[0], p[1], z), R, c, s // 2, k < n_app - 1) for k, z in enumerate(zs[::-1])]  # same pace up
+        return (
+            [((p[0], p[1], lift), R, o, s)]
+            + approach
+            + [((p[0], p[1], gz), R, o, s // 2), ((p[0], p[1], gz), R, c, self.hold_steps)]
+            + rise
+            + [((p[0], p[1], lift), R, c, s // 2), ((tgt[0], tgt[1], lift), R, c, 2 * s)]
+            + descent
+            + [((tgt[0], tgt[1], tgt[2]), R, o, self.hold_steps), ((tgt[0], tgt[1], tgt[2] + 0.15), R, o, s)]
+        )
 
     @staticmethod
     def _chain_error(env, wps) -> float:
@@ -431,8 +554,6 @@ class ScriptedExpert(Policy):
     def _drive_and_place(self, env, task: dict, o: float, c: float) -> list[tuple]:
         """counter_to_counter on a mobile base: grasp in front of the object, tuck the object in front of the base
         and above the counter top, drive along the counter front to the target, then place as counter_to_sink does."""
-        from arrival.sim.collect import _front
-
         p = env.body_pos(task["object_id"])
         gz = p[2] + min(0.01, env.obj_half_h(task["object_id"]) * 0.2)
         tgt = env.place_point(task)
@@ -445,17 +566,28 @@ class ScriptedExpert(Policy):
         R = ik.down(self._grip_yaw(env, yaw))
         s = self.seg_steps
         here, there = env.base_pose(), env.drive_to
-        n = _front(env.fx[task["source"]])[:2]
+        n = front(env.fx[task["source"]])[:2]
         carry = (here[0] - 0.25 * n[0], here[1] - 0.25 * n[1], 1.1)  # just off the counter front, above its top
         lift = [((p[0], p[1], gz + 0.22), R, c, s)]
         if g is not None:  # a wide object tips in the pads as it leaves the counter: lift it in short steps
             lift = [((p[0], p[1], gz + dz), R, c, s, dz < 0.22) for dz in (0.03, 0.08, 0.15, 0.22)]
-        return [((p[0], p[1], gz + 0.18), R, o, s, False, here), ((p[0], p[1], gz + 0.02), R, o, s),
-                ((p[0], p[1], gz), R, o, s // 2), ((p[0], p[1], gz), R, c, self.hold_steps)] + lift + [
+        return (
+            [
+                ((p[0], p[1], gz + 0.18), R, o, s, False, here),
+                ((p[0], p[1], gz + 0.02), R, o, s),
+                ((p[0], p[1], gz), R, o, s // 2),
+                ((p[0], p[1], gz), R, c, self.hold_steps),
+            ]
+            + lift
+            + [
                 (carry, R, c, s),
                 (None, None, c, s, False, there),
-                ((tgt[0], tgt[1], gz + 0.22), R, c, 2 * s), ((tgt[0], tgt[1], tgt[2]), R, c, s),
-                ((tgt[0], tgt[1], tgt[2]), R, o, self.hold_steps), ((tgt[0], tgt[1], tgt[2] + 0.2), R, o, s)]
+                ((tgt[0], tgt[1], gz + 0.22), R, c, 2 * s),
+                ((tgt[0], tgt[1], tgt[2]), R, c, s),
+                ((tgt[0], tgt[1], tgt[2]), R, o, self.hold_steps),
+                ((tgt[0], tgt[1], tgt[2] + 0.2), R, o, s),
+            ]
+        )
 
     def reset(self, env, task: dict) -> None:
         self.env, self.last, self.held = env, None, 0
@@ -487,8 +619,9 @@ class ScriptedExpert(Policy):
             best = None
             for yaw, roll in cands:
                 for f in (np.eye(3), flip):
-                    pl = self._plan(env, [(p, None if R is None else _rz(yaw) @ R @ f @ _rz(roll), *rest)
-                                          for p, R, *rest in wps])
+                    pl = self._plan(
+                        env, [(p, None if R is None else _rz(yaw) @ R @ f @ _rz(roll), *rest) for p, R, *rest in wps]
+                    )
                     run = self._limit_run(env, pl[0])
                     if pl[1] <= self.ik_error + 0.005 and run < self._limit_run(env, self.plan):
                         if best is None or run < best[0]:
@@ -510,15 +643,13 @@ class ScriptedExpert(Policy):
         lo, hi = env.model.jnt_range[[env.model.dof_jntid[i] for i in env.dofadr]].T
         q = np.asarray(plan)[:, :7]
         band = LIMIT_FRAC * (hi - lo)
-        return max(longest_run(((q[:, j] <= lo[j] + band[j]) | (q[:, j] >= hi[j] - band[j]))) for j in range(7))
+        return max(longest_run((q[:, j] <= lo[j] + band[j]) | (q[:, j] >= hi[j] - band[j])) for j in range(7))
 
     @staticmethod
     def _plan(env, waypoints, start=None) -> tuple[list[np.ndarray], float, float]:
         """Joint-space plan for the waypoints: (targets per step, worst IK position error, peak |joint 7|). Every
         target is 11 wide: 7 arm joints, the gripper, then the base pose (the parked one unless a waypoint drives).
         `start` is the 11-wide target to continue from (default: HOME, gripper open, the parked base)."""
-        from arrival.sim.collect import FPS
-
         q = np.array(HOME)
         plan: list[np.ndarray] = []
         base = env.base_pose()
@@ -532,14 +663,19 @@ class ScriptedExpert(Policy):
             via = bool(rest[0]) if rest else False
             nxt_base = np.asarray(rest[1], dtype=float) if len(rest) > 1 and rest[1] is not None else base
             if pos is not None:
-                pin = (env.badr, nxt_base - env.base0) if env.mobile else None  # solve with the base where it will stand
+                pin = (
+                    (env.badr, nxt_base - env.base0) if env.mobile else None
+                )  # solve with the base where it will stand
                 q, err = ik.solve(env.model, env.data, pos, R, q, env.qadr, env.dofadr, fixed=pin)
                 ik_error, q7 = max(ik_error, err), max(q7, abs(float(q[6])))
             d_xy = float(np.hypot(*(nxt_base[:2] - base[:2])))
             d_yaw = abs(float(nxt_base[2] - base[2]))
             if d_xy > 1e-6 or d_yaw > 1e-6:  # a drive: long enough that the min-jerk peak stays under the limits
-                steps = max(steps, int(np.ceil(MINJERK_PEAK * d_xy / BASE_SPEED * FPS)) + 2,
-                            int(np.ceil(MINJERK_PEAK * d_yaw / BASE_TURN * FPS)) + 2)
+                steps = max(
+                    steps,
+                    int(np.ceil(MINJERK_PEAK * d_xy / BASE_SPEED * FPS)) + 2,
+                    int(np.ceil(MINJERK_PEAK * d_yaw / BASE_TURN * FPS)) + 2,
+                )
             base = nxt_base
             nxt = np.concatenate([q, [g], base])
             chain.append((nxt, steps))
@@ -550,7 +686,7 @@ class ScriptedExpert(Policy):
             pts = np.array([prev] + [p for p, _ in chain])
             for k in range(1, total + 1):
                 t = min(1.0, k / max(1, total - 2))
-                s = t ** 3 * (10 - 15 * t + 6 * t * t)
+                s = t**3 * (10 - 15 * t + 6 * t * t)
                 plan.append(np.array([np.interp(s, knots, pts[:, j]) for j in range(pts.shape[1])]))
             prev, chain = nxt, []
         return plan, ik_error, q7
@@ -564,11 +700,13 @@ class ScriptedExpert(Policy):
         self.fridge_replan = None
         wps = rest(float(self.env.data.joint(joint).qpos[0]))
         flip = np.diag([-1.0, -1.0, 1.0])
-        plans = [self._plan(self.env, w, start=self.last) for w in
-                 (wps, [(p, None if R is None else R @ flip, *r) for p, R, *r in wps])]
+        plans = [
+            self._plan(self.env, w, start=self.last)
+            for w in (wps, [(p, None if R is None else R @ flip, *r) for p, R, *r in wps])
+        ]
         best_err = min(err for _, err, _ in plans)
         plan, err, _ = min((pl for pl in plans if pl[1] <= best_err + 0.005), key=lambda pl: pl[2])
-        self.plan = self.plan[:self.t] + plan
+        self.plan = self.plan[: self.t] + plan
         self.ik_error = max(self.ik_error, err)
 
     def act(self, obs: dict) -> np.ndarray:
@@ -598,6 +736,7 @@ class ScriptedExpert(Policy):
 
 
 # ---------- language planning ----------
+
 
 def rule_plan(instruction: str, objects: list[str], fixtures: list[str]) -> dict:
     """Deterministic parser: family + object + target from keywords."""
@@ -632,8 +771,14 @@ class VLMPlanner:
         self._cache = self._load_cache()
         self._offline = False  # set by the first network failure so later tasks skip the 60 s timeout
 
-    def _cache_key(self, instruction: str, objects: list[str], fixtures: list[str],
-                   research_context: str | None = None, families: tuple[str, ...] | None = None) -> str:
+    def _cache_key(
+        self,
+        instruction: str,
+        objects: list[str],
+        fixtures: list[str],
+        research_context: str | None = None,
+        families: tuple[str, ...] | None = None,
+    ) -> str:
         # the families offered are part of the question: a plan cached under another offer (the 9-family prompt,
         # another room's list) never answers
         offered = "|".join(families or self._offered_families())
@@ -664,22 +809,18 @@ class VLMPlanner:
     def _offered_families(twin: dict | None = None) -> tuple[str, ...]:
         """The families whose fixture the twin has (arrival.sim.tasks.room_families), or all of SIM_FAMILIES without a
         twin. The prompt offers these and _parse_plan accepts only these; it once offered 9 of 15 everywhere."""
-        from arrival.sim.tasks import SIM_FAMILIES, room_families
-
         return (room_families(twin) if twin else ()) or SIM_FAMILIES
 
     @staticmethod
     def _system_prompt(families: tuple[str, ...] | None = None) -> str:
         families = families or VLMPlanner._offered_families()
-        return "Return only JSON: {\"family\": one of " + "|".join(families) + ", \"object\": id|null, \"target\": id|null}"
+        return 'Return only JSON: {"family": one of ' + "|".join(families) + ', "object": id|null, "target": id|null}'
 
     @staticmethod
     def _parse_plan(txt: str, objects: list[str], fixtures: list[str], families: tuple[str, ...] | None = None) -> dict:
         """First JSON object in the reply, checked against the known families (and, when given, the ones the prompt
         offered), objects and fixtures."""
-        from arrival.sim.tasks import SIM_FAMILIES
-
-        plan, _ = json.JSONDecoder().raw_decode(txt[txt.index("{"):])
+        plan, _ = json.JSONDecoder().raw_decode(txt[txt.index("{") :])
         if not isinstance(plan, dict) or plan.get("family") not in SIM_FAMILIES:
             raise ValueError(f"plan has no known family: {plan!r}")
         if families is not None and plan["family"] not in families:
@@ -692,8 +833,17 @@ class VLMPlanner:
             raise ValueError(f"plan target {plan['target']!r} is not in the scene")
         return {"family": plan["family"], "object": plan.get("object"), "target": plan.get("target")}
 
-    def plan(self, instruction: str, objects: list[str], fixtures: list[str],
-             research_context: str | None = None, twin: dict | None = None) -> dict:
+    def plan(
+        self,
+        instruction: str,
+        objects: list[str],
+        fixtures: list[str],
+        research_context: str | None = None,
+        twin: dict | None = None,
+    ) -> dict:
+        """The plan (family, object, target) for an instruction in this room: from the cache when the same request was
+        planned before, from the keyword rules when offline, else from Nemotron through Token Factory, falling back
+        to the rules on any failure. `source` says which answered."""
         from arrival.models.token_factory import TokenFactoryNotConfigured, complete
 
         offered = self._offered_families(twin)
@@ -709,8 +859,14 @@ class VLMPlanner:
             user_payload = {"instruction": instruction, "objects": objects, "fixtures": fixtures}
             if research_context:
                 user_payload["research_context"] = research_context
-            txt = complete([{"role": "system", "content": self._system_prompt(offered)},
-                            {"role": "user", "content": json.dumps(user_payload)}], role="super", temperature=0)
+            txt = complete(
+                [
+                    {"role": "system", "content": self._system_prompt(offered)},
+                    {"role": "user", "content": json.dumps(user_payload)},
+                ],
+                role="super",
+                temperature=0,
+            )
             plan = self._parse_plan(txt, objects, fixtures, offered)
             self.source = "token_factory"
             self._cache[key] = plan
@@ -775,8 +931,9 @@ class VLAClient(Policy):
 
             schema = getattr(self, "active_schema", self.schema or "arm")
             body = json.dumps(encode_request(obs, self.instruction, schema)).encode()
-            req = urllib.request.Request(self.url.rstrip("/") + "/act", data=body, method="POST",
-                                         headers={"Content-Type": "application/json"})
+            req = urllib.request.Request(
+                self.url.rstrip("/") + "/act", data=body, method="POST", headers={"Content-Type": "application/json"}
+            )
             with urllib.request.urlopen(req, timeout=self.timeout) as r:
                 self.queue = list(decode_response(json.load(r), schema))
         return np.asarray(self.queue.pop(0), dtype=float)

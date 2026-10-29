@@ -46,8 +46,11 @@ ACCENT = (118, 185, 0)  # NVIDIA-ish green
 # ---------------------------------------------------------------- fonts / captions
 def _font(size: int, mono: bool = False, bold: bool = False):
     """SF (has the → glyph) first, then Helvetica / DejaVu, then PIL's default."""
-    cands = (["/System/Library/Fonts/SFNSMono.ttf", "/System/Library/Fonts/Menlo.ttc", "DejaVuSansMono.ttf"] if mono else
-             ["/System/Library/Fonts/SFNS.ttf", "/System/Library/Fonts/Helvetica.ttc", "DejaVuSans.ttf"])
+    cands = (
+        ["/System/Library/Fonts/SFNSMono.ttf", "/System/Library/Fonts/Menlo.ttc", "DejaVuSansMono.ttf"]
+        if mono
+        else ["/System/Library/Fonts/SFNS.ttf", "/System/Library/Fonts/Helvetica.ttc", "DejaVuSans.ttf"]
+    )
     for c in cands:
         try:
             f = ImageFont.truetype(c, size)
@@ -94,15 +97,13 @@ def outro_card() -> Image.Image:
     d = ImageDraw.Draw(im)
     centered(d, 170, "Join in →", _font(40, bold=True), ACCENT)
     centered(d, 225, "github.com/AvnehSBhatia/ExeaLabsNvidiaHacks", _font(36, bold=True), FG)
-    centered(d, 320, "Help wanted: real iPhone scans · mobile base · GR00T fine-tune",
-             _font(23), (205, 210, 218))
+    centered(d, 320, "Help wanted: real iPhone scans · mobile base · GR00T fine-tune", _font(23), (205, 210, 218))
     centered(d, 460, "Arrival · Exea Labs", _font(18), DIM)
     return im
 
 
 # ---------------------------------------------------------------- 2. floor plan from twin.json
-FIX_COLORS = {"counter": (150, 112, 70), "sink": (120, 160, 200), "stove": (60, 60, 66),
-              "fridge": (200, 205, 212)}
+FIX_COLORS = {"counter": (150, 112, 70), "sink": (120, 160, 200), "stove": (60, 60, 66), "fridge": (200, 205, 212)}
 
 
 def floor_plan(twin: dict) -> Image.Image:
@@ -148,9 +149,13 @@ def floor_plan(twin: dict) -> Image.Image:
         d.text((x + 9, y + 2), o["label"] if "label" in o else o["id"], font=small, fill=(225, 255, 190))
     for w in twin["walls"]:
         d.line([P(*w["start"]), P(*w["end"])], fill=(245, 245, 245), width=6)
-    d.text((ox, oy + (y1 - y0) * s + 10),
-           f"{twin['room_id']} · {x1 - x0:.1f} m × {y1 - y0:.1f} m · {len(twin['fixtures'])} fixtures · "
-           f"{len(twin['objects'])} objects   (out/twins/{twin['room_id']}/twin.json)", font=small, fill=DIM)
+    d.text(
+        (ox, oy + (y1 - y0) * s + 10),
+        f"{twin['room_id']} · {x1 - x0:.1f} m × {y1 - y0:.1f} m · {len(twin['fixtures'])} fixtures · "
+        f"{len(twin['objects'])} objects   (out/twins/{twin['room_id']}/twin.json)",
+        font=small,
+        fill=DIM,
+    )
     return im
 
 
@@ -249,15 +254,18 @@ def data_frames(ep: dict, n: int) -> list[Image.Image]:
             d.rectangle([bx, yy + 4, bx + max(2, frac * bw), yy + 18], fill=ACCENT if j < 7 else (120, 160, 200))
             d.text((bx + bw + 8, yy), val, font=mono, fill=FG)
         d.text((px, y + 62 + 8 * 30 + 6), "rad (arm) · mm (gripper) · 20 Hz", font=monob, fill=DIM)
-        res.append(caption(im, "3 · Capture robot data",
-                           "Real joint states · physics-checked success · failures dropped"))
+        res.append(
+            caption(im, "3 · Capture robot data", "Real joint states · physics-checked success · failures dropped")
+        )
     return res
 
 
 # ---------------------------------------------------------------- 5. terminal card from real CLI output
 def run_cli() -> list[str]:
-    cmds = [["-m", "arrival", "sim", "--episodes", "6", "--people", "2", "--out", VIDEO_OUT],
-            ["-m", "arrival", "validate", f"{VIDEO_OUT}/datasets/{ROOM}_sim"]]
+    cmds = [
+        ["-m", "arrival", "sim", "--episodes", "6", "--people", "2", "--out", VIDEO_OUT],
+        ["-m", "arrival", "validate", f"{VIDEO_OUT}/datasets/{ROOM}_sim"],
+    ]
     lines = []
     for c in cmds:
         p = subprocess.run([PY, *c], cwd=ROOT, capture_output=True, text=True)
@@ -292,8 +300,9 @@ def terminal_frames(lines: list[str], n: int) -> list[Image.Image]:
             if "MISS" in ln:
                 col = (230, 150, 90)
             d.text((36, 52 + i * 17.5), ln, font=f, fill=col)
-        res.append(caption(im, "4 · Validated dataset",
-                           "LeRobot v2 · parquet + mp4 + modality.json · validated locally"))
+        res.append(
+            caption(im, "4 · Validated dataset", "LeRobot v2 · parquet + mp4 + modality.json · validated locally")
+        )
     return res
 
 
@@ -309,13 +318,14 @@ def main() -> None:
 
     tasks = make_tasks(twin, ["counter_to_sink", "open_drawer"], 2, seed=0, people=2, log=lambda *a: None)
     sink_t, drawer_t = tasks
-    drawer_t["handle"], drawer_t["joint"] = f'{drawer_t["fixture"]}_drawer0_handle', f'{drawer_t["fixture"]}_drawer0'
+    drawer_t["handle"], drawer_t["joint"] = f"{drawer_t['fixture']}_drawer0_handle", f"{drawer_t['fixture']}_drawer0"
     fx = {f["id"]: f for f in twin["fixtures"]}
     sx = (sink_t["start"][0] + fx[sink_t["target"]]["position"][0]) / 2
     sink = episode_frames(twin, sink_t, {"lookat": [sx, 0.45, 0.85], "az": -140, "el": -42, "d0": 3.6, "d1": 2.3})
     dfx = fx[drawer_t["fixture"]]
-    drawer = episode_frames(twin, drawer_t, {"lookat": [dfx["position"][0] - 0.35, 0.75, 0.6], "az": -40, "el": -42,
-                                             "d0": 3.4, "d1": 2.2})
+    drawer = episode_frames(
+        twin, drawer_t, {"lookat": [dfx["position"][0] - 0.35, 0.75, 0.6], "az": -40, "el": -42, "d0": 3.4, "d1": 2.2}
+    )
     if not (sink["success"] and drawer["success"]):
         raise RuntimeError("A filmed episode failed its physics success check")
 
@@ -324,8 +334,12 @@ def main() -> None:
     sim_sub = "MuJoCo kitchen · drawers & doors on joints · people walking · 7-DoF arm, friction grasp"
     segments = [
         [title_card()] * int(3 * FPS),
-        [caption(floor_plan(twin), "1 · Room → digital twin",
-                 "Authored sample room → walls, fixtures, objects in metres")] * int(4 * FPS),
+        [
+            caption(
+                floor_plan(twin), "1 · Room → digital twin", "Authored sample room → walls, fixtures, objects in metres"
+            )
+        ]
+        * int(4 * FPS),
         sim_frames(sink, int(6.5 * FPS), "2 · Simulate the room", sim_sub, f'"{sink_t["instruction"]}"'),
         sim_frames(drawer, int(5.5 * FPS), "2 · Simulate the room", sim_sub, f'"{drawer_t["instruction"]}"'),
         data_frames(sink, int(5 * FPS)),
@@ -335,8 +349,15 @@ def main() -> None:
     frames = [f for seg in segments for f in fade_in(seg)]
 
     mp4 = MEDIA / "demo.mp4"
-    with imageio.get_writer(mp4, fps=FPS, format="FFMPEG", codec="libx264", pixelformat="yuv420p", macro_block_size=1,
-                            ffmpeg_params=["-crf", "20", "-preset", "slow", "-movflags", "+faststart"]) as w:
+    with imageio.get_writer(
+        mp4,
+        fps=FPS,
+        format="FFMPEG",
+        codec="libx264",
+        pixelformat="yuv420p",
+        macro_block_size=1,
+        ffmpeg_params=["-crf", "20", "-preset", "slow", "-movflags", "+faststart"],
+    ) as w:
         for f in frames:
             w.append_data(np.asarray(f))
 
@@ -348,8 +369,9 @@ def main() -> None:
     step = FPS / gif_fps
     gif = [frames[int(i * step)].resize((480, 270), Image.LANCZOS) for i in range(int(len(frames) / step))]
     gif = [g.quantize(colors=128, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE) for g in gif]
-    gif[0].save(MEDIA / "demo.gif", save_all=True, append_images=gif[1:], duration=int(1000 / gif_fps), loop=0,
-                optimize=True)
+    gif[0].save(
+        MEDIA / "demo.gif", save_all=True, append_images=gif[1:], duration=int(1000 / gif_fps), loop=0, optimize=True
+    )
     for p in ("demo.mp4", "demo.gif", "poster.png"):
         print(f"[video] {MEDIA / p}: {(MEDIA / p).stat().st_size / 1e6:.2f} MB")
     print(f"[video] {len(frames)} frames @ {FPS} fps = {len(frames) / FPS:.1f} s")

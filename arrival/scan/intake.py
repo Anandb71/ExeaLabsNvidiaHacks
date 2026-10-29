@@ -104,8 +104,10 @@ def parse_measures(spec: str | dict | None) -> dict[str, float]:
             raise IntakeError(f"duplicate measurement {k!r}")
         n = _number(str(v))
         if n is None:
-            raise IntakeError(f"measurement {k}={str(v).strip()!r} must be a number of metres, above 0 and at most "
-                              f"{MAX_MEASURE_M:g} (a value in centimetres?)")
+            raise IntakeError(
+                f"measurement {k}={str(v).strip()!r} must be a number of metres, above 0 and at most "
+                f"{MAX_MEASURE_M:g} (a value in centimetres?)"
+            )
         out[k] = n
     return out
 
@@ -163,8 +165,10 @@ def validate_scan_dir(path: str | Path) -> list[str]:
                 if not value or value.startswith("<") or value.upper() == "TODO":
                     problems.append(f"notes.md: '{label}' is missing or blank")
                 elif key.endswith("_m") and _number(value) is None:
-                    problems.append(f"notes.md: '{label}' must be a number of metres above 0 and at most "
-                                    f"{MAX_MEASURE_M:g}, got {value!r}")
+                    problems.append(
+                        f"notes.md: '{label}' must be a number of metres above 0 and at most "
+                        f"{MAX_MEASURE_M:g}, got {value!r}"
+                    )
     measurements = d / "measurements.json"
     if not measurements.is_file():
         problems.append("measurements.json is missing; three tape measurements are required")
@@ -218,8 +222,14 @@ def _checks(bundle: dict) -> dict:
     place_default_objects(twin)
     problems = []
     fx = twin["fixtures"]
-    overlaps = sorted({tuple(sorted((a["id"], b["id"]))) for i, a in enumerate(fx) for b in fx[i + 1:]
-                       if ts._overlap(a, b) and not ts._allowed(a, b)})
+    overlaps = sorted(
+        {
+            tuple(sorted((a["id"], b["id"])))
+            for i, a in enumerate(fx)
+            for b in fx[i + 1 :]
+            if ts._overlap(a, b) and not ts._allowed(a, b)
+        }
+    )
     if overlaps:
         problems.append(f"overlapping fixtures: {overlaps}")
     for item in fx + twin["objects"]:
@@ -266,9 +276,21 @@ def check(room_id: str, *, scans: str | Path | None = None) -> dict:
     return {"dir": dest, "go": not problems, "problems": problems, "fixtures": fixtures}
 
 
-def intake(room_id: str, roomplan_path: str | Path, photos: list | None = None, *, scans: str | Path | None = None,
-           no_photos: bool = False, location_type: str = "", phone: str = "", ios: str = "", lighting: str = "",
-           clutter: str = "", measures: str | dict | None = None, out_dir: str | Path | None = None) -> dict:
+def intake(
+    room_id: str,
+    roomplan_path: str | Path,
+    photos: list | None = None,
+    *,
+    scans: str | Path | None = None,
+    no_photos: bool = False,
+    location_type: str = "",
+    phone: str = "",
+    ios: str = "",
+    lighting: str = "",
+    clutter: str = "",
+    measures: str | dict | None = None,
+    out_dir: str | Path | None = None,
+) -> dict:
     """Create scans/<room_id>/ and check it. Raises IntakeError (nothing written) on a bad id, an existing
     folder, too few or unreadable photos, a RoomPlan that does not load or has fewer than 3 walls, or a bad
     measurement. Returns {"dir", "go", "problems", "fixtures", "render"}; go is False while the notes are
@@ -287,8 +309,10 @@ def intake(room_id: str, roomplan_path: str | Path, photos: list | None = None, 
     tape = parse_measures(measures)
     for p in photos:
         if _is_heif(p):
-            raise IntakeError(f"photo {p} is HEIC/HEIF, which intake cannot read; convert it to JPEG, or "
-                              "take the photos with the iPhone's Settings > Camera > Formats set to Most Compatible")
+            raise IntakeError(
+                f"photo {p} is HEIC/HEIF, which intake cannot read; convert it to JPEG, or "
+                "take the photos with the iPhone's Settings > Camera > Formats set to Most Compatible"
+            )
         try:
             with Image.open(p) as im:
                 im.verify()
@@ -303,13 +327,20 @@ def intake(room_id: str, roomplan_path: str | Path, photos: list | None = None, 
         shutil.copyfile(plan, tmp / "roomplan.json")
         for i, p in enumerate(photos, 1):
             _reencode(p, tmp / f"reference_{i}.jpg")
-        values = {"location_type": location_type, "phone_model": phone, "ios_version": ios, "lighting": lighting,
-                  "clutter": clutter, **{f"{k}_m": tape.get(k, "") for k in MEASURES}}
+        values = {
+            "location_type": location_type,
+            "phone_model": phone,
+            "ios_version": ios,
+            "lighting": lighting,
+            "clutter": clutter,
+            **{f"{k}_m": tape.get(k, "") for k in MEASURES},
+        }
         values = {k: v if v != "" else "TODO" for k, v in values.items()}
         (tmp / "notes.md").write_text(NOTES_TEMPLATE.format(room_id=room_id, **values), encoding="utf-8")
         if tape:
-            (tmp / "measurements.json").write_text(json.dumps(
-                {f"{k}_m": tape[k] for k in MEASURES if k in tape}, indent=2) + "\n")
+            (tmp / "measurements.json").write_text(
+                json.dumps({f"{k}_m": tape[k] for k in MEASURES if k in tape}, indent=2) + "\n"
+            )
         tmp.rename(dest)
     except BaseException:
         shutil.rmtree(tmp, ignore_errors=True)

@@ -30,14 +30,17 @@ class _Cfg:
 
 def _load_config(monkeypatch, path=CONFIG):
     registered = []
-    enums = {n: types.SimpleNamespace(RELATIVE="rel", ABSOLUTE="abs", NON_EEF="joint", DEFAULT="default")
-             for n in ("ActionRepresentation", "ActionType", "ActionFormat")}
+    enums = {
+        n: types.SimpleNamespace(RELATIVE="rel", ABSOLUTE="abs", NON_EEF="joint", DEFAULT="default")
+        for n in ("ActionRepresentation", "ActionType", "ActionFormat")
+    }
     mods = {
         "gr00t": types.ModuleType("gr00t"),
         "gr00t.configs": types.ModuleType("gr00t.configs"),
         "gr00t.configs.data": types.ModuleType("gr00t.configs.data"),
         "gr00t.configs.data.embodiment_configs": types.SimpleNamespace(
-            register_modality_config=lambda cfg, embodiment_tag: registered.append((cfg, embodiment_tag))),
+            register_modality_config=lambda cfg, embodiment_tag: registered.append((cfg, embodiment_tag))
+        ),
         "gr00t.data": types.ModuleType("gr00t.data"),
         "gr00t.data.embodiment_tags": types.SimpleNamespace(EmbodimentTag=types.SimpleNamespace(NEW_EMBODIMENT="NEW")),
         "gr00t.data.types": types.SimpleNamespace(ActionConfig=_Cfg, ModalityConfig=_Cfg, **enums),
@@ -59,8 +62,16 @@ def dataset(tmp_path_factory):
 @pytest.fixture(scope="module")
 def mobile_dataset(tmp_path_factory):
     twin = compile_twin(load_room("hero_kitchen", "scans"))
-    res = collect(twin, ["counter_to_counter"], 1, tmp_path_factory.mktemp("dsm"), people=0, res=32, base="mobile",
-                  log=lambda *_: None)
+    res = collect(
+        twin,
+        ["counter_to_counter"],
+        1,
+        tmp_path_factory.mktemp("dsm"),
+        people=0,
+        res=32,
+        base="mobile",
+        log=lambda *_: None,
+    )
     assert res["report_data"]["successes"] == 1
     return res["dataset"]
 
@@ -115,8 +126,7 @@ def test_mobile_config_adds_the_base_key_at_8_to_11(monkeypatch, mobile_dataset)
 
 def test_multiview_config_matches_paired_dataset(monkeypatch, tmp_path):
     twin = compile_twin(load_room("hero_kitchen", "scans"))
-    result = collect(twin, ["open_drawer"], 1, tmp_path, people=0, res=32,
-                     exocentric=True, log=lambda *_: None)
+    result = collect(twin, ["open_drawer"], 1, tmp_path, people=0, res=32, exocentric=True, log=lambda *_: None)
     cfg = _load_config(monkeypatch, CONFIGS / "arrival_panda_multiview_config.py")
     modality = _modality(result["dataset"])
     assert cfg["video"].modality_keys == list(modality["video"]) == ["ego_view", "wrist", "overview"]

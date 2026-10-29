@@ -8,9 +8,18 @@ from arrival.eval.compare import CompareError, compare, sign_test_p
 
 def write_run(path, outcomes, manifest="m1", checkpoint="ck"):
     path.mkdir(parents=True)
-    rows = [{"run_id": path.name, "checkpoint_id": checkpoint, "manifest_id": manifest, "trial_index": i,
-             "task_id": f"t{i}", "family": "counter_to_sink" if i % 2 else "open_drawer", "success": ok}
-            for i, ok in enumerate(outcomes)]
+    rows = [
+        {
+            "run_id": path.name,
+            "checkpoint_id": checkpoint,
+            "manifest_id": manifest,
+            "trial_index": i,
+            "task_id": f"t{i}",
+            "family": "counter_to_sink" if i % 2 else "open_drawer",
+            "success": ok,
+        }
+        for i, ok in enumerate(outcomes)
+    ]
     (path / "episodes.jsonl").write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
     return path
 
@@ -70,8 +79,17 @@ def test_dataset_episodes_jsonl_is_refused_not_a_traceback(tmp_path, capsys):
     meta = tmp_path / "datasets" / "hero_kitchen_sim" / "meta"
     meta.mkdir(parents=True)
     (meta / "episodes.jsonl").write_text(
-        json.dumps({"episode_index": 0, "tasks": ["Put the plate in the sink."], "length": 80,
-                    "arrival_family": "counter_to_sink"}) + "\n", encoding="utf-8")
+        json.dumps(
+            {
+                "episode_index": 0,
+                "tasks": ["Put the plate in the sink."],
+                "length": 80,
+                "arrival_family": "counter_to_sink",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     with pytest.raises(CompareError, match="not an eval run"):
         compare(meta, meta)
     assert cli.main(["eval-compare", str(meta), str(meta)]) == cli.EXIT_USAGE

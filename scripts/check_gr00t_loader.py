@@ -39,7 +39,10 @@ def check(config: Path, dataset: Path) -> list[str]:
         if i == 0:
             for c in df.columns:
                 v = df[c].iloc[0]
-                print(f"   {c}:", ("str", v[:40]) if isinstance(v, str) else (np.asarray(v).shape, str(np.asarray(v).dtype)))
+                print(
+                    f"   {c}:",
+                    ("str", v[:40]) if isinstance(v, str) else (np.asarray(v).shape, str(np.asarray(v).dtype)),
+                )
         if len(df) != lengths[i]:
             problems.append(f"episode {i}: {len(df)} rows, its length says {lengths[i]}")
         for key in cfg["video"].modality_keys:

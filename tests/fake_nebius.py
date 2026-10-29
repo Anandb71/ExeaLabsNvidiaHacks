@@ -36,15 +36,36 @@ from xml.sax.saxutils import escape
 from arrival.jobs.nebius import sigv4
 
 S3_XMLNS = "http://s3.amazonaws.com/doc/2006-03-01/"
-AUTH_RE = re.compile(r"AWS4-HMAC-SHA256 Credential=([^/]+)/(\d{8})/([^/]+)/s3/aws4_request, "
-                     r"SignedHeaders=([a-z0-9;-]+), Signature=([0-9a-f]{64})$")
+AUTH_RE = re.compile(
+    r"AWS4-HMAC-SHA256 Credential=([^/]+)/(\d{8})/([^/]+)/s3/aws4_request, "
+    r"SignedHeaders=([a-z0-9;-]+), Signature=([0-9a-f]{64})$"
+)
 
 # documented request fields (docs.nebius.com/rest-api/ai/v1/jobs/create)
 REQUEST_FIELDS = {"metadata", "spec", "dryRun"}
 METADATA_FIELDS = {"parentId", "name", "id", "labels", "resourceVersion"}
-SPEC_FIELDS = {"image", "containerCommand", "args", "workingDir", "environmentVariables", "platform", "preset",
-               "timeout", "restartAttempts", "disk", "volumes", "subnetId", "ports", "injectedFiles",
-               "sshAuthorizedKeys", "publicIp", "preemptible", "shmSizeBytes", "pricingModel", "registryCredentials"}
+SPEC_FIELDS = {
+    "image",
+    "containerCommand",
+    "args",
+    "workingDir",
+    "environmentVariables",
+    "platform",
+    "preset",
+    "timeout",
+    "restartAttempts",
+    "disk",
+    "volumes",
+    "subnetId",
+    "ports",
+    "injectedFiles",
+    "sshAuthorizedKeys",
+    "publicIp",
+    "preemptible",
+    "shmSizeBytes",
+    "pricingModel",
+    "registryCredentials",
+}
 DISK_TYPES = {"UNSPECIFIED", "NETWORK_SSD", "NETWORK_HDD", "NETWORK_SSD_NON_REPLICATED", "NETWORK_SSD_IO_M3"}
 
 
@@ -78,9 +99,10 @@ class _Handler(BaseHTTPRequestHandler):
 
 # ---- S3 ----
 
+
 class _S3Handler(_Handler):
     def _error(self, status: int, code: str):
-        self._send(status, f"<?xml version=\"1.0\"?><Error><Code>{code}</Code></Error>".encode())
+        self._send(status, f'<?xml version="1.0"?><Error><Code>{code}</Code></Error>'.encode())
 
     def _route(self):
         fake: FakeS3 = self.server.fake
@@ -134,22 +156,34 @@ class FakeS3(_Server):
             return "XAmzContentSHA256Mismatch"
         query = urllib.parse.parse_qsl(raw_query, keep_blank_values=True)
         path = urllib.parse.quote(urllib.parse.unquote(raw_path), safe="/-_.~")  # S3 canonicalizes the decoded key
-        auth, _ = sigv4(method, path, query, {n: headers.get(n) or "" for n in names},
-                        headers["x-amz-content-sha256"], key_id, self.secret, region, "s3", headers["x-amz-date"])
+        auth, _ = sigv4(
+            method,
+            path,
+            query,
+            {n: headers.get(n) or "" for n in names},
+            headers["x-amz-content-sha256"],
+            key_id,
+            self.secret,
+            region,
+            "s3",
+            headers["x-amz-date"],
+        )
         return None if auth.endswith(f"Signature={signature}") else "SignatureDoesNotMatch"
 
     def list_xml(self, prefix: str, token: str | None) -> bytes:
         keys = sorted(k for k in self.objects if k.startswith(prefix) and (token is None or k > token))
-        page, more = keys[:self.page], len(keys) > self.page
-        items = "".join(f"<Contents><Key>{escape(k)}</Key><Size>{len(self.objects[k])}</Size></Contents>"
-                        for k in page)
+        page, more = keys[: self.page], len(keys) > self.page
+        items = "".join(f"<Contents><Key>{escape(k)}</Key><Size>{len(self.objects[k])}</Size></Contents>" for k in page)
         tail = f"<NextContinuationToken>{escape(page[-1])}</NextContinuationToken>" if more else ""
-        return (f"<?xml version=\"1.0\" encoding=\"UTF-8\"?><ListBucketResult xmlns=\"{S3_XMLNS}\">"
-                f"<Name>{self.bucket}</Name><Prefix>{escape(prefix)}</Prefix><KeyCount>{len(page)}</KeyCount>"
-                f"{items}<IsTruncated>{'true' if more else 'false'}</IsTruncated>{tail}</ListBucketResult>").encode()
+        return (
+            f'<?xml version="1.0" encoding="UTF-8"?><ListBucketResult xmlns="{S3_XMLNS}">'
+            f"<Name>{self.bucket}</Name><Prefix>{escape(prefix)}</Prefix><KeyCount>{len(page)}</KeyCount>"
+            f"{items}<IsTruncated>{'true' if more else 'false'}</IsTruncated>{tail}</ListBucketResult>"
+        ).encode()
 
 
 # ---- Serverless AI Jobs ----
+
 
 class _JobsHandler(_Handler):
     def _json(self, status: int, obj: dict):
@@ -182,8 +216,9 @@ class FakeJobs(_Server):
     run nothing until cancelled. `states`: shard -> a state to report once the job is past provisioning. `silent`:
     shards whose jobs run nothing and answer GET with no state at all until cancelled."""
 
-    def __init__(self, token: str, project: str, secrets: dict, workdir, logdir, fail_first=(), hold=(),
-                 states=None, silent=()):
+    def __init__(
+        self, token: str, project: str, secrets: dict, workdir, logdir, fail_first=(), hold=(), states=None, silent=()
+    ):
         self.token, self.project, self.secrets, self.workdir, self.logdir = token, project, secrets, workdir, logdir
         self.fail_first, self.hold, self.states = set(fail_first), set(hold), dict(states or {})
         self.silent = set(silent)
@@ -242,8 +277,9 @@ class FakeJobs(_Server):
             log = open(os.path.join(self.logdir, f"{job_id}.log"), "wb")
             # the container sees only the spec's NEBIUS_* variables, never the test process's own
             base = {k: v for k, v in os.environ.items() if not k.startswith("NEBIUS_")}
-            job["proc"] = subprocess.Popen([cmd, *args], cwd=self.workdir, env={**base, **env}, stdout=log,
-                                           stderr=subprocess.STDOUT)
+            job["proc"] = subprocess.Popen(
+                [cmd, *args], cwd=self.workdir, env={**base, **env}, stdout=log, stderr=subprocess.STDOUT
+            )
             job["log"] = log
         job["shard"] = shard
         return {"id": f"aiop-{job_id}", "resourceId": job_id, "description": "create job"}
@@ -264,8 +300,11 @@ class FakeJobs(_Server):
         if proc is None or proc.poll() is None:
             return "RUNNING", None
         job["log"].close()
-        job["final"] = ("COMPLETED", None) if proc.returncode == 0 else (
-            "FAILED", {"code": "ExitCode", "message": f"container exited with code {proc.returncode}"})
+        job["final"] = (
+            ("COMPLETED", None)
+            if proc.returncode == 0
+            else ("FAILED", {"code": "ExitCode", "message": f"container exited with code {proc.returncode}"})
+        )
         return job["final"]
 
     def get(self, job_id: str) -> dict:

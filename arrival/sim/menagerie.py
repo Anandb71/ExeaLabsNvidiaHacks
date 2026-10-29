@@ -17,16 +17,25 @@ from arrival.sim import robot
 PANDA_DIR = Path(__file__).resolve().parents[1] / "assets" / "menagerie" / "franka_emika_panda"
 FINGER_OPEN = 0.04  # per finger: the real hand opens 8 cm, the procedural one 10 cm
 EEF_Z = 0.103  # hand-frame height of the fingertip pad centres (procedural arm: 0.115)
-RENAMES = {"link0": "robot_base", "left_finger": "finger_l", "right_finger": "finger_r",
-           "finger_joint1": "finger_l", "finger_joint2": "finger_r"}
+RENAMES = {
+    "link0": "robot_base",
+    "left_finger": "finger_l",
+    "right_finger": "finger_r",
+    "finger_joint1": "finger_l",
+    "finger_joint2": "finger_r",
+}
 CLASSES = {"panda": "panda", "finger": "panda_finger", "visual": "panda_visual", "collision": "panda_collision"}
 FINGER_FORCE = 40
-HAND = {"flap_bar": 0.0084, "flap_up": 0.3,  # see robot.HAND
-        "door_z": 0.04, "door_push": 0.015,  # close_door: the closed fingertips reach 15 mm less than the procedural ones, so the push stands 15 mm nearer the bar
-        # open_oven: at the steepest flap tilt (1.35 rad) IK reaches the bar but the real hand's body meets the stove
-        # front 3.4 cm short of it, so the door never moved (0 of 6 over seeds 0, 3, 5 with 0 and 2 people); each
-        # flatter tilt opens it 6 of 6
-        "flap_tilts": {"open_oven": (0.0, 0.35, 0.7)}}
+HAND = {
+    "flap_bar": 0.0084,
+    "flap_up": 0.3,  # see robot.HAND
+    "door_z": 0.04,
+    "door_push": 0.015,  # close_door: the closed fingertips reach 15 mm less than the procedural ones, so the push stands 15 mm nearer the bar
+    # open_oven: at the steepest flap tilt (1.35 rad) IK reaches the bar but the real hand's body meets the stove
+    # front 3.4 cm short of it, so the door never moved (0 of 6 over seeds 0, 3, 5 with 0 and 2 people); each
+    # flatter tilt opens it 6 of 6
+    "flap_tilts": {"open_oven": (0.0, 0.35, 0.7)},
+}
 PAD_FRICTION = {"friction": "2.0 0.05 0.05", "condim": "6"}  # same pads as robot.py's fingers
 FETCH_HINT = "Menagerie Panda not found; run: python scripts/fetch_menagerie.py"
 
@@ -88,9 +97,14 @@ def arm_fragments(base_pos: tuple[float, float, float], base_yaw_deg: float, mob
     for i, el in enumerate(ET.fromstring(f"<x>{robot.pedestal_xml(z, base_yaw_deg, mobile)}</x>")):
         base.insert(i, el)  # joints first, then the column, plate and ego camera, before the arm links
     contact = root.find("contact")
-    for ex in (contact if contact is not None else []):
+    for ex in contact if contact is not None else []:
         for attr in ("body1", "body2"):
             ex.set(attr, RENAMES.get(ex.get(attr), ex.get(attr)))
-    return {"meshdir": str(PANDA_DIR / "assets"), "defaults": _s(default),
-            "assets": "".join(_s(el) for el in root.find("asset")), "body": _s(base),
-            "actuators": robot.actuators_xml(mobile, FINGER_OPEN, FINGER_FORCE), "contact": _s(contact) if contact is not None else ""}
+    return {
+        "meshdir": str(PANDA_DIR / "assets"),
+        "defaults": _s(default),
+        "assets": "".join(_s(el) for el in root.find("asset")),
+        "body": _s(base),
+        "actuators": robot.actuators_xml(mobile, FINGER_OPEN, FINGER_FORCE),
+        "contact": _s(contact) if contact is not None else "",
+    }

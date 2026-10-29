@@ -30,7 +30,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from xml.etree import ElementTree
 
@@ -45,9 +45,17 @@ DISK_BYTES = str(64 * 1024**3)  # the docs ask for at least 20 GiB on CPU platfo
 
 # JobStatus.State from the REST reference. CANCELLING and DELETING can no longer end in COMPLETED.
 JOB_STATES = {
-    "STATE_UNSPECIFIED": RUNNING, "PROVISIONING": RUNNING, "STARTING": RUNNING, "IMAGE_PULLING": RUNNING,
-    "RUNNING": RUNNING, "COMPLETED": SUCCEEDED, "FAILED": FAILED, "CANCELLED": FAILED, "ERROR": FAILED,
-    "CANCELLING": FAILED, "DELETING": FAILED,
+    "STATE_UNSPECIFIED": RUNNING,
+    "PROVISIONING": RUNNING,
+    "STARTING": RUNNING,
+    "IMAGE_PULLING": RUNNING,
+    "RUNNING": RUNNING,
+    "COMPLETED": SUCCEEDED,
+    "FAILED": FAILED,
+    "CANCELLED": FAILED,
+    "ERROR": FAILED,
+    "CANCELLING": FAILED,
+    "DELETING": FAILED,
 }
 FINAL_STATES = {"COMPLETED", "FAILED", "CANCELLED", "ERROR"}
 
@@ -57,11 +65,15 @@ class NebiusNotConfigured(RuntimeError):
 
 
 def require(*names: str) -> dict[str, str]:
+    """The values of the named settings. Raises NebiusNotConfigured, naming every missing one, before anything is
+    submitted."""
     values = {n: settings.get(n) for n in names}
     missing = [n for n, v in values.items() if not v]
     if missing:
-        raise NebiusNotConfigured(f"set {', '.join(missing)} for the Nebius backend (see .env.example and "
-                                  f"docs/REFERENCE.md); nothing was submitted")
+        raise NebiusNotConfigured(
+            f"set {', '.join(missing)} for the Nebius backend (see .env.example and "
+            f"docs/REFERENCE.md); nothing was submitted"
+        )
     return values
 
 
@@ -76,8 +88,9 @@ def _seconds(name: str) -> float:
     return value
 
 
-def _http(method: str, url: str, body: bytes | None = None, headers: dict | None = None,
-          timeout: float = 60.0) -> tuple[int, bytes]:
+def _http(
+    method: str, url: str, body: bytes | None = None, headers: dict | None = None, timeout: float = 60.0
+) -> tuple[int, bytes]:
     """(status, body); an HTTP error status is returned, not raised, and a network failure is a ShardError."""
     req = urllib.request.Request(url, data=body, method=method, headers=headers or {})
     try:
@@ -91,6 +104,7 @@ def _http(method: str, url: str, body: bytes | None = None, headers: dict | None
 
 # ---- Object Storage (S3 API, Signature Version 4) ----
 
+
 def _quote(s: str, safe: str = "-_.~") -> str:
     return urllib.parse.quote(s, safe=safe)
 
@@ -99,15 +113,26 @@ def canonical_query(pairs) -> str:
     return "&".join(f"{k}={v}" for k, v in sorted((_quote(k), _quote(v)) for k, v in pairs))
 
 
-def sigv4(method: str, path: str, query, headers: dict, payload_hash: str, key_id: str, secret: str, region: str,
-          service: str, amz_date: str) -> tuple[str, str]:
+def sigv4(
+    method: str,
+    path: str,
+    query,
+    headers: dict,
+    payload_hash: str,
+    key_id: str,
+    secret: str,
+    region: str,
+    service: str,
+    amz_date: str,
+) -> tuple[str, str]:
     """Signature Version 4 over every header in `headers`. `path` is the URI path exactly as sent (already
     percent-encoded, as S3 wants it not encoded twice), `query` a list of (name, value) pairs. Returns the
     Authorization value and the canonical request."""
     h = {k.lower(): " ".join(str(v).split()) for k, v in headers.items()}
     signed = ";".join(sorted(h))
-    canonical = "\n".join([method, path, canonical_query(query), *(f"{k}:{h[k]}" for k in sorted(h)), "", signed,
-                           payload_hash])
+    canonical = "\n".join(
+        [method, path, canonical_query(query), *(f"{k}:{h[k]}" for k in sorted(h)), "", signed, payload_hash]
+    )
     day = amz_date[:8]
     scope = f"{day}/{region}/{service}/aws4_request"
     to_sign = "\n".join(["AWS4-HMAC-SHA256", amz_date, scope, hashlib.sha256(canonical.encode()).hexdigest()])
@@ -128,6 +153,7 @@ class ObjectStore:
 
     @classmethod
     def from_settings(cls) -> ObjectStore:
+        """The bucket named by the NEBIUS_* settings; the endpoint defaults to the region's storage endpoint."""
         v = require(*STORE_SETTINGS)
         region = settings.get("NEBIUS_REGION")
         endpoint = settings.get("NEBIUS_S3_ENDPOINT") or f"https://storage.{region}.nebius.cloud"
@@ -136,10 +162,11 @@ class ObjectStore:
     def _call(self, method: str, key: str = "", query=(), body: bytes = b"") -> tuple[int, bytes]:
         path = f"/{self.bucket}" + (f"/{_quote(key, safe='/-_.~')}" if key else "")
         payload_hash = hashlib.sha256(body).hexdigest()
-        amz_date = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        amz_date = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         headers = {"host": self.host, "x-amz-content-sha256": payload_hash, "x-amz-date": amz_date}
-        auth, _ = sigv4(method, path, query, headers, payload_hash, self._key_id, self._secret, self.region, "s3",
-                        amz_date)
+        auth, _ = sigv4(
+            method, path, query, headers, payload_hash, self._key_id, self._secret, self.region, "s3", amz_date
+        )
         qs = canonical_query(query)
         url = self.endpoint + path + (f"?{qs}" if qs else "")
         send = {"x-amz-content-sha256": payload_hash, "x-amz-date": amz_date, "Authorization": auth}
@@ -148,8 +175,12 @@ class ObjectStore:
     def _check(self, method: str, key: str, status: int, body: bytes) -> None:
         if status != 200:
             code = re.search(rb"<Code>([^<]+)</Code>", body or b"")
-            raise ShardError(settings.redact(f"object storage {method} {key or '/'}: HTTP {status}"
-                             + (f" {code.group(1).decode(errors='replace')}" if code else "")))
+            raise ShardError(
+                settings.redact(
+                    f"object storage {method} {key or '/'}: HTTP {status}"
+                    + (f" {code.group(1).decode(errors='replace')}" if code else "")
+                )
+            )
 
     def put(self, key: str, data: bytes) -> None:
         self._check("PUT", key, *self._call("PUT", key, body=data))
@@ -190,6 +221,7 @@ class ObjectStore:
 
 # ---- Serverless AI Jobs ----
 
+
 class NebiusBackend:
     """`Backend` for run_fanout: shards as Serverless AI Jobs, storage in one Object Storage bucket. Settings come
     from arrival.config (see .env.example); a missing one raises NebiusNotConfigured naming it, before any request.
@@ -211,8 +243,10 @@ class NebiusBackend:
         self.max_job_seconds = _seconds("NEBIUS_MAX_JOB_SECONDS")
         self.max_no_state_seconds = _seconds("NEBIUS_MAX_NO_STATE_SECONDS")
         if self.max_job_seconds <= float(timeout.rstrip("s")):
-            raise NebiusNotConfigured(f"NEBIUS_MAX_JOB_SECONDS ({self.max_job_seconds:g}) must be longer than the job "
-                                      f"timeout ({timeout}), or it would cut off a shard the service still allows")
+            raise NebiusNotConfigured(
+                f"NEBIUS_MAX_JOB_SECONDS ({self.max_job_seconds:g}) must be longer than the job "
+                f"timeout ({timeout}), or it would cut off a shard the service still allows"
+            )
         self.clock = clock or time.monotonic
         self.submissions: list[tuple[int, int]] = []  # (shard, attempt number) in order
         self.jobs: dict[str, dict] = {}  # job id -> shard, name, staging prefix, last state, clock readings, reason
@@ -222,15 +256,20 @@ class NebiusBackend:
         headers = {"Authorization": f"Bearer {self._token}", "Content-Type": "application/json"}
         status, data = _http(method, self.api + path, body, headers)
         if status != 200:
-            raise ShardError(settings.redact(f"Nebius API {method} {path}: HTTP {status} "
-                                             f"{data[:300].decode(errors='replace')}"))
+            raise ShardError(
+                settings.redact(f"Nebius API {method} {path}: HTTP {status} {data[:300].decode(errors='replace')}")
+            )
         try:  # a proxy's HTML page with HTTP 200 is a failed call, like any other: callers catch ShardError
             reply = json.loads(data or b"{}")
         except ValueError:
             reply = None
         if not isinstance(reply, dict):
-            raise ShardError(settings.redact(f"Nebius API {method} {path}: the HTTP 200 reply is not a JSON object: "
-                                             f"{data[:300].decode(errors='replace')}"))
+            raise ShardError(
+                settings.redact(
+                    f"Nebius API {method} {path}: the HTTP 200 reply is not a JSON object: "
+                    f"{data[:300].decode(errors='replace')}"
+                )
+            )
         return reply
 
     def job_spec(self, cfg: FanoutConfig, i: int, name: str, staging: str) -> dict:
@@ -239,13 +278,22 @@ class NebiusBackend:
         bad = [a for a in args if not a or any(ch.isspace() for ch in a)]
         if bad:
             raise ShardError(f"job arguments cannot be empty or contain spaces (the API takes one args string): {bad}")
-        env = [{"name": "NEBIUS_BUCKET", "value": self.store.bucket},
-               {"name": "NEBIUS_S3_ENDPOINT", "value": self.store.endpoint},
-               {"name": "NEBIUS_REGION", "value": self.store.region}]
+        env = [
+            {"name": "NEBIUS_BUCKET", "value": self.store.bucket},
+            {"name": "NEBIUS_S3_ENDPOINT", "value": self.store.endpoint},
+            {"name": "NEBIUS_REGION", "value": self.store.region},
+        ]
         env += [{"name": n, "mysteryboxSecret": {"secretId": self.s3_secret}} for n in SECRET_ENV]
-        spec = {"image": self.image, "containerCommand": "python", "args": " ".join(args),
-                "environmentVariables": env, "platform": self.platform, "preset": self.preset,
-                "timeout": self.timeout, "disk": {"type": "NETWORK_SSD", "sizeBytes": DISK_BYTES}}
+        spec = {
+            "image": self.image,
+            "containerCommand": "python",
+            "args": " ".join(args),
+            "environmentVariables": env,
+            "platform": self.platform,
+            "preset": self.preset,
+            "timeout": self.timeout,
+            "disk": {"type": "NETWORK_SSD", "sizeBytes": DISK_BYTES},
+        }
         if self.subnet:
             spec["subnetId"] = self.subnet
         return {"metadata": {"parentId": self.project, "name": name}, "spec": spec}
@@ -263,8 +311,17 @@ class NebiusBackend:
         if not job_id:
             raise ShardError(f"Nebius create for job {name} returned no resourceId")
         now = self.clock()
-        self.jobs[job_id] = {"shard": i, "shards": cfg.shards, "name": name, "staging": staging, "state": None,
-                             "details": None, "submitted": now, "seen": now, "reason": None}
+        self.jobs[job_id] = {
+            "shard": i,
+            "shards": cfg.shards,
+            "name": name,
+            "staging": staging,
+            "state": None,
+            "details": None,
+            "submitted": now,
+            "seen": now,
+            "reason": None,
+        }
         return job_id
 
     def poll(self, job_id: str) -> str:
@@ -300,9 +357,16 @@ class NebiusBackend:
         reason = rec["reason"]
         if reason is None and rec["state"] and JOB_STATES[rec["state"]] == FAILED:
             reason = rec["state"] + (f": {rec['details'].get('message')}" if rec["details"] else "")
-        return {"state": rec["state"], "reason": reason,
-                "resources": {"platform": self.platform, "preset": self.preset, "disk_bytes": int(DISK_BYTES),
-                              "timeout": self.timeout}}
+        return {
+            "state": rec["state"],
+            "reason": reason,
+            "resources": {
+                "platform": self.platform,
+                "preset": self.preset,
+                "disk_bytes": int(DISK_BYTES),
+                "timeout": self.timeout,
+            },
+        }
 
     def cancel(self, job_id: str) -> None:
         self._api("POST", "/ai/v1/jobs/cancel", {"id": job_id})
@@ -329,7 +393,7 @@ class NebiusBackend:
         if not keys:
             raise ShardError(f"job {job_id} reported success but uploaded nothing under {src}")
         for key in keys:
-            self.put_object(f"{prefix}/{key[len(src):]}", self.store.get(key))
+            self.put_object(f"{prefix}/{key[len(src) :]}", self.store.get(key))
 
     def put_object(self, key: str, data: bytes) -> None:
         self.store.put(key, data)
@@ -345,6 +409,7 @@ class NebiusBackend:
 
 
 # ---- inside the job ----
+
 
 def run_shard(dest: str, sim_args: list[str], store: ObjectStore | None = None) -> int:
     """Run one `arrival sim ... --shard i/n` on local disk, then upload its shard folder under `dest/`."""

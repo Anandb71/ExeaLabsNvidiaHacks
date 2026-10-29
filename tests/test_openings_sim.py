@@ -12,23 +12,25 @@ import pytest
 
 mujoco = pytest.importorskip("mujoco")
 
+from conftest import REPO, SCANS  # noqa: E402
+
 from arrival.scan import roomplan  # noqa: E402
 from arrival.scan.bundle import load_room  # noqa: E402
 from arrival.sim.scene import build_mjcf, portals_xml  # noqa: E402
 from arrival.twin.compile import compile_twin, place_default_objects  # noqa: E402
-
-from conftest import REPO, SCANS  # noqa: E402
 
 FIXTURES = REPO / "tests" / "fixtures" / "roomplan"
 BASE = (2.0, 0.6, 0.75)  # a stand spot clear of the office's table and chairs (test_non_kitchen)
 HERO_BASE = (1.3, 1.0, 0.75)
 PORTAL = re.compile(r"(door|window|opening)(\d+)_(\w+)$")
 PORTAL_TAG = re.compile(r'<geom name="(?:door|window|opening)\d+_\w+"[^>]*/>')
-PARTS = {"closed": {"jamb0", "jamb1", "head", "leaf", "knob"},
-         "open": {"jamb0", "jamb1", "head", "recess", "leaf", "knob"},
-         "window": {"jamb0", "jamb1", "head", "sill", "pane", "mullion"},
-         "opening": {"jamb0", "jamb1", "head", "recess"},
-         "raised": {"jamb0", "jamb1", "head", "sill", "recess"}}  # an opening above the floor (a pass-through)
+PARTS = {
+    "closed": {"jamb0", "jamb1", "head", "leaf", "knob"},
+    "open": {"jamb0", "jamb1", "head", "recess", "leaf", "knob"},
+    "window": {"jamb0", "jamb1", "head", "sill", "pane", "mullion"},
+    "opening": {"jamb0", "jamb1", "head", "recess"},
+    "raised": {"jamb0", "jamb1", "head", "sill", "recess"},
+}  # an opening above the floor (a pass-through)
 MAX_PROUD, KNOB_PROUD = 0.03, 0.06  # how far past each wall face a box (the sill at most) and the knob reach
 TOL = 1e-3
 
@@ -54,26 +56,48 @@ def _t(x, y, z, yaw=0.0):
 def _surface(kind, ident, parent, x, z, w, h, sill=0.0, yaw=0.0, is_open=None):
     """A door, window or opening `w` wide and `h` tall with its bottom `sill` above the floor, centred at ARKit x, z."""
     cat = {kind: {"isOpen": is_open}} if kind == "door" else {kind: {}}
-    return {"identifier": ident, "parentIdentifier": parent, "category": cat, "confidence": {"high": {}},
-            "dimensions": [w, h, 0], "transform": _t(x, FLOOR_Y + sill + h / 2, z, yaw)}
+    return {
+        "identifier": ident,
+        "parentIdentifier": parent,
+        "category": cat,
+        "confidence": {"high": {}},
+        "dimensions": [w, h, 0],
+        "transform": _t(x, FLOOR_Y + sill + h / 2, z, yaw),
+    }
 
 
 def _export():
     """A 6 by 5 m room in Apple's encoding (floor at ARKit y = -1.4, walls centred on the origin)."""
-    def wall(ident, x, z, length, yaw):
-        return {"identifier": ident, "category": {"wall": {}}, "confidence": {"high": {}},
-                "dimensions": [length, H, 0], "transform": _t(x, FLOOR_Y + H / 2, z, yaw)}
 
-    walls = [wall("north", 0, -D / 2, W, 0), wall("south", 0, D / 2, W, 0),
-             wall("east", W / 2, 0, D, math.pi / 2), wall("west", -W / 2, 0, D, math.pi / 2)]
-    doors = [_surface("door", "front", "north", -2.0, -D / 2, 0.9, 2.1, sill=0.03, is_open=False),
-             _surface("door", "hall", "north", -0.5, -D / 2, 0.8, 2.0, is_open=True)]
-    windows = [_surface("window", "view", "north", 1.5, -D / 2, 1.6, 1.2, sill=0.9),
-               _surface("window", "nowhere", None, 0.0, 0.0, 1.0, 1.0, sill=1.0),
-               _surface("window", "speck", "south", 0.0, D / 2, 0.0, 0.0, sill=1.0)]
-    openings = [_surface("opening", "arch", "gone", W / 2, 0.0, 1.0, 2.0, yaw=math.pi / 2),
-                _surface("opening", "hatch", "west", -W / 2, 0.5, 1.2, 0.6, sill=0.9, yaw=math.pi / 2),
-                _surface("opening", "wide", "south", 0.0, D / 2, 9.0, 2.2)]
+    def wall(ident, x, z, length, yaw):
+        return {
+            "identifier": ident,
+            "category": {"wall": {}},
+            "confidence": {"high": {}},
+            "dimensions": [length, H, 0],
+            "transform": _t(x, FLOOR_Y + H / 2, z, yaw),
+        }
+
+    walls = [
+        wall("north", 0, -D / 2, W, 0),
+        wall("south", 0, D / 2, W, 0),
+        wall("east", W / 2, 0, D, math.pi / 2),
+        wall("west", -W / 2, 0, D, math.pi / 2),
+    ]
+    doors = [
+        _surface("door", "front", "north", -2.0, -D / 2, 0.9, 2.1, sill=0.03, is_open=False),
+        _surface("door", "hall", "north", -0.5, -D / 2, 0.8, 2.0, is_open=True),
+    ]
+    windows = [
+        _surface("window", "view", "north", 1.5, -D / 2, 1.6, 1.2, sill=0.9),
+        _surface("window", "nowhere", None, 0.0, 0.0, 1.0, 1.0, sill=1.0),
+        _surface("window", "speck", "south", 0.0, D / 2, 0.0, 0.0, sill=1.0),
+    ]
+    openings = [
+        _surface("opening", "arch", "gone", W / 2, 0.0, 1.0, 2.0, yaw=math.pi / 2),
+        _surface("opening", "hatch", "west", -W / 2, 0.5, 1.2, 0.6, sill=0.9, yaw=math.pi / 2),
+        _surface("opening", "wide", "south", 0.0, D / 2, 9.0, 2.2),
+    ]
     return {"walls": walls, "floors": [], "doors": doors, "windows": windows, "openings": openings, "objects": []}
 
 
@@ -175,10 +199,13 @@ def test_portals_lie_on_their_wall(synthetic):
         _check_on_wall(m, d, geoms, walls[wall_id], _world_extent(walls[wall_id], *along), zs)
 
 
-@pytest.mark.parametrize("name,counts", [
-    ("office", {("door", 0): "closed", ("door", 1): "open", ("window", 0): "window"}),
-    ("study", {("door", 0): "closed"}),
-])
+@pytest.mark.parametrize(
+    "name,counts",
+    [
+        ("office", {("door", 0): "closed", ("door", 1): "open", ("window", 0): "window"}),
+        ("study", {("door", 0): "closed"}),
+    ],
+)
 def test_authored_fixtures_draw_every_portal_on_its_wall(name, counts):
     twin = _fixture(name)
     m = _model(twin)
@@ -219,8 +246,7 @@ def test_portal_geoms_never_collide(synthetic, office):
         assert all(m.geom_bodyid[g] == 0 for g in gs)  # on the world body: no mass, no new body or joint
 
 
-@pytest.mark.parametrize("wall_id,inward", [("north", (0, -1)), ("south", (0, 1)),
-                                           ("east", (-1, 0)), ("west", (1, 0))])
+@pytest.mark.parametrize("wall_id,inward", [("north", (0, -1)), ("south", (0, 1)), ("east", (-1, 0)), ("west", (1, 0))])
 @pytest.mark.parametrize("hinge", [None, "left", "right"])
 def test_open_leaf_and_knob_swing_from_the_selected_jamb(synthetic, wall_id, inward, hinge):
     twin = copy.deepcopy(synthetic)
@@ -272,10 +298,26 @@ def test_physics_is_unchanged(office, hinge):
     twin["doors"][1]["hinge"] = hinge
     m0 = _model(twin)
     knob, open_knob = m0.geom("door0_knob").pos, m0.geom("door1_knob").pos
-    twin["objects"].append({"id": "cup_drop", "catalog_id": "cup", "label": "cup", "size": [0.07, 0.07, 0.09],
-                            "position": [float(knob[0]), 0.09, float(knob[2])], "yaw": 0.0})  # the room is y > 0
-    twin["objects"].append({"id": "cup_open", "catalog_id": "cup", "label": "cup", "size": [0.07, 0.07, 0.09],
-                            "position": open_knob.tolist(), "yaw": 0.0})
+    twin["objects"].append(
+        {
+            "id": "cup_drop",
+            "catalog_id": "cup",
+            "label": "cup",
+            "size": [0.07, 0.07, 0.09],
+            "position": [float(knob[0]), 0.09, float(knob[2])],
+            "yaw": 0.0,
+        }
+    )  # the room is y > 0
+    twin["objects"].append(
+        {
+            "id": "cup_open",
+            "catalog_id": "cup",
+            "label": "cup",
+            "size": [0.07, 0.07, 0.09],
+            "position": open_knob.tolist(),
+            "yaw": 0.0,
+        }
+    )
     runs = []
     for t in (twin, _bare(twin)):
         m = _model(t)
@@ -302,8 +344,15 @@ def test_pick_task_and_safety_are_identical_with_open_door_visuals():
     from arrival.sim.tasks import finish_task, make_tasks
 
     twin = compile_twin(load_room("hero_kitchen", SCANS))
-    twin["doors"] = [{"wall_id": "wall_north", "size": [0.8, 0.0, 2.0], "position": [1.0, 0.0, 1.0],
-                      "is_open": True, "hinge": "right"}]
+    twin["doors"] = [
+        {
+            "wall_id": "wall_north",
+            "size": [0.8, 0.0, 2.0],
+            "position": [1.0, 0.0, 1.0],
+            "is_open": True,
+            "hinge": "right",
+        }
+    ]
     task = finish_task(make_tasks(twin, ["counter_to_sink"], 1, seed=0, people=1, log=lambda *_: None)[0])
     episodes = []
     for t in (twin, _bare(twin)):

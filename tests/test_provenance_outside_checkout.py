@@ -6,14 +6,29 @@ import subprocess
 
 import pytest
 
-from arrival.export import provenance
+from arrival import provenance
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
 
 
 def _git(cwd, *args):
-    return subprocess.run(["git", "-C", str(cwd), "-c", "user.name=t", "-c", "user.email=t@example.com",
-                           "-c", "commit.gpgsign=false", *args], capture_output=True, text=True, check=True).stdout.strip()
+    return subprocess.run(
+        [
+            "git",
+            "-C",
+            str(cwd),
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.com",
+            "-c",
+            "commit.gpgsign=false",
+            *args,
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
 
 
 @pytest.fixture

@@ -21,13 +21,15 @@ def _project(p, room_center_x: float) -> tuple[int, int]:
 
 
 def render_frame(frame: dict, lighting: str, room_center_x: float = 2.0) -> np.ndarray:
+    """One schematic SIZE x SIZE frame: the lighting's background, the counter as a band, the object as a disc and the
+    end effector as a small square, projected from the frame's cartesian positions."""
     img = np.empty((SIZE, SIZE, 3), dtype=np.uint8)
     img[:] = BACKGROUND[lighting]
-    img[SIZE - 20:, :] = COUNTER
+    img[SIZE - 20 :, :] = COUNTER
     ox, oy = _project(frame["object_position"], room_center_x)
     img[(_xx - ox) ** 2 + (_yy - oy) ** 2 <= 16] = OBJECT
     ex, ey = _project(frame["eef"], room_center_x)
-    img[max(ey - 1, 0):ey + 2, max(ex - 1, 0):ex + 2] = EEF
+    img[max(ey - 1, 0) : ey + 2, max(ex - 1, 0) : ex + 2] = EEF
     return img
 
 

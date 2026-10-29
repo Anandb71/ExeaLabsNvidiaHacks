@@ -1,9 +1,11 @@
-import os
 import json
+import os
 from pathlib import Path
+
 import pytest
 
-from arrival.models.tavily import TavilyNotConfigured, search as tavily_search
+from arrival.models.tavily import TavilyNotConfigured
+from arrival.models.tavily import search as tavily_search
 from arrival.tasks.tavily_research import TavilyResearchAgent
 
 
@@ -15,13 +17,17 @@ def test_tavily_not_configured_raises(monkeypatch):
 
 def test_tavily_research_agent_cache_hit(tmp_path):
     cache_file = tmp_path / "test_tavily_cache.json"
-    cache_file.write_text(json.dumps({
-        "test appliance query": {
-            "source": "tavily_api",
-            "answer": "Test answer for appliance latch and clearance.",
-            "results": [{"title": "Test Guide", "url": "https://example.com/test", "content": "..."}]
-        }
-    }))
+    cache_file.write_text(
+        json.dumps(
+            {
+                "test appliance query": {
+                    "source": "tavily_api",
+                    "answer": "Test answer for appliance latch and clearance.",
+                    "results": [{"title": "Test Guide", "url": "https://example.com/test", "content": "..."}],
+                }
+            }
+        )
+    )
 
     agent = TavilyResearchAgent(log=lambda *_: None, cache_path=cache_file)
     res = agent.search("test appliance query")
@@ -50,7 +56,7 @@ def test_tavily_research_agent_mock_live_search(monkeypatch, tmp_path):
     def mock_tavily_search(query, search_depth="basic", include_answer=True):
         return {
             "answer": "Mock live Tavily answer for microwave button.",
-            "results": [{"title": "Microwave Manual", "url": "https://example.com/mw", "content": "specs"}]
+            "results": [{"title": "Microwave Manual", "url": "https://example.com/mw", "content": "specs"}],
         }
 
     monkeypatch.setattr("arrival.tasks.tavily_research.tavily_search", mock_tavily_search)
@@ -80,7 +86,7 @@ def test_enrich_twin_with_tavily_research(tmp_path):
             {"id": "dw1", "type": "dishwasher"},
             {"id": "st1", "type": "gas_range"},
         ],
-        "objects": []
+        "objects": [],
     }
 
     enriched = agent.enrich_twin(twin)
@@ -93,6 +99,7 @@ def test_enrich_twin_with_tavily_research(tmp_path):
 
 def test_cli_research_command(tmp_path):
     import argparse
+
     from arrival.cli import cmd_research
 
     args = argparse.Namespace(
@@ -112,8 +119,14 @@ def test_cli_research_command(tmp_path):
 def test_enrich_twin_skips_non_appliances_and_negative_caches(tmp_path, monkeypatch):
     monkeypatch.delenv("TAVILY_API_KEY", raising=False)
     agent = TavilyResearchAgent(log=lambda *_: None, cache_path=tmp_path / "c.json")
-    twin = {"fixtures": [{"id": "b", "type": "box"}, {"id": "c", "type": "counter"},
-                         {"id": "h", "type": "hinge_cabinet"}, {"id": "s", "type": "sink"}]}
+    twin = {
+        "fixtures": [
+            {"id": "b", "type": "box"},
+            {"id": "c", "type": "counter"},
+            {"id": "h", "type": "hinge_cabinet"},
+            {"id": "s", "type": "sink"},
+        ]
+    }
     research = agent.enrich_twin(twin)["tavily_research"]
     assert set(research) == {"sink"}
 
@@ -150,8 +163,10 @@ def test_default_cache_is_under_out_not_in_the_package(tmp_path, monkeypatch):
 
     monkeypatch.chdir(tmp_path)
     calls = []
-    monkeypatch.setattr("arrival.tasks.tavily_research.tavily_search",
-                        lambda q, **k: calls.append(q) or {"answer": "live", "results": []})
+    monkeypatch.setattr(
+        "arrival.tasks.tavily_research.tavily_search",
+        lambda q, **k: calls.append(q) or {"answer": "live", "results": []},
+    )
     agent = TavilyResearchAgent(log=lambda *_: None)
     for fixture in ("dishwasher", "stove", "fridge", "microwave", "sink"):
         assert agent.research_appliance(fixture)["source"] == "tavily_api"
@@ -164,6 +179,7 @@ def test_default_cache_is_under_out_not_in_the_package(tmp_path, monkeypatch):
 def http_reply(monkeypatch):
     """An HTTP-200 byte stream in process: no listener, API keys or real connection needed."""
     import io
+
     from arrival.models import tavily
 
     calls = []
@@ -182,12 +198,22 @@ def http_reply(monkeypatch):
     return install
 
 
-@pytest.mark.parametrize("payload", [
-    b"<html>proxy response</html>", b"\xff", [1, 2], "ok", None,
-    {"results": None}, {"results": {}}, {"results": "wrong"}, {"error": "unavailable"},
-    {"results": [None, {"title": None, "url": None, "content": None}]},
-    {"answer": {}, "results": []},
-])
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"<html>proxy response</html>",
+        b"\xff",
+        [1, 2],
+        "ok",
+        None,
+        {"results": None},
+        {"results": {}},
+        {"results": "wrong"},
+        {"error": "unavailable"},
+        {"results": [None, {"title": None, "url": None, "content": None}]},
+        {"answer": {}, "results": []},
+    ],
+)
 def test_bad_http_200_replies_fall_back_without_poisoning_cache(tmp_path, http_reply, payload):
     from arrival.tasks.tavily_research import FALLBACK_KNOWLEDGE
 
@@ -209,9 +235,15 @@ def test_bad_http_200_replies_fall_back_without_poisoning_cache(tmp_path, http_r
 
 @pytest.mark.parametrize("bad_text", [None, 42, ["bad"], {"bad": "text"}])
 def test_mixed_result_rows_are_sanitized_before_research_and_cache(tmp_path, http_reply, bad_text):
-    payload = {"answer": bad_text, "results": [None, 7,
-               {"title": bad_text, "url": bad_text, "content": "Maintain 15 cm clearance."},
-               {"title": "Manual", "url": "https://example.test/manual", "content": bad_text}]}
+    payload = {
+        "answer": bad_text,
+        "results": [
+            None,
+            7,
+            {"title": bad_text, "url": bad_text, "content": "Maintain 15 cm clearance."},
+            {"title": "Manual", "url": "https://example.test/manual", "content": bad_text},
+        ],
+    }
     http_reply(payload)
     path = tmp_path / "cache.json"
     agent = TavilyResearchAgent(cache_path=path, log=lambda *_: None)
@@ -227,15 +259,22 @@ def test_mixed_result_rows_are_sanitized_before_research_and_cache(tmp_path, htt
     assert replay.research_appliance("microwave")["source"] == "cache"
 
 
-@pytest.mark.parametrize("cache_body", [
-    '{"q":', '[1, 2]', '"ok"', 'null', b'\xff',
-    '{"q": {"source": "tavily_api", "answer": null, "results": []}}',
-    '{"q": {"source": "tavily_api", "answer": "old", "results": null}}',
-    '{"q": {"source": "tavily_api", "answer": "old", "results": [null]}}',
-    '{"q": {"source": "tavily_api", "answer": "old", "results": [{"title": "Guide", "url": null}]}}',
-    '{"q": {"source": "fallback", "answer": "old", "results": []}}',
-    '{"q": {}}',
-])
+@pytest.mark.parametrize(
+    "cache_body",
+    [
+        '{"q":',
+        "[1, 2]",
+        '"ok"',
+        "null",
+        b"\xff",
+        '{"q": {"source": "tavily_api", "answer": null, "results": []}}',
+        '{"q": {"source": "tavily_api", "answer": "old", "results": null}}',
+        '{"q": {"source": "tavily_api", "answer": "old", "results": [null]}}',
+        '{"q": {"source": "tavily_api", "answer": "old", "results": [{"title": "Guide", "url": null}]}}',
+        '{"q": {"source": "fallback", "answer": "old", "results": []}}',
+        '{"q": {}}',
+    ],
+)
 def test_corrupt_or_malformed_cache_is_a_miss_and_recovers(tmp_path, http_reply, cache_body):
     path = tmp_path / "cache.json"
     path.write_bytes(cache_body if isinstance(cache_body, bytes) else cache_body.encode())
@@ -250,15 +289,25 @@ def test_corrupt_or_malformed_cache_is_a_miss_and_recovers(tmp_path, http_reply,
 
 
 def test_valid_http_response_and_request_stay_unchanged(http_reply):
-    payload = {"query": "clearance", "answer": "Allow 15 cm.", "results": [
-        {"title": "Guide", "url": "https://example.test/guide", "content": "15 cm clearance", "score": .9}],
-        "response_time": .1}
+    payload = {
+        "query": "clearance",
+        "answer": "Allow 15 cm.",
+        "results": [
+            {"title": "Guide", "url": "https://example.test/guide", "content": "15 cm clearance", "score": 0.9}
+        ],
+        "response_time": 0.1,
+    }
     calls = http_reply(payload)
     assert tavily_search("clearance", search_depth="advanced", timeout=2) == payload
     request, timeout = calls[0]
     assert request.get_method() == "POST" and timeout == 2
-    assert json.loads(request.data) == {"api_key": "test-only", "query": "clearance", "search_depth": "advanced",
-                                        "include_answer": True, "max_results": 5}
+    assert json.loads(request.data) == {
+        "api_key": "test-only",
+        "query": "clearance",
+        "search_depth": "advanced",
+        "include_answer": True,
+        "max_results": 5,
+    }
 
 
 def test_bad_lookup_preserves_other_valid_cached_findings(tmp_path, monkeypatch):
@@ -275,5 +324,7 @@ def test_bad_lookup_preserves_other_valid_cached_findings(tmp_path, monkeypatch)
 
 def test_missing_result_text_fields_are_safe_strings(http_reply):
     http_reply({"answer": None, "results": [{"url": "https://example.test/manual"}]})
-    assert tavily_search("query") == {"answer": "", "results": [
-        {"title": "", "url": "https://example.test/manual", "content": ""}]}
+    assert tavily_search("query") == {
+        "answer": "",
+        "results": [{"title": "", "url": "https://example.test/manual", "content": ""}],
+    }

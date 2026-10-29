@@ -21,8 +21,12 @@ def _setup(tmp_path: Path) -> tuple[Path, Path]:
     shutil.copy(ROOMPLAN, scans / "phone_kitchen" / "roomplan.json")
     meta = out / "datasets" / "phone_kitchen_sim" / "meta"
     meta.mkdir(parents=True)
-    (meta / "info.json").write_text(json.dumps({"arrival_physically_valid": True, "total_episodes": 3,
-                                                "arrival_successes": 3, "arrival_attempts": 3}), encoding="utf-8")
+    (meta / "info.json").write_text(
+        json.dumps(
+            {"arrival_physically_valid": True, "total_episodes": 3, "arrival_successes": 3, "arrival_attempts": 3}
+        ),
+        encoding="utf-8",
+    )
     return scans, out
 
 

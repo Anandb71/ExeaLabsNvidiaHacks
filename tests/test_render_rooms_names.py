@@ -29,18 +29,20 @@ def test_each_roomplan_json_gets_its_own_render(tmp_path, capsys):
     files = [str(scans / "kitchen_a" / "roomplan.json"), str(scans / "office_b" / "roomplan.json")]
     assert _render_rooms().main([*files, "--out", str(out)]) == 0
     assert sorted(p.name for p in out.iterdir()) == ["kitchen_a_roomplan_top.png", "office_b_roomplan_top.png"]
-    assert capsys.readouterr().out.split() == [str(out / "kitchen_a_roomplan_top.png"),
-                                               str(out / "office_b_roomplan_top.png")]
+    assert capsys.readouterr().out.split() == [
+        str(out / "kitchen_a_roomplan_top.png"),
+        str(out / "office_b_roomplan_top.png"),
+    ]
 
 
 def test_the_file_and_its_folder_name_the_room_alike(tmp_path):
     scans, mod = _scans(tmp_path), _render_rooms()
-    (by_file, twin), = mod._twins([scans / "kitchen_a" / "roomplan.json"])
-    (by_folder, _), = mod._twins([scans / "kitchen_a"])
+    ((by_file, twin),) = mod._twins([scans / "kitchen_a" / "roomplan.json"])
+    ((by_folder, _),) = mod._twins([scans / "kitchen_a"])
     assert by_file == by_folder == "kitchen_a_roomplan"
     assert twin["room_id"] == "kitchen_a"
 
 
 def test_another_export_name_keeps_its_stem(tmp_path):
-    (name, twin), = _render_rooms()._twins([FIXTURES / "office.json"])
+    ((name, twin),) = _render_rooms()._twins([FIXTURES / "office.json"])
     assert name == "office" and twin["room_id"] == "office"

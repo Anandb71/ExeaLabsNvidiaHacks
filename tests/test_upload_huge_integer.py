@@ -5,18 +5,19 @@ numbers. `10**400` raises OverflowError, which is not a ValueError, so the worke
 queues the same upload again (the default is two retries). NaN and a string in the
 same field are already ScanBundleError and are not retried.
 """
+
 import json
 
 import pytest
+from conftest import SCANS
 
 from arrival.jobs.limits import Limits
 from arrival.jobs.queue import create_job
 from arrival.jobs.worker import load_upload, retryable, run_once
 from arrival.scan.bundle import ScanBundleError
 from arrival.scan.roomplan import to_bundle
-from conftest import SCANS
 
-HUGE = 10 ** 400
+HUGE = 10**400
 EYE = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
 QUIET = lambda *_: None  # noqa: E731
 
@@ -28,9 +29,12 @@ def _scan(mutate) -> bytes:
 
 
 def _roomplan(mutate) -> bytes:
-    data = {"walls": [{"identifier": "w", "dimensions": [4.0, 2.5, 0.1], "transform": list(EYE)}],
-            "objects": [{"identifier": "table", "category": "table", "dimensions": [1.0, 1.0, 1.0],
-                         "transform": list(EYE)}]}
+    data = {
+        "walls": [{"identifier": "w", "dimensions": [4.0, 2.5, 0.1], "transform": list(EYE)}],
+        "objects": [
+            {"identifier": "table", "category": "table", "dimensions": [1.0, 1.0, 1.0], "transform": list(EYE)}
+        ],
+    }
     mutate(data)
     return json.dumps(data).encode()
 
@@ -42,10 +46,12 @@ REFUSED = {
     "roomplan transform": lambda: _roomplan(lambda d: d["walls"][0]["transform"].__setitem__(12, HUGE)),
     "roomplan wall dimensions": lambda: _roomplan(lambda d: d["walls"][0]["dimensions"].__setitem__(0, HUGE)),
     "roomplan object dimensions": lambda: _roomplan(lambda d: d["objects"][0]["dimensions"].__setitem__(0, HUGE)),
-    "roomplan door dimensions": lambda: _roomplan(lambda d: d.__setitem__(
-        "doors", [{"identifier": "d", "dimensions": [HUGE, 2.0, 0.1], "transform": list(EYE)}])),
-    "roomplan floor polygon": lambda: _roomplan(lambda d: d.__setitem__(
-        "floors", [{"identifier": "f", "polygonCorners": [[0, 0, 0], [1, 0, 0], [HUGE, 1, 0]]}])),
+    "roomplan door dimensions": lambda: _roomplan(
+        lambda d: d.__setitem__("doors", [{"identifier": "d", "dimensions": [HUGE, 2.0, 0.1], "transform": list(EYE)}])
+    ),
+    "roomplan floor polygon": lambda: _roomplan(
+        lambda d: d.__setitem__("floors", [{"identifier": "f", "polygonCorners": [[0, 0, 0], [1, 0, 0], [HUGE, 1, 0]]}])
+    ),
 }
 
 
@@ -67,11 +73,14 @@ def test_worker_does_not_requeue_a_scan_with_a_huge_integer(tmp_path):
     assert run_once(out, limits=Limits(job_retry_backoff=0), log=QUIET) is None
 
 
-@pytest.mark.parametrize("curve", [
-    {"startAngle": HUGE, "endAngle": 1.0, "radius": 2.0},
-    {"startAngle": 0.0, "endAngle": 1.0, "radius": HUGE},
-    {"startAngle": 0.0, "endAngle": 1.0, "radius": 2.0, "center": [HUGE, 0.0]},
-])
+@pytest.mark.parametrize(
+    "curve",
+    [
+        {"startAngle": HUGE, "endAngle": 1.0, "radius": 2.0},
+        {"startAngle": 0.0, "endAngle": 1.0, "radius": HUGE},
+        {"startAngle": 0.0, "endAngle": 1.0, "radius": 2.0, "center": [HUGE, 0.0]},
+    ],
+)
 def test_a_huge_integer_in_a_curve_is_treated_as_not_finite(curve):
     """A non-finite curve angle or radius is dropped and the wall stays straight; a non-finite centre is ignored.
     A huge int used to raise OverflowError on the way there."""

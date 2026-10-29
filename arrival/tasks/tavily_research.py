@@ -11,9 +11,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-from arrival.models.tavily import TavilyNotConfigured, search as tavily_search, validate_reply
+from arrival.models.tavily import TavilyNotConfigured, validate_reply
+from arrival.models.tavily import search as tavily_search
 
-DEFAULT_CACHE = Path("out") / "cache" / "tavily_cache.json"  # under the run's out/, never in the package (see instructions.py)
+DEFAULT_CACHE = (
+    Path("out") / "cache" / "tavily_cache.json"
+)  # under the run's out/, never in the package (see instructions.py)
 
 CANONICAL_APPLIANCES = ("dishwasher", "stove", "fridge", "microwave", "sink")
 APPLIANCE_QUERIES = {  # picked by running candidates against the live API (Oct 26): these return concrete figures
@@ -105,8 +108,12 @@ class TavilyResearchAgent:
                     return {}
                 cache = {}
                 for key, item in value.items():
-                    if (not isinstance(key, str) or not isinstance(item, dict)
-                            or item.get("source") != "tavily_api" or not isinstance(item.get("answer"), str)):
+                    if (
+                        not isinstance(key, str)
+                        or not isinstance(item, dict)
+                        or item.get("source") != "tavily_api"
+                        or not isinstance(item.get("answer"), str)
+                    ):
                         continue
                     try:
                         clean = validate_reply(item)
@@ -170,20 +177,32 @@ class TavilyResearchAgent:
         """Synthesize operating knowledge and safety guidelines for an appliance."""
         key = fixture_type.lower()
         canonical = next((k for k in CANONICAL_APPLIANCES if k in key), "appliance")
-        query = APPLIANCE_QUERIES.get(key, APPLIANCE_QUERIES.get(canonical, f"residential {key} appliance safe robot operation"))
+        query = APPLIANCE_QUERIES.get(
+            key, APPLIANCE_QUERIES.get(canonical, f"residential {key} appliance safe robot operation")
+        )
 
         search_res = self.search(query, search_depth="advanced")  # the basic depth answered "the sources do not say"
         fallback = FALLBACK_KNOWLEDGE.get(canonical, FALLBACK_KNOWLEDGE.get(key, {}))
 
         summary = search_res.get("answer") or fallback.get("summary", f"Standard {fixture_type} fixture.")
-        guidelines = list(fallback.get("safety_guidelines", [
-            f"Maintain safe clearance from {fixture_type} surfaces.",
-            f"Verify physical latches and joints before moving.",
-        ]))
-        operating_steps = list(fallback.get("operating_steps", [
-            f"Approach {fixture_type} handle site.",
-            f"Engage grip and execute trajectory along defined mechanical joint.",
-        ]))
+        guidelines = list(
+            fallback.get(
+                "safety_guidelines",
+                [
+                    f"Maintain safe clearance from {fixture_type} surfaces.",
+                    f"Verify physical latches and joints before moving.",
+                ],
+            )
+        )
+        operating_steps = list(
+            fallback.get(
+                "operating_steps",
+                [
+                    f"Approach {fixture_type} handle site.",
+                    f"Engage grip and execute trajectory along defined mechanical joint.",
+                ],
+            )
+        )
         sources = [r.get("url") for r in search_res.get("results", []) if r.get("url")]
 
         return {

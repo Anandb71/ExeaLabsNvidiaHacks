@@ -36,18 +36,31 @@ HONEST_LABEL = "Scripted expert in simulation, no policy trained."
 FAMILIES = ["counter_to_sink", "open_drawer"]  # the README's sim defaults
 SIZES = {"quick": {"episodes": 2, "people": 1, "res": 64}, "full": {"episodes": 8, "people": 2, "res": 128}}
 EVAL_EPISODES = 2  # per family
-UNMEASURED = ["nebius_token_factory_usd", "nebius_gpu_job_usd", "cosmos_restyle_usd", "finetune_usd",
-              "teleop_comparison_usd_per_demo"]
+UNMEASURED = [
+    "nebius_token_factory_usd",
+    "nebius_gpu_job_usd",
+    "cosmos_restyle_usd",
+    "finetune_usd",
+    "teleop_comparison_usd_per_demo",
+]
 
 
 # Keys that would make some other script reach for the network. The demo ignores them.
-NETWORK_ENV = ["TOKEN_FACTORY_API_KEY", "TOKEN_FACTORY_BASE_URL", "TAVILY_API_KEY", "TAVILY_BASE_URL",
-               "GR00T_POLICY_URL", "COSMOS_URL"]
+NETWORK_ENV = [
+    "TOKEN_FACTORY_API_KEY",
+    "TOKEN_FACTORY_BASE_URL",
+    "TAVILY_API_KEY",
+    "TAVILY_BASE_URL",
+    "GR00T_POLICY_URL",
+    "COSMOS_URL",
+]
 EXIT_ENV = 2  # the machine cannot run the demo (not a stage failure)
 DEFAULT_TIMEOUT_S = 900
-GL_PROBE = ("import mujoco;"
-            "m=mujoco.MjModel.from_xml_string('<mujoco><worldbody><geom size=\"1\"/></worldbody></mujoco>');"
-            "r=mujoco.Renderer(m,16,16);d=mujoco.MjData(m);mujoco.mj_forward(m,d);r.update_scene(d);r.render()")
+GL_PROBE = (
+    "import mujoco;"
+    "m=mujoco.MjModel.from_xml_string('<mujoco><worldbody><geom size=\"1\"/></worldbody></mujoco>');"
+    "r=mujoco.Renderer(m,16,16);d=mujoco.MjData(m);mujoco.mj_forward(m,d);r.update_scene(d);r.render()"
+)
 
 
 class StageFailed(Exception):
@@ -71,6 +84,7 @@ def pick_gl_backend(candidates: list[str | None], probe=None) -> tuple[bool, str
     Each probe is a fresh process because MuJoCo reads MUJOCO_GL once, at import time, and a bad
     backend can abort the interpreter instead of raising.
     """
+
     def run(backend):
         env = dict(os.environ)
         env.pop("MUJOCO_GL", None)
@@ -80,8 +94,10 @@ def pick_gl_backend(candidates: list[str | None], probe=None) -> tuple[bool, str
             if backend == "osmesa":
                 env["PYOPENGL_PLATFORM"] = "osmesa"
         try:
-            return subprocess.run([sys.executable, "-c", GL_PROBE], env=env, capture_output=True,
-                                  timeout=60).returncode == 0
+            return (
+                subprocess.run([sys.executable, "-c", GL_PROBE], env=env, capture_output=True, timeout=60).returncode
+                == 0
+            )
         except (OSError, subprocess.TimeoutExpired):
             return False
 
@@ -100,9 +116,11 @@ def preflight(log=print, probe=None) -> str | None:
     forced = os.environ.get("MUJOCO_GL") or None
     found, backend, tried = pick_gl_backend(gl_candidates(forced=forced), probe)
     if not found:
-        return ("no working OpenGL backend for MuJoCo (tried " + ", ".join(tried) + "). On Linux install "
-                "libegl1 and libosmesa6 (or set MUJOCO_GL=osmesa); on Windows and macOS a desktop session "
-                "with a GPU driver is needed for glfw")
+        return (
+            "no working OpenGL backend for MuJoCo (tried " + ", ".join(tried) + "). On Linux install "
+            "libegl1 and libosmesa6 (or set MUJOCO_GL=osmesa); on Windows and macOS a desktop session "
+            "with a GPU driver is needed for glfw"
+        )
     if backend:
         os.environ["MUJOCO_GL"] = backend
         if backend == "osmesa":
@@ -127,6 +145,7 @@ def offline_guard():
             if self.family in (socket.AF_INET, socket.AF_INET6) and not _is_loopback(address):
                 raise OSError(f"demo_all is offline: refused connection to {address!r}")
             return real(self, address, *args)
+
         return inner
 
     socket.socket.connect, socket.socket.connect_ex = guarded(real_connect), guarded(real_connect_ex)
@@ -165,8 +184,12 @@ def _stage(stages: list[dict], name: str, fn, log=print):
     except (Exception, SystemExit) as e:  # run_demo reports a missing room with SystemExit(message)
         detail = None
         err = " ".join(str(e.code if isinstance(e, SystemExit) else e).split()) or type(e).__name__
-    row = {"stage": name, "status": "FAIL" if err else "PASS", "seconds": round(time.perf_counter() - t0, 2),
-           "detail": err or (detail if isinstance(detail, str) else None)}
+    row = {
+        "stage": name,
+        "status": "FAIL" if err else "PASS",
+        "seconds": round(time.perf_counter() - t0, 2),
+        "detail": err or (detail if isinstance(detail, str) else None),
+    }
     stages.append(row)
     log(f"[demo_all] {row['status']} {name} ({row['seconds']:.1f}s)" + (f": {err}" if err else ""))
     if err:
@@ -185,16 +208,26 @@ def _render_layout(twin: dict, room: str, out: Path) -> str:
 
 def _markdown(s: dict) -> str:
     ds = s["dataset"]
-    lines = [f"# Arrival demo summary: {s['room']}", "", f"**{HONEST_LABEL}**", "",
-             f"Mode: {s['mode']}. Overall: **{s['overall']}**. Wall time {s['seconds']} s.", "",
-             "| Stage | Status | Seconds |", "|---|---|---|"]
+    lines = [
+        f"# Arrival demo summary: {s['room']}",
+        "",
+        f"**{HONEST_LABEL}**",
+        "",
+        f"Mode: {s['mode']}. Overall: **{s['overall']}**. Wall time {s['seconds']} s.",
+        "",
+        "| Stage | Status | Seconds |",
+        "|---|---|---|",
+    ]
     lines += [f"| {r['stage']} | {r['status']} | {r['seconds']} |" for r in s["stages"]]
     lines += ["", "## Dataset", ""]
     if ds:
-        lines += [f"- Path: `{ds['path']}`", f"- Episodes: {ds['episodes']}, frames: {ds['frames']}",
-                  f"- arrival_physically_valid: {str(ds['physically_valid']).lower()}",
-                  f"- joints_are_placeholder: {str(ds['joints_are_placeholder']).lower()}",
-                  f"- Demos per hour (this laptop): {ds['demos_per_hour']}"]
+        lines += [
+            f"- Path: `{ds['path']}`",
+            f"- Episodes: {ds['episodes']}, frames: {ds['frames']}",
+            f"- arrival_physically_valid: {str(ds['physically_valid']).lower()}",
+            f"- joints_are_placeholder: {str(ds['joints_are_placeholder']).lower()}",
+            f"- Demos per hour (this laptop): {ds['demos_per_hour']}",
+        ]
     else:
         lines.append("- not produced")
     lines += ["", "## Closed-loop eval (scripted expert)", ""]
@@ -213,8 +246,9 @@ def _index_html(s: dict) -> str:
     """One self-contained page: summary, stage table and the contact sheet inlined as a data URI."""
     e = html.escape
     ds = s["dataset"]
-    rows = "".join(f"<tr><td>{e(r['stage'])}</td><td>{r['status']}</td><td>{r['seconds']}</td></tr>"
-                   for r in s["stages"])
+    rows = "".join(
+        f"<tr><td>{e(r['stage'])}</td><td>{r['status']}</td><td>{r['seconds']}</td></tr>" for r in s["stages"]
+    )
     img = ""
     sheet = s["artifacts"].get("contact_sheet")
     if sheet and Path(sheet).is_file():
@@ -222,22 +256,26 @@ def _index_html(s: dict) -> str:
         img = f'<h2>Contact sheet</h2><img alt="contact sheet" src="data:image/png;base64,{b64}">'
     facts = ""
     if ds:
-        facts = (f"<ul><li>Dataset: <code>{e(str(ds['path']))}</code></li>"
-                 f"<li>Episodes: {ds['episodes']}, frames: {ds['frames']}</li>"
-                 f"<li>arrival_physically_valid: {str(ds['physically_valid']).lower()}</li>"
-                 f"<li>joints_are_placeholder: {str(ds['joints_are_placeholder']).lower()}</li></ul>")
+        facts = (
+            f"<ul><li>Dataset: <code>{e(str(ds['path']))}</code></li>"
+            f"<li>Episodes: {ds['episodes']}, frames: {ds['frames']}</li>"
+            f"<li>arrival_physically_valid: {str(ds['physically_valid']).lower()}</li>"
+            f"<li>joints_are_placeholder: {str(ds['joints_are_placeholder']).lower()}</li></ul>"
+        )
     err = f"<p><b>Error:</b> {e(s['error'])}</p>" if s["error"] else ""
-    return ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
-            "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-            f"<title>Arrival demo: {e(s['room'])}</title>"
-            "<style>body{font:16px/1.5 system-ui,sans-serif;max-width:46rem;margin:2rem auto;padding:0 1rem}"
-            "table{border-collapse:collapse}td,th{border:1px solid #8885;padding:.25rem .6rem;text-align:left}"
-            "img{max-width:100%}</style></head><body>"
-            f"<h1>Arrival demo: {e(s['room'])}</h1><p><b>{e(HONEST_LABEL)}</b></p>"
-            f"<p>Mode {e(s['mode'])}. Overall <b>{s['overall']}</b>. Wall time {s['seconds']} s. "
-            f"Run offline: no network, no API keys.</p>{err}"
-            f"<table><tr><th>Stage</th><th>Status</th><th>Seconds</th></tr>{rows}</table>{facts}{img}"
-            "</body></html>\n")
+    return (
+        '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        f"<title>Arrival demo: {e(s['room'])}</title>"
+        "<style>body{font:16px/1.5 system-ui,sans-serif;max-width:46rem;margin:2rem auto;padding:0 1rem}"
+        "table{border-collapse:collapse}td,th{border:1px solid #8885;padding:.25rem .6rem;text-align:left}"
+        "img{max-width:100%}</style></head><body>"
+        f"<h1>Arrival demo: {e(s['room'])}</h1><p><b>{e(HONEST_LABEL)}</b></p>"
+        f"<p>Mode {e(s['mode'])}. Overall <b>{s['overall']}</b>. Wall time {s['seconds']} s. "
+        f"Run offline: no network, no API keys.</p>{err}"
+        f"<table><tr><th>Stage</th><th>Status</th><th>Seconds</th></tr>{rows}</table>{facts}{img}"
+        "</body></html>\n"
+    )
 
 
 def run(room: str, mode: str, out: Path, scans: str = "scans", log=print) -> tuple[dict, int]:
@@ -246,30 +284,56 @@ def run(room: str, mode: str, out: Path, scans: str = "scans", log=print) -> tup
     size = SIZES[mode]
     t_all = time.perf_counter()
     stages: list[dict] = []
-    s = {"room": room, "mode": mode, "size": size, "honest_label": HONEST_LABEL, "stages": stages,
-         "dataset": None, "per_family": {}, "successes": 0, "cost": {k: None for k in UNMEASURED},
-         "artifacts": {}, "error": None}
+    s = {
+        "room": room,
+        "mode": mode,
+        "size": size,
+        "honest_label": HONEST_LABEL,
+        "stages": stages,
+        "dataset": None,
+        "per_family": {},
+        "successes": 0,
+        "cost": {k: None for k in UNMEASURED},
+        "artifacts": {},
+        "error": None,
+    }
     quiet = lambda *_: None  # noqa: E731
     try:
         # scan normalize + compile; the 1-episode placeholder dataset it also writes is not the demo dataset
-        res = _stage(stages, "scan normalize + compile",
-                     lambda: run_demo(room, 1, "none", out, scans, log=quiet), log)
+        res = _stage(stages, "scan normalize + compile", lambda: run_demo(room, 1, "none", out, scans, log=quiet), log)
         twin = json.loads((res["twin_dir"] / "twin.json").read_text())
         s["artifacts"]["layout"] = _stage(stages, "twin layout png", lambda: _render_layout(twin, room, out), log)
 
         from arrival.sim.collect import collect
 
-        sim = _stage(stages, "sim dataset", lambda: collect(
-            twin, FAMILIES, size["episodes"], out, people=size["people"], res=size["res"], save_preview=True,
-            log=quiet), log)
+        sim = _stage(
+            stages,
+            "sim dataset",
+            lambda: collect(
+                twin,
+                FAMILIES,
+                size["episodes"],
+                out,
+                people=size["people"],
+                res=size["res"],
+                save_preview=True,
+                log=quiet,
+            ),
+            log,
+        )
         ds_dir = Path(sim["dataset"])
         info = json.loads((ds_dir / "meta" / "info.json").read_text())
         emb = json.loads((ds_dir / "meta" / "embodiment.json").read_text())  # the placeholder flag lives here
         rep = sim["report_data"]
-        s["dataset"] = {"path": str(ds_dir), "episodes": info["total_episodes"], "frames": info["total_frames"],
-                        "physically_valid": info.get("arrival_physically_valid"),
-                        "joints_are_placeholder": emb.get("joints_are_placeholder"),
-                        "demos_per_hour": rep["demos_per_hour"], "attempts": rep["attempts"]}
+        s["dataset"] = {
+            "path": str(ds_dir),
+            "episodes": info["total_episodes"],
+            "frames": info["total_frames"],
+            "physically_valid": info.get("arrival_physically_valid"),
+            "joints_are_placeholder": emb.get("joints_are_placeholder"),
+            "demos_per_hour": rep["demos_per_hour"],
+            "attempts": rep["attempts"],
+        }
         s["successes"] = rep["successes"]
 
         def check():
@@ -295,12 +359,22 @@ def run(room: str, mode: str, out: Path, scans: str = "scans", log=print) -> tup
         def ev():
             from arrival.eval.harness import evaluate
 
-            r = evaluate(twin, FAMILIES, EVAL_EPISODES, "scripted", people=size["people"], res=size["res"],
-                         out_dir=out, log=quiet)
-            s["artifacts"].update(eval_report=str(r["path"]), eval_manifest=r["manifest_path"],
-                                  eval_episodes=r["episodes_path"])
-            s["per_family"] = {k: {"successes": v["successes"], "episodes": v["episodes"]}
-                               for k, v in r["families"].items()}
+            r = evaluate(
+                twin,
+                FAMILIES,
+                EVAL_EPISODES,
+                "scripted",
+                people=size["people"],
+                res=size["res"],
+                out_dir=out,
+                log=quiet,
+            )
+            s["artifacts"].update(
+                eval_report=str(r["path"]), eval_manifest=r["manifest_path"], eval_episodes=r["episodes_path"]
+            )
+            s["per_family"] = {
+                k: {"successes": v["successes"], "episodes": v["episodes"]} for k, v in r["families"].items()
+            }
             if not s["per_family"]:
                 raise StageFailed("no eval episodes ran")
             return f"{r['totals']['successes']}/{r['totals']['episodes']}"
@@ -336,8 +410,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--scans", default="scans")
     ap.add_argument("--serve", action="store_true", help="start the local page when every stage passed")
     ap.add_argument("--port", type=int, default=8000)
-    ap.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_S,
-                    help=f"abort with exit 1 after this many seconds, 0 for none (default {DEFAULT_TIMEOUT_S})")
+    ap.add_argument(
+        "--timeout",
+        type=float,
+        default=DEFAULT_TIMEOUT_S,
+        help=f"abort with exit 1 after this many seconds, 0 for none (default {DEFAULT_TIMEOUT_S})",
+    )
     a = ap.parse_args(argv)
     out = Path(a.out)
     why = preflight()
@@ -357,7 +435,7 @@ def main(argv: list[str] | None = None) -> int:
     print((out / "demo_summary.md").read_text())
     print(f"summary: {out / 'demo_summary.md'}\npage: {out / 'index.html'}")
     if a.serve:
-        from arrival.cli import resolve_scans
+        from arrival.scan.bundle import resolve_scans
         from arrival.web.app import serve
 
         serve(port=a.port, out_dir=out, scans_dir=resolve_scans(a.scans))

@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+
 import pytest
 
 from arrival.sim.policy import VLMPlanner, rule_plan
@@ -37,14 +38,25 @@ def test_a_plan_cached_under_another_offer_never_answers(monkeypatch, tmp_path):
     # the same instruction and inventory offered different families is a different question
     planner = VLMPlanner(log=lambda *_: None, cache_path=tmp_path / "c.json")
     args = ("Open the oven", ["mug_1"], ["stove_1"])
-    nine = ("counter_to_sink", "counter_to_counter", "open_drawer", "open_door", "close_drawer", "close_door",
-            "put_in_drawer", "wipe_counter", "open_fridge")  # what the prompt offered everywhere before
+    nine = (
+        "counter_to_sink",
+        "counter_to_counter",
+        "open_drawer",
+        "open_door",
+        "close_drawer",
+        "close_door",
+        "put_in_drawer",
+        "wipe_counter",
+        "open_fridge",
+    )  # what the prompt offered everywhere before
     keys = {planner._cache_key(*args, families=f) for f in (nine, nine + ("open_oven",), None)}
     assert len(keys) == 3 and planner._cache_key(*args) == planner._cache_key(*args, families=None)
     old = "open the oven::['mug_1']::['stove_1']"  # the key format before the offer was part of it
     (tmp_path / "c.json").write_text(json.dumps({old: {"family": "open_door", "object": None, "target": None}}))
-    monkeypatch.setattr("arrival.models.token_factory.complete",
-                        lambda *a, **k: '{"family": "open_oven", "object": null, "target": "stove_1"}')
+    monkeypatch.setattr(
+        "arrival.models.token_factory.complete",
+        lambda *a, **k: '{"family": "open_oven", "object": null, "target": "stove_1"}',
+    )
     planner = VLMPlanner(log=lambda *_: None, cache_path=tmp_path / "c.json")
     assert planner.plan(*args)["family"] == "open_oven" and planner.source == "token_factory"  # asked, not cached
 
@@ -99,7 +111,7 @@ def test_generate_instructions_train_eval_split(tmp_path):
 
 def test_sim_collect_with_vlm_planner(tmp_path, monkeypatch):
     monkeypatch.delenv("TOKEN_FACTORY_API_KEY", raising=False)  # no network; fallback is not cached
-    mujoco = pytest.importorskip("mujoco")
+    pytest.importorskip("mujoco")
     from arrival.scan.bundle import load_room
     from arrival.sim.collect import collect
     from arrival.twin.compile import compile_twin
@@ -140,8 +152,16 @@ def test_sim_collect_ignores_plan_for_another_family(tmp_path, monkeypatch):
 
     monkeypatch.setattr(VLMPlanner, "plan", plan)
     logs = []
-    res = collect(twin=twin, families=["counter_to_sink"], episodes=1, out_dir=tmp_path, people=0, res=32,
-                  planner_name="vlm", log=logs.append)
+    res = collect(
+        twin=twin,
+        families=["counter_to_sink"],
+        episodes=1,
+        out_dir=tmp_path,
+        people=0,
+        res=32,
+        planner_name="vlm",
+        log=logs.append,
+    )
 
     assert any("keeping the task's" in line for line in logs)
     assert res["report_data"]["successes"] == 1
@@ -175,14 +195,18 @@ def _planner_with_reply(monkeypatch, tmp_path, reply):
 
 
 def test_planner_rejects_unknown_family_and_does_not_cache(monkeypatch, tmp_path):
-    planner = _planner_with_reply(monkeypatch, tmp_path, 'Sure {"family": "fold_laundry", "object": null, "target": null}')
+    planner = _planner_with_reply(
+        monkeypatch, tmp_path, 'Sure {"family": "fold_laundry", "object": null, "target": null}'
+    )
     plan = planner.plan("Open the cabinet door", ["mug_1"], ["counter_a"])
     assert planner.source == "rule_based" and plan["family"] == "open_door"
     assert not (tmp_path / "c.json").exists()
 
 
 def test_planner_rejects_unknown_object_and_non_dict(monkeypatch, tmp_path):
-    planner = _planner_with_reply(monkeypatch, tmp_path, '{"family": "counter_to_sink", "object": "ghost", "target": null}')
+    planner = _planner_with_reply(
+        monkeypatch, tmp_path, '{"family": "counter_to_sink", "object": "ghost", "target": null}'
+    )
     planner.plan("Put the mug in the sink", ["mug_1"], ["sink_1"])
     assert planner.source == "rule_based"
     planner = _planner_with_reply(monkeypatch, tmp_path, "[1, 2]")
@@ -192,7 +216,9 @@ def test_planner_rejects_unknown_object_and_non_dict(monkeypatch, tmp_path):
 
 def test_planner_moves_a_fixture_named_as_object_to_target(monkeypatch, tmp_path):
     # Nemotron answers "open the fridge" with the fridge as its object; that was refused and fell back to the parser
-    planner = _planner_with_reply(monkeypatch, tmp_path, '{"family": "open_fridge", "object": "fridge_1", "target": null}')
+    planner = _planner_with_reply(
+        monkeypatch, tmp_path, '{"family": "open_fridge", "object": "fridge_1", "target": null}'
+    )
     plan = planner.plan("Let me check if we're out of milk.", ["mug_1"], ["fridge_1", "sink_1"])
     assert planner.source == "token_factory"
     assert plan == {"family": "open_fridge", "object": None, "target": "fridge_1"}
@@ -200,8 +226,10 @@ def test_planner_moves_a_fixture_named_as_object_to_target(monkeypatch, tmp_path
 
 def test_planner_calls_at_temperature_zero(monkeypatch, tmp_path):
     seen = {}
-    monkeypatch.setattr("arrival.models.token_factory.complete",
-                        lambda *a, **k: seen.update(k) or '{"family": "open_door", "object": null, "target": null}')
+    monkeypatch.setattr(
+        "arrival.models.token_factory.complete",
+        lambda *a, **k: seen.update(k) or '{"family": "open_door", "object": null, "target": null}',
+    )
     VLMPlanner(log=lambda *_: None, cache_path=tmp_path / "c.json").plan("Open the door", [], [])
     assert seen["temperature"] == 0
 
@@ -212,8 +240,10 @@ def _offered(system: str) -> list[str]:
 
 def _prompt_sent(monkeypatch, tmp_path, **kw) -> str:
     seen = []
-    monkeypatch.setattr("arrival.models.token_factory.complete",
-                        lambda messages, **k: seen.append(messages) or '{"family": "open_fridge", "object": null, "target": null}')
+    monkeypatch.setattr(
+        "arrival.models.token_factory.complete",
+        lambda messages, **k: seen.append(messages) or '{"family": "open_fridge", "object": null, "target": null}',
+    )
     cache = tmp_path / f"c{len(list(tmp_path.glob('c*.json')))}.json"  # a fresh cache: a hit sends nothing
     VLMPlanner(log=lambda *_: None, cache_path=cache).plan("Check the milk", [], ["fridge_1"], **kw)
     return seen[0][0]["content"]
@@ -247,10 +277,14 @@ def test_planner_prompt_offers_the_families_whose_fixture_the_room_has(monkeypat
     from arrival.sim.tasks import SIM_FAMILIES, room_families
 
     twins = _twins()
-    expect = {"hero_kitchen": ({"counter_to_counter", "open_oven", "turn_on_faucet"},
-                               {"move_on_table", "open_dishwasher", "load_dishwasher", "unload_dishwasher"}),
-              "office": ({"move_on_table"}, {"counter_to_sink", "turn_on_faucet", "open_door", "close_door"}),
-              "kitchen_real_01": ({"open_dishwasher", "open_oven"}, {"counter_to_sink", "turn_on_faucet"})}
+    expect = {
+        "hero_kitchen": (
+            {"counter_to_counter", "open_oven", "turn_on_faucet"},
+            {"move_on_table", "open_dishwasher", "load_dishwasher", "unload_dishwasher"},
+        ),
+        "office": ({"move_on_table"}, {"counter_to_sink", "turn_on_faucet", "open_door", "close_door"}),
+        "kitchen_real_01": ({"open_dishwasher", "open_oven"}, {"counter_to_sink", "turn_on_faucet"}),
+    }
     for room, (present, absent) in expect.items():
         offered = _offered(_prompt_sent(monkeypatch, tmp_path, twin=twins[room]))
         assert offered == list(room_families(twins[room]))  # derived from the twin, in SIM_FAMILIES order
@@ -260,7 +294,9 @@ def test_planner_prompt_offers_the_families_whose_fixture_the_room_has(monkeypat
 
 def test_planner_rejects_a_family_the_room_was_not_offered(monkeypatch, tmp_path):
     twin = _twins()["hero_kitchen"]
-    planner = _planner_with_reply(monkeypatch, tmp_path, '{"family": "move_on_table", "object": "mug_1", "target": null}')
+    planner = _planner_with_reply(
+        monkeypatch, tmp_path, '{"family": "move_on_table", "object": "mug_1", "target": null}'
+    )
     planner.plan("Shift the mug down the counter", ["mug_1"], ["counter_a"], twin=twin)
     assert planner.source == "rule_based" and not (tmp_path / "c.json").exists()  # rejected, so the parser answered
     with pytest.raises(ValueError, match="not offered"):
@@ -293,10 +329,20 @@ def test_research_cache_key_is_stable_across_processes():
     import subprocess
     import sys
 
-    code = ("from arrival.sim.policy import VLMPlanner;import tempfile;"
-            "print(VLMPlanner(cache_path=tempfile.mkdtemp()+'/c.json')._cache_key('a',[],[],'ctx'))")
-    keys = {subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True,
-                           env={**os.environ, "PYTHONHASHSEED": str(i)}).stdout for i in (1, 2)}
+    code = (
+        "from arrival.sim.policy import VLMPlanner;import tempfile;"
+        "print(VLMPlanner(cache_path=tempfile.mkdtemp()+'/c.json')._cache_key('a',[],[],'ctx'))"
+    )
+    keys = {
+        subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            check=True,
+            env={**os.environ, "PYTHONHASHSEED": str(i)},
+        ).stdout
+        for i in (1, 2)
+    }
     assert len(keys) == 1
 
 
@@ -307,8 +353,10 @@ def test_default_cache_is_under_out_not_in_the_package(tmp_path, monkeypatch):
 
     monkeypatch.chdir(tmp_path)
     calls = []
-    monkeypatch.setattr("arrival.models.token_factory.complete",
-                        lambda *a, **k: calls.append(1) or '{"family": "counter_to_sink", "object": "mug_1", "target": "sink_1"}')
+    monkeypatch.setattr(
+        "arrival.models.token_factory.complete",
+        lambda *a, **k: calls.append(1) or '{"family": "counter_to_sink", "object": "mug_1", "target": "sink_1"}',
+    )
     planner = VLMPlanner(log=lambda *_: None)
     objects, fixtures = ["bowl_1", "mug_1"], ["counter_a", "counter_b", "fridge_1", "sink_1", "stove_1"]
     wordings = [t.format(name="mug") for t in FALLBACK_TEMPLATES["counter_to_sink"]]

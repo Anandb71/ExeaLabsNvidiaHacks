@@ -8,11 +8,12 @@ import pytest
 mujoco = pytest.importorskip("mujoco")
 
 from arrival.scan.bundle import load_room  # noqa: E402
-from arrival.sim.collect import SimEnv, _front, run_episode  # noqa: E402
+from arrival.sim.collect import SimEnv, run_episode  # noqa: E402
 from arrival.sim.people import person_spec  # noqa: E402
 from arrival.sim.policy import ScriptedExpert  # noqa: E402
+from arrival.sim.stand import front  # noqa: E402
 from arrival.sim.tasks import SIM_FAMILIES, finish_task, make_tasks  # noqa: E402
-from arrival.twin.compile import _rect_distance, compile_twin  # noqa: E402
+from arrival.twin.compile import compile_twin, rect_distance  # noqa: E402
 
 SCANS = "tests/fixtures/scans"
 RUNS = ("counter_w", "counter_s", "counter_e")
@@ -29,7 +30,7 @@ def _tasks(twin, families, n, people=0):
 
 
 def _footprint_clearance(twin, xy):
-    return min(_rect_distance(list(xy), f) for f in twin["fixtures"])
+    return min(rect_distance(list(xy), f) for f in twin["fixtures"])
 
 
 def test_every_fixture_type_is_built(twin):
@@ -50,9 +51,9 @@ def test_base_parks_in_front_of_fixtures_on_every_wall(twin):
         assert _footprint_clearance(twin, xy) >= 0.25, (t["task_id"], xy)
         assert 0.4 < xy[0] < 4.1 and 0.4 < xy[1] < 3.1, (t["task_id"], xy)
         heading = base.xmat.reshape(3, 3)[:, 0][:2]
-        assert np.dot(heading, _front(anchor)[:2]) < -0.99, t["task_id"]  # faces the fixture's front
+        assert np.dot(heading, front(anchor)[:2]) < -0.99, t["task_id"]  # faces the fixture's front
         near = 1.0 if t["family"] in ("open_oven", "open_dishwasher") else 0.8  # the flap door's length is in between
-        assert _rect_distance(list(xy), anchor) < near, t["task_id"]  # and stands at it, not across the room
+        assert rect_distance(list(xy), anchor) < near, t["task_id"]  # and stands at it, not across the room
 
 
 def test_sink_tasks_only_from_the_sink_run(twin):
@@ -83,11 +84,21 @@ def test_walkers_get_a_strip_in_front_of_each_run(twin, fixture):
     assert all(0.0 < x < 4.5 and 0.0 < y < 3.5 for x, y in env.people_xy)
 
 
-@pytest.mark.parametrize("family,fixture,obj", [("counter_to_sink", "counter_w", "mug_1"), ("open_drawer", "counter_e", None),
-                                                ("open_door", "counter_s", None), ("put_in_drawer", "counter_w", "mug_1")])
+@pytest.mark.parametrize(
+    "family,fixture,obj",
+    [
+        ("counter_to_sink", "counter_w", "mug_1"),
+        ("open_drawer", "counter_e", None),
+        ("open_door", "counter_s", None),
+        ("put_in_drawer", "counter_w", "mug_1"),
+    ],
+)
 def test_expert_succeeds_with_people_on_a_rotated_run(twin, family, fixture, obj):
-    t = next(t for t in _tasks(twin, [family], 8, people=2)
-             if (t.get("fixture") or t["source"]) == fixture and (obj is None or t["object_id"] == obj))
+    t = next(
+        t
+        for t in _tasks(twin, [family], 8, people=2)
+        if (t.get("fixture") or t["source"]) == fixture and (obj is None or t["object_id"] == obj)
+    )
     env = SimEnv(twin, t, res=32)
     ep = run_episode(env, ScriptedExpert(), t)
     assert ep["success"] and not ep["safety"]["human_contact"], (t["task_id"], ep["detail"])
@@ -104,7 +115,9 @@ def test_closed_pads_squeeze_a_bowl_wall_and_a_plate_rim(twin):
     for j in ("finger_l", "finger_r"):
         d.joint(j).qpos[0] = 0.0
     mujoco.mj_forward(m, d)
-    pads = [i for i in range(m.ngeom) if m.body(m.geom_bodyid[i]).name in ("finger_l", "finger_r") and m.geom_contype[i]]
+    pads = [
+        i for i in range(m.ngeom) if m.body(m.geom_bodyid[i]).name in ("finger_l", "finger_r") and m.geom_contype[i]
+    ]
     a, b = d.geom_xpos[pads[0]], d.geom_xpos[pads[1]]
     axis = (b - a) / np.linalg.norm(b - a)
     half = [float(np.abs(d.geom_xmat[i].reshape(3, 3).T @ axis) @ m.geom_size[i]) for i in pads]

@@ -23,12 +23,13 @@ from functools import lru_cache
 from pathlib import Path
 
 SCHEMA_VERSION = 1
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 OBJECT_PROVENANCE = ("detected", "authored", "default_synthetic")
 GIT_TIMEOUT_S = 5
 
 
 def sha256_file(path: str | Path) -> str:
+    """The sha256 hex digest of a file's bytes, read in 1 MiB blocks."""
     h = hashlib.sha256()
     with open(path, "rb") as f:
         for block in iter(lambda: f.read(1 << 20), b""):
@@ -45,8 +46,9 @@ def canonical_sha256(obj) -> str:
 def _git(repo: str) -> tuple[str | None, bool | None]:
     def run(*args: str) -> str | None:
         try:
-            out = subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True, timeout=GIT_TIMEOUT_S,
-                                 check=True)
+            out = subprocess.run(
+                ["git", "-C", repo, *args], capture_output=True, text=True, timeout=GIT_TIMEOUT_S, check=True
+            )
         except (OSError, subprocess.SubprocessError):
             return None
         return out.stdout.strip()
@@ -97,16 +99,21 @@ def object_counts(twin: dict) -> dict:
     return counts
 
 
-def stamp_twin(twin: dict, bundle: dict | None = None, input_path: str | Path | None = None,
-               generators: dict | None = None) -> dict:
+def stamp_twin(
+    twin: dict, bundle: dict | None = None, input_path: str | Path | None = None, generators: dict | None = None
+) -> dict:
     """Add twin["provenance"]. `bundle` is the normalized scan the twin was compiled from (its hash and, when the
     loader recorded it, its input file's hash); `input_path` hashes a file directly. Returns the twin."""
     twin["provenance"] = {
         "schema_version": SCHEMA_VERSION,
         "input": input_record(bundle, input_path),
         "code": git_state(),
-        "generators": {"geometry": twin.get("geometry_source"), "twin_compiler": "arrival.twin.compile",
-                       "objects": object_counts(twin), **(generators or {})},
+        "generators": {
+            "geometry": twin.get("geometry_source"),
+            "twin_compiler": "arrival.twin.compile",
+            "objects": object_counts(twin),
+            **(generators or {}),
+        },
         "seeds": dict(twin.get("provenance", {}).get("seeds", {})),
     }
     return twin

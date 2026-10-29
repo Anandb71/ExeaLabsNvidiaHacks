@@ -9,6 +9,7 @@ import math
 import mujoco
 import numpy as np
 
+from arrival.sim.geometry import fridge_door_frame, point_segment_distance
 from arrival.sim.safety import YIELD, SafetyMonitor, yield_factor
 
 CLEAR = 0.6  # min distance (m) from the base column for any path segment: 0.12 pedestal + 0.17 torso + margin
@@ -29,8 +30,16 @@ def _in_frame(f: dict, M: np.ndarray, yaw: float) -> dict:
 
 HEIGHT = (1.55, 1.90)
 NC = 'contype="0" conaffinity="0"'
-SHIRTS = ["0.70 0.20 0.20 1", "0.20 0.40 0.70 1", "0.30 0.60 0.30 1", "0.85 0.75 0.25 1", "0.55 0.30 0.60 1",
-          "0.90 0.90 0.90 1", "0.20 0.20 0.22 1", "0.90 0.55 0.25 1"]
+SHIRTS = [
+    "0.70 0.20 0.20 1",
+    "0.20 0.40 0.70 1",
+    "0.30 0.60 0.30 1",
+    "0.85 0.75 0.25 1",
+    "0.55 0.30 0.60 1",
+    "0.90 0.90 0.90 1",
+    "0.20 0.20 0.22 1",
+    "0.90 0.55 0.25 1",
+]
 TROUSERS = ["0.20 0.22 0.32 1", "0.12 0.12 0.14 1", "0.45 0.40 0.33 1", "0.30 0.30 0.32 1", "0.55 0.55 0.58 1"]
 SKINS = ["0.95 0.80 0.69 1", "0.87 0.68 0.52 1", "0.76 0.55 0.38 1", "0.60 0.42 0.28 1", "0.42 0.28 0.18 1"]
 HAIRS = ["0.10 0.08 0.06 1", "0.35 0.22 0.12 1", "0.60 0.45 0.25 1", "0.75 0.70 0.65 1", "0.15 0.15 0.15 1"]
@@ -44,13 +53,17 @@ BRAKE = (0.6, 0.15)  # into a stop the speed falls with the distance left over 0
 PATH_SAMPLE = 0.05
 P_VISIT = 0.6  # share of episodes with people in which one person goes to the fridge
 OPEN_ANGLE = (0.95, 1.30)  # radians the door is opened to, seeded; a wider swing puts the panel further from the
-MAX_ANGLE = 1.45  # person in the doorway, so the angle is raised in 5 deg steps up to this when the stand point is close
+MAX_ANGLE = (
+    1.45  # person in the doorway, so the angle is raised in 5 deg steps up to this when the stand point is close
+)
 SWING_T, REACH_T = 1.2, 0.3  # seconds to swing the door, and for the hand to settle on or leave the handle
 LOOK_T = (1.5, 3.5)  # seconds spent in the open doorway
 SLOW = 0.45  # the two short steps into and out of the doorway, as a share of walking speed; the stride scales with it
 LET_GO = 0.30  # radians: the hand pulls the bar this far, then lets go and the door swings on; past about 20 deg the
 # person is on the inner side of the panel while the bar is on the outer face, so an arm still on the bar would cross it
-CATCH = 0.25  # radians: closing, the hand pushes the inner face at the free edge down to here, then the door shuts itself
+CATCH = (
+    0.25  # radians: closing, the hand pushes the inner face at the free edge down to here, then the door shuts itself
+)
 WAIT_MAX = 4.0  # seconds a person near the robot may go without PROGRESS before they walk away from it
 PROGRESS = 0.10  # metres from where the progress clock last reset that count as having got somewhere
 AWAY = (120, 0.4)  # walking away: headings tried (3 deg apart), and how far (m)
@@ -61,13 +74,27 @@ def person_spec(seed: int, i: int) -> dict:
     """Body proportions and colours for person i of a seed; the same (seed, i) always gives the same person."""
     rng = np.random.default_rng([seed, i])
     h = float(rng.uniform(*HEIGHT))
-    return {"height": h, "hip_z": 0.53 * h, "shoulder_z": 0.818 * h, "hip_w": 0.055 * h, "shoulder_w": 0.12 * h,
-            "thigh": 0.245 * h, "shank": 0.245 * h, "foot": 0.13 * h,
-            "upper_arm": 0.188 * h, "forearm": 0.19 * h, "torso_r": 0.075 * h, "limb_r": 0.038 * h,
-            "head_r": 0.065 * h, "head_z": 0.93 * h,
-            "shirt": SHIRTS[int(rng.integers(len(SHIRTS)))], "trousers": TROUSERS[int(rng.integers(len(TROUSERS)))],
-            "skin": SKINS[int(rng.integers(len(SKINS)))], "hair": HAIRS[int(rng.integers(len(HAIRS)))],
-            "radius": 0.12 * h + 0.038 * h + 0.03}  # shoulder half-width plus a limb radius plus margin, for paths
+    return {
+        "height": h,
+        "hip_z": 0.53 * h,
+        "shoulder_z": 0.818 * h,
+        "hip_w": 0.055 * h,
+        "shoulder_w": 0.12 * h,
+        "thigh": 0.245 * h,
+        "shank": 0.245 * h,
+        "foot": 0.13 * h,
+        "upper_arm": 0.188 * h,
+        "forearm": 0.19 * h,
+        "torso_r": 0.075 * h,
+        "limb_r": 0.038 * h,
+        "head_r": 0.065 * h,
+        "head_z": 0.93 * h,
+        "shirt": SHIRTS[int(rng.integers(len(SHIRTS)))],
+        "trousers": TROUSERS[int(rng.integers(len(TROUSERS)))],
+        "skin": SKINS[int(rng.integers(len(SKINS)))],
+        "hair": HAIRS[int(rng.integers(len(HAIRS)))],
+        "radius": 0.12 * h + 0.038 * h + 0.03,
+    }  # shoulder half-width plus a limb radius plus margin, for paths
 
 
 def _down(theta: float) -> np.ndarray:
@@ -116,7 +143,9 @@ def reach_arm(s: dict, target: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 def toe_reach(s: dict, amp: float) -> float:
     """How far ahead of the body centre the toe gets at swing amplitude amp, including the foot's radius. Standing,
     the foot still points 0.13 h forward."""
-    return max(limb_segments(s, ph, amp)["foot_r"][1][0] for ph in np.linspace(0.0, 2 * math.pi, 36)) + 0.8 * s["limb_r"]
+    return (
+        max(limb_segments(s, ph, amp)["foot_r"][1][0] for ph in np.linspace(0.0, 2 * math.pi, 36)) + 0.8 * s["limb_r"]
+    )
 
 
 def _cap(name: str, r: float, a, b, rgba: str) -> str:
@@ -125,21 +154,29 @@ def _cap(name: str, r: float, a, b, rgba: str) -> str:
 
 
 def person_xml(i: int, seed: int = 0) -> str:
+    """MJCF for walker i: a mocap body of capsules (pelvis, torso, neck, limbs) and spheres (head, hair), proportioned
+    and coloured by person_spec(seed, i). The limbs are posed each step by Walkers."""
     s = person_spec(seed, i)
     p = f"person_{i}"
     limbs = limb_segments(s, 0.0, 0.0)
-    col = {"thigh": s["trousers"], "shank": s["trousers"], "foot": "0.15 0.12 0.10 1", "uarm": s["shirt"],
-           "farm": s["skin"]}
-    body = (f'<body name="{p}" mocap="true" pos="0 0 0">'
-            + _cap(f"{p}_pelvis", 0.06 * s["height"], (0, -s["hip_w"], s["hip_z"]), (0, s["hip_w"], s["hip_z"]),
-                   s["trousers"])
-            + _cap(f"{p}_torso", s["torso_r"], (0, 0, s["hip_z"] + 0.03), (0, 0, s["shoulder_z"] - 0.03), s["shirt"])
-            + _cap(f"{p}_neck", 0.03 * s["height"], (0, 0, s["shoulder_z"]), (0, 0, s["head_z"] - s["head_r"]),
-                   s["skin"])
-            + f'<geom name="{p}_head" type="sphere" size="{s["head_r"]:.4f}" pos="0 0 {s["head_z"]:.4f}" '
-              f'rgba="{s["skin"]}" {NC}/>'
-            + f'<geom name="{p}_hair" type="sphere" size="{s["head_r"] * 0.96:.4f}" '
-              f'pos="{-0.015 * s["height"]:.4f} 0 {s["head_z"] + 0.025 * s["height"]:.4f}" rgba="{s["hair"]}" {NC}/>')
+    col = {
+        "thigh": s["trousers"],
+        "shank": s["trousers"],
+        "foot": "0.15 0.12 0.10 1",
+        "uarm": s["shirt"],
+        "farm": s["skin"],
+    }
+    body = (
+        f'<body name="{p}" mocap="true" pos="0 0 0">'
+        + _cap(
+            f"{p}_pelvis", 0.06 * s["height"], (0, -s["hip_w"], s["hip_z"]), (0, s["hip_w"], s["hip_z"]), s["trousers"]
+        )
+        + _cap(f"{p}_torso", s["torso_r"], (0, 0, s["hip_z"] + 0.03), (0, 0, s["shoulder_z"] - 0.03), s["shirt"])
+        + _cap(f"{p}_neck", 0.03 * s["height"], (0, 0, s["shoulder_z"]), (0, 0, s["head_z"] - s["head_r"]), s["skin"])
+        + f'<geom name="{p}_head" type="sphere" size="{s["head_r"]:.4f}" pos="0 0 {s["head_z"]:.4f}" '
+        f'rgba="{s["skin"]}" {NC}/>' + f'<geom name="{p}_hair" type="sphere" size="{s["head_r"] * 0.96:.4f}" '
+        f'pos="{-0.015 * s["height"]:.4f} 0 {s["head_z"] + 0.025 * s["height"]:.4f}" rgba="{s["hair"]}" {NC}/>'
+    )
     for name, (a, b) in limbs.items():
         r = s["limb_r"] * (1.25 if name.startswith("thigh") else 0.8 if name.startswith("f") else 1.0)
         body += _cap(f"{p}_{name}", r, a, b, col[name.split("_")[0]])
@@ -150,8 +187,17 @@ class Footprints:
     """Fixture footprints as arrays, with point and segment tests against the footprints grown by r."""
 
     def __init__(self, fixtures):
-        rows = [(f["position"][0], f["position"][1], f["size"][0] / 2, f["size"][1] / 2,
-                 math.cos(f.get("yaw", 0.0)), math.sin(f.get("yaw", 0.0))) for f in fixtures or []]
+        rows = [
+            (
+                f["position"][0],
+                f["position"][1],
+                f["size"][0] / 2,
+                f["size"][1] / 2,
+                math.cos(f.get("yaw", 0.0)),
+                math.sin(f.get("yaw", 0.0)),
+            )
+            for f in fixtures or []
+        ]
         self.a = np.array(rows, dtype=float).reshape(-1, 6)
 
     def plus(self, fixtures) -> Footprints:
@@ -161,6 +207,8 @@ class Footprints:
         return out
 
     def blocked(self, pts, r: float) -> bool:
+        """Whether any of the points, grown by radius r, falls inside a fixture footprint (each box tested in its own
+        rotated frame)."""
         if not len(self.a):
             return False
         pts = np.atleast_2d(pts)
@@ -261,13 +309,6 @@ def free_path(rng, floor, prints: Footprints, r: float, n: int = 4, tries: int =
     return pts + back
 
 
-def _seg_dist(a, b, p) -> float:
-    ab = b - a
-    n = float(ab @ ab)
-    t = 0.0 if n < 1e-12 else float(np.clip((p - a) @ ab / n, 0.0, 1.0))
-    return float(np.linalg.norm(a + t * ab - p))
-
-
 def _base_block(base_xy, r: float, base_to=None) -> dict:
     """The robot base, stretched along a mobile base's straight drive to base_to, as a footprint that, grown by a
     walker's radius r, keeps the walker's centre CLEAR from the base centre at every point of the drive (the rule
@@ -275,8 +316,11 @@ def _base_block(base_xy, r: float, base_to=None) -> dict:
     a = np.asarray(base_xy, dtype=float)
     d = np.zeros(2) if base_to is None else np.asarray(base_to, dtype=float) - a
     c, w = a + d / 2, 2 * max(CLEAR - r, 0.0)
-    return {"position": [float(c[0]), float(c[1]), 0.0], "size": [float(np.linalg.norm(d)) + w, w, 0.0],
-            "yaw": float(math.atan2(d[1], d[0]))}
+    return {
+        "position": [float(c[0]), float(c[1]), 0.0],
+        "size": [float(np.linalg.norm(d)) + w, w, 0.0],
+        "yaw": float(math.atan2(d[1], d[0])),
+    }
 
 
 def _rot(yaw: float, v) -> np.ndarray:
@@ -291,8 +335,6 @@ def plan_fridge_visit(fixtures, floor, spec: dict, rng, base_xy=None, keep=()) -
     or in a footprint, a stand point or the swing comes within CLEAR of the robot base, the walk from s1 to s2 comes
     inside a `keep` disc (Walkers), or no opening angle keeps the panel clear of the person's body and toes (a wider
     swing moves the panel away from the doorway)."""
-    from arrival.sim.scene import fridge_door_frame
-
     fr = next((f for f in fixtures or [] if f["type"].startswith("fridge")), None)
     if fr is None:
         return None
@@ -306,16 +348,24 @@ def plan_fridge_visit(fixtures, floor, spec: dict, rng, base_xy=None, keep=()) -
     s2 = centre + _rot(yaw, (m * (L / 2 - 0.15), front + r + 0.05))
     toe = _rot(yaw, (0.0, -toe_reach(spec, 0.0)))  # the standing toe tip, facing the fridge
     stride = toe_reach(spec, SLOW)
-    x0, _, x1, y1 = floor  # the stand points are in the work strip in front of the floor rectangle, like the counter stop
+    x0, _, x1, y1 = (
+        floor  # the stand points are in the work strip in front of the floor rectangle, like the counter stop
+    )
     prints = Footprints(fixtures)
     for p in (s1, s2):
-        if (not (x0 <= p[0] <= x1 and p[1] <= y1) or prints.blocked(p, r)
-                or prints.blocked(p + toe, 0.8 * spec["limb_r"])):
+        if (
+            not (x0 <= p[0] <= x1 and p[1] <= y1)
+            or prints.blocked(p, r)
+            or prints.blocked(p + toe, 0.8 * spec["limb_r"])
+        ):
             return None
     if base_xy is not None:
         base = np.asarray(base_xy, dtype=float)
-        if (np.linalg.norm(base - hinge) < L + CLEAR or np.linalg.norm(s1 - base) < CLEAR
-                or np.linalg.norm(s2 - base) < CLEAR):
+        if (
+            np.linalg.norm(base - hinge) < L + CLEAR
+            or np.linalg.norm(s1 - base) < CLEAR
+            or np.linalg.norm(s2 - base) < CLEAR
+        ):
             return None
     leg = [s1 + (s2 - s1) * t for t in np.linspace(0.0, 1.0, 12)]
     # The visitor holds still at s1 and s2, so they need the robot's door keep-out as much as a counter stop does: in
@@ -325,30 +375,59 @@ def plan_fridge_visit(fixtures, floor, spec: dict, rng, base_xy=None, keep=()) -
         return None
 
     def panel_dist(p, q):  # distance from a stand point to the door panel at angle q
-        return _seg_dist(hinge, hinge + L * _rot(yaw + m * q, (float(m), 0.0)), p)
+        return point_segment_distance(p, hinge, hinge + L * _rot(yaw + m * q, (float(m), 0.0)))
 
     swing = np.linspace(0.0, OPEN_ANGLE[1], 40)
-    if (min(panel_dist(s1, q) for q in swing) < r + 0.02
-            or min(panel_dist(s1 + toe, q) for q in swing) < 0.8 * spec["limb_r"] + 0.02):
+    if (
+        min(panel_dist(s1, q) for q in swing) < r + 0.02
+        or min(panel_dist(s1 + toe, q) for q in swing) < 0.8 * spec["limb_r"] + 0.02
+    ):
         return None
     q_open = float(rng.uniform(*OPEN_ANGLE))
     while q_open <= MAX_ANGLE:
-        if (min(panel_dist(p, q_open) for p in leg) >= stride + 0.02
-                and panel_dist(s2 + toe, q_open) >= 0.8 * spec["limb_r"] + 0.02):
+        if (
+            min(panel_dist(p, q_open) for p in leg) >= stride + 0.02
+            and panel_dist(s2 + toe, q_open) >= 0.8 * spec["limb_r"] + 0.02
+        ):
             break
         q_open += math.radians(5)
     else:
         return None
-    sector = {"position": [*(centre + _rot(yaw, (0.0, front + L / 2))), 0.0], "size": [L + 0.7, L + 0.7, 0.0],
-              "yaw": yaw}  # the quarter disc the door sweeps, grown for toes: the other walkers route round it
-    return {"fixture": fr["id"], "hinge": hinge, "yaw": yaw, "length": L, "handle": g["handle"], "centre": centre,
-            "face": yaw - math.pi / 2, "mirror": m, "s1": s1, "s2": s2, "q_open": q_open, "look": float(rng.uniform(*LOOK_T)),
-            "sector": sector}
+    sector = {
+        "position": [*(centre + _rot(yaw, (0.0, front + L / 2))), 0.0],
+        "size": [L + 0.7, L + 0.7, 0.0],
+        "yaw": yaw,
+    }  # the quarter disc the door sweeps, grown for toes: the other walkers route round it
+    return {
+        "fixture": fr["id"],
+        "hinge": hinge,
+        "yaw": yaw,
+        "length": L,
+        "handle": g["handle"],
+        "centre": centre,
+        "face": yaw - math.pi / 2,
+        "mirror": m,
+        "s1": s1,
+        "s2": s2,
+        "q_open": q_open,
+        "look": float(rng.uniform(*LOOK_T)),
+        "sector": sector,
+    }
 
 
-def _interaction_loop(rng, floor, base_xy, front_y, prints: Footprints | None = None, r: float = 0.0,
-                      base_to=None, keep=(), person_idx: int = 0, existing_stops: list | None = None,
-                      other_starts: list | None = None):
+def _interaction_loop(
+    rng,
+    floor,
+    base_xy,
+    front_y,
+    prints: Footprints | None = None,
+    r: float = 0.0,
+    base_to=None,
+    keep=(),
+    person_idx: int = 0,
+    existing_stops: list | None = None,
+    other_starts: list | None = None,
+):
     """Free point -> approach from behind -> walk a lane behind the base (crossing the robot's work strip)
     -> stop at the counter on the far side -> free point. Free points are resampled until no segment comes
     within CLEAR of the base; after 50 misses the point directly behind the stop or the lane is used.
@@ -393,12 +472,20 @@ def _interaction_loop(rng, floor, base_xy, front_y, prints: Footprints | None = 
                 break
     if existing_stops is not None:
         existing_stops.append(stop)
+
     def free(prev, nxt, fallback, min_other: bool = False):
         for _ in range(50):
             p = rng.uniform([x0, y0], [x1, y1])
-            if (all(np.linalg.norm(p - q) >= CLEAR and _seg_dist(prev, p, q) >= CLEAR
-                    and _seg_dist(p, nxt, q) >= CLEAR for q in drive) and not (prints and prints.blocked(p, r))
-                    and not any(np.linalg.norm(p - c) < k for c, k in keep)):
+            if (
+                all(
+                    np.linalg.norm(p - q) >= CLEAR
+                    and point_segment_distance(q, prev, p) >= CLEAR
+                    and point_segment_distance(q, p, nxt) >= CLEAR
+                    for q in drive
+                )
+                and not (prints and prints.blocked(p, r))
+                and not any(np.linalg.norm(p - c) < k for c, k in keep)
+            ):
                 if min_other and other_starts:
                     if any(np.linalg.norm(p - s0) < 0.70 for s0 in other_starts):
                         continue
@@ -437,9 +524,20 @@ class Walkers:
     the visit and the door geometry are turned back into the world before the first step. `front_y` None means no
     counter stop: free loops over the floor (the base is still kept clear of)."""
 
-    def __init__(self, n: int, floor: tuple[float, float, float, float], seed: int = 0, speed: float = 0.8,
-                 base_xy=None, front_y: float | None = None, fixtures=None, fridge_visit: bool | None = None,
-                 yaw: float = 0.0, base_to=None, keep=None):
+    def __init__(
+        self,
+        n: int,
+        floor: tuple[float, float, float, float],
+        seed: int = 0,
+        speed: float = 0.8,
+        base_xy=None,
+        front_y: float | None = None,
+        fixtures=None,
+        fridge_visit: bool | None = None,
+        yaw: float = 0.0,
+        base_to=None,
+        keep=None,
+    ):
         rng = np.random.default_rng(seed)
         self.M, self.work_yaw = frame(yaw), yaw
         # `keep`: (world xy, radius) discs the robot works in, e.g. the swing of the door it opens. No counter stop,
@@ -456,8 +554,11 @@ class Walkers:
                 plan = plan_fridge_visit(fixtures, floor, self.specs[who], vrng, base_xy, keep)
                 self.visit = {**plan, "person": who} if plan else None
         prints = Footprints(fixtures)
-        avoid = Footprints(list(fixtures or []) + ([self.visit["sector"]] if self.visit else [])
-                           + [{"position": [*c, 0.0], "size": [1.7 * k, 1.7 * k, 0.0], "yaw": 0.0} for c, k in keep])
+        avoid = Footprints(
+            list(fixtures or [])
+            + ([self.visit["sector"]] if self.visit else [])
+            + [{"position": [*c, 0.0], "size": [1.7 * k, 1.7 * k, 0.0], "yaw": 0.0} for c, k in keep]
+        )
         self.paths, self.pauses, self.faces, self.slow = [], [], [], []
         stops = []
         if self.visit:
@@ -476,9 +577,19 @@ class Walkers:
                 pts = free_path(rng, floor, fp, s["radius"], start=self.visit["s1"] if visiting else None)
                 pause = [0.0] * len(pts)
             else:
-                pts, pause = _interaction_loop(rng, floor, base_xy, front_y, pr, s["radius"], base_to,
-                                               keep=[] if visiting else keep,
-                                               person_idx=i, existing_stops=stops, other_starts=starts)
+                pts, pause = _interaction_loop(
+                    rng,
+                    floor,
+                    base_xy,
+                    front_y,
+                    pr,
+                    s["radius"],
+                    base_to,
+                    keep=[] if visiting else keep,
+                    person_idx=i,
+                    existing_stops=stops,
+                    other_starts=starts,
+                )
             faces, slow = [None] * len(pts), [False] * len(pts)
             if visiting:
                 pts, pause, faces, slow = self._splice_visit(pts, pause, s["radius"], floor, fixtures, base_xy)
@@ -488,9 +599,15 @@ class Walkers:
             self.faces.append(faces)
             self.slow.append(slow)
         self.zones = [prints if self.visit and i == self.visit["person"] else avoid for i in range(n)]
-        self.box = [(min(floor[0], *(p[0] for p in path)), min(floor[1], *(p[1] for p in path)),
-                     max(floor[2], *(p[0] for p in path)), max(floor[3], *(p[1] for p in path)))
-                    for path in self.paths]  # the floor and the path, work frame: where a person walking away may go
+        self.box = [
+            (
+                min(floor[0], *(p[0] for p in path)),
+                min(floor[1], *(p[1] for p in path)),
+                max(floor[2], *(p[0] for p in path)),
+                max(floor[3], *(p[1] for p in path)),
+            )
+            for path in self.paths
+        ]  # the floor and the path, work frame: where a person walking away may go
         self._to_world(yaw)
         self.pos = [p[0].copy() for p in self.paths]
         self.idx = [1] * n
@@ -556,8 +673,9 @@ class Walkers:
         return path, waits, faces, slow
 
     def _bind(self, model) -> None:
-        self._gids = [{k: model.geom(f"person_{i}_{k}").id for k in limb_segments(s, 0.0, 0.0)}
-                      for i, s in enumerate(self.specs)]
+        self._gids = [
+            {k: model.geom(f"person_{i}_{k}").id for k in limb_segments(s, 0.0, 0.0)} for i, s in enumerate(self.specs)
+        ]
         if self.visit:
             jn = f"{self.visit['fixture']}_door"
             try:
@@ -566,8 +684,11 @@ class Walkers:
             except KeyError:
                 self.visit = None  # a model built without the fridge: the person just walks
                 return
-            self._door = (int(j.qposadr[0]), int(j.dofadr[0]),
-                          {g for g in range(model.ngeom) if model.geom_bodyid[g] == body})
+            self._door = (
+                int(j.qposadr[0]),
+                int(j.dofadr[0]),
+                {g for g in range(model.ngeom) if model.geom_bodyid[g] == body},
+            )
 
     def door_point(self, q: float, lx: float, ly: float) -> np.ndarray:
         """A point of the door at angle q, from its frame: x along the panel from the hinge, y out of the front face
@@ -592,7 +713,9 @@ class Walkers:
             target = self.door_point(q, hx, hy + off)
         else:
             hold = _smooth((q - CATCH) / 0.2)
-            target = self.door_point(q, v["mirror"] * (v["length"] - 0.05), -off - 0.065)  # 0.065 keeps the forearm capsule above the panel's top edge
+            target = self.door_point(
+                q, v["mirror"] * (v["length"] - 0.05), -off - 0.065
+            )  # 0.065 keeps the forearm capsule above the panel's top edge
         w = min(_smooth(t / REACH_T), _smooth((self.total[i] - t) / REACH_T)) * hold
         self.reach[i] = (w, target) if w > 0.0 else None
 
@@ -670,6 +793,86 @@ class Walkers:
             return self.visit["face"]  # square to the fridge; the toes stay out of the door's swing
         return -np.pi / 2 + self.work_yaw  # face the counter while stopped
 
+    def _walker_give(self, i: int, u_dirs: list[np.ndarray], path) -> float:
+        """Speed factor (0 to 1) walker i keeps for the other walkers in its forward corridor: it stops or slows for
+        whoever is ahead within the lateral limit, and of two walkers heading for each other the one with priority
+        (leaving the room, then not paused, then the lower index) keeps half speed while there is room."""
+        give = 1.0
+        n = len(self.paths)
+        u_i = u_dirs[i]
+        for j in range(n):
+            if j == i:
+                continue
+            v_ij = self.pos[j] - self.pos[i]
+            d_ij = float(np.linalg.norm(v_ij))
+            if d_ij < 1e-6:
+                continue
+
+            s_i = float(np.dot(u_i, v_ij))
+            if s_i > 0:
+                lat = float(np.linalg.norm(v_ij - s_i * u_i))
+                r_sum = self.specs[i]["torso_r"] + self.specs[j]["torso_r"]
+
+                u_j = u_dirs[j]
+                s_j = float(np.dot(u_j, -v_ij))
+                mutual = s_j > 0
+
+                j_leaving = self.idx[j] == 5 and self.pos[j][1] < 1.45
+                i_leaving = self.idx[i] == 5 and self.pos[i][1] < 1.45
+
+                i_has_prio = False
+                if mutual:
+                    if i_leaving and not j_leaving:
+                        i_has_prio = True
+                    elif j_leaving and not i_leaving:
+                        i_has_prio = False
+                    elif self.wait[j] > 0 and self.wait[i] <= 0:
+                        i_has_prio = True
+                    elif self.wait[i] > 0 and self.wait[j] <= 0:
+                        i_has_prio = False
+                    else:
+                        i_has_prio = i < j
+
+                k_i = self.idx[i] % len(path)
+                target_p = path[k_i]
+                j_at_stop = float(np.linalg.norm(self.pos[j] - target_p)) < 0.45
+                j_paused = self.wait[j] > 0
+
+                if (j_paused or j_at_stop) and self.pos[i][1] > 1.40:
+                    d_stop = max(r_sum + 0.16, 0.65)
+                    d_slow = d_stop + 0.20
+                else:
+                    d_stop = r_sum + 0.16
+                    d_slow = d_stop + 0.22
+
+                lat_limit = 0.45
+                if lat < lat_limit:
+                    if mutual and i_has_prio and d_ij > 0.42:
+                        hg = 0.5
+                    elif d_ij <= d_stop:
+                        hg = 0.0
+                    elif d_ij < d_slow:
+                        hg = (d_ij - d_stop) / (d_slow - d_stop)
+                    else:
+                        hg = 1.0
+                    give = min(give, hg)
+        return give
+
+    def _place_body(self, model, data, i: int, yaw: float, moved: float, dt: float) -> None:
+        """Advance walker i's gait by the distance it moved this step and write its pose: limbs, the mocap root at
+        its position with the stride's bob, and its heading."""
+        self.yaw[i] = yaw
+        self.phase[i] += 2 * math.pi * moved / STRIDE
+        target = (
+            min(1.0, moved / (self.speed * dt)) if moved > 0 else 0.0
+        )  # stride scaled to speed: a full stride at 45% speed puts the toe in the door swing
+        self.amp[i] += float(np.clip(target - self.amp[i], -AMP_RATE * dt, AMP_RATE * dt))
+        self.pose_limbs(model, i)
+        mid = model.body(f"person_{i}").mocapid[0]
+        bob = BOB * self.amp[i] * (1 - abs(math.cos(self.phase[i])))
+        data.mocap_pos[mid] = [self.pos[i][0], self.pos[i][1], bob]
+        data.mocap_quat[mid] = [np.cos(yaw / 2), 0, 0, np.sin(yaw / 2)]
+
     def step(self, model, data, dt: float, clearance=None) -> list[list[float]]:
         """`clearance(xy, radius)` is the walker's clearance to the closest of the robot base and arm-link
         bodies (safety.yield_clearance). A
@@ -707,63 +910,7 @@ class Walkers:
             visiting_pause = self.wait[i] > 0 and tag_i in ("open", "look", "close")
 
             if n > 1 and not visiting_pause:
-                u_i = u_dirs[i]
-                for j in range(n):
-                    if j == i:
-                        continue
-                    v_ij = self.pos[j] - self.pos[i]
-                    d_ij = float(np.linalg.norm(v_ij))
-                    if d_ij < 1e-6:
-                        continue
-
-                    s_i = float(np.dot(u_i, v_ij))
-                    if s_i > 0:
-                        lat = float(np.linalg.norm(v_ij - s_i * u_i))
-                        r_sum = self.specs[i]["torso_r"] + self.specs[j]["torso_r"]
-
-                        u_j = u_dirs[j]
-                        s_j = float(np.dot(u_j, -v_ij))
-                        mutual = s_j > 0
-
-                        j_leaving = self.idx[j] == 5 and self.pos[j][1] < 1.45
-                        i_leaving = self.idx[i] == 5 and self.pos[i][1] < 1.45
-
-                        i_has_prio = False
-                        if mutual:
-                            if i_leaving and not j_leaving:
-                                i_has_prio = True
-                            elif j_leaving and not i_leaving:
-                                i_has_prio = False
-                            elif self.wait[j] > 0 and self.wait[i] <= 0:
-                                i_has_prio = True
-                            elif self.wait[i] > 0 and self.wait[j] <= 0:
-                                i_has_prio = False
-                            else:
-                                i_has_prio = (i < j)
-
-                        k_i = self.idx[i] % len(path)
-                        target_p = path[k_i]
-                        j_at_stop = float(np.linalg.norm(self.pos[j] - target_p)) < 0.45
-                        j_paused = self.wait[j] > 0
-
-                        if (j_paused or j_at_stop) and self.pos[i][1] > 1.40:
-                            d_stop = max(r_sum + 0.16, 0.65)
-                            d_slow = d_stop + 0.20
-                        else:
-                            d_stop = r_sum + 0.16
-                            d_slow = d_stop + 0.22
-
-                        lat_limit = 0.45
-                        if lat < lat_limit:
-                            if mutual and i_has_prio and d_ij > 0.42:
-                                hg = 0.5
-                            elif d_ij <= d_stop:
-                                hg = 0.0
-                            elif d_ij < d_slow:
-                                hg = (d_ij - d_stop) / (d_slow - d_stop)
-                            else:
-                                hg = 1.0
-                            give = min(give, hg)
+                give = min(give, self._walker_give(i, u_dirs, path))
 
             held = False
             if self.wait[i] > 0:
@@ -817,15 +964,7 @@ class Walkers:
                 self.anchor[i], self.stuck[i] = self.pos[i].copy(), 0.0
             else:
                 self.stuck[i] += dt
-            self.yaw[i] = float(yaw)
-            self.phase[i] += 2 * math.pi * moved / STRIDE
-            target = min(1.0, moved / (self.speed * dt)) if moved > 0 else 0.0  # stride scaled to speed: a full stride at 45% speed puts the toe in the door swing
-            self.amp[i] += float(np.clip(target - self.amp[i], -AMP_RATE * dt, AMP_RATE * dt))
-            self.pose_limbs(model, i)
-            mid = model.body(f"person_{i}").mocapid[0]
-            bob = BOB * self.amp[i] * (1 - abs(math.cos(self.phase[i])))
-            data.mocap_pos[mid] = [self.pos[i][0], self.pos[i][1], bob]
-            data.mocap_quat[mid] = [np.cos(yaw / 2), 0, 0, np.sin(yaw / 2)]
+            self._place_body(model, data, i, float(yaw), moved, dt)
             out.append([float(self.pos[i][0]), float(self.pos[i][1])])
         if self._door is not None:
             qadr, dadr, geoms = self._door

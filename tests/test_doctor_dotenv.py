@@ -18,8 +18,9 @@ def dotenv(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(config, "REPO_ROOT", tmp_path / "no_repo_root")
     monkeypatch.setattr(doctor, "REPO", tmp_path / "no_repo_root")
-    (tmp_path / ".env").write_text(f"{KEY}=tvly-from-dotenv-0123456789\nTOKEN_FACTORY_API_KEY=nvapi-from-dotenv-0123\n",
-                                   encoding="utf-8")
+    (tmp_path / ".env").write_text(
+        f"{KEY}=tvly-from-dotenv-0123456789\nTOKEN_FACTORY_API_KEY=nvapi-from-dotenv-0123\n", encoding="utf-8"
+    )
     return tmp_path
 
 

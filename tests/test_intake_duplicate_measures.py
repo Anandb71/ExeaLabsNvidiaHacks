@@ -9,5 +9,4 @@ def test_conflicting_repeated_tape_values_are_rejected():
 
 
 def test_distinct_tape_values_still_parse():
-    assert parse_measures("counter_height=0.92,sink_width=0.55") == {
-        "counter_height": 0.92, "sink_width": 0.55}
+    assert parse_measures("counter_height=0.92,sink_width=0.55") == {"counter_height": 0.92, "sink_width": 0.55}

@@ -8,16 +8,20 @@ with no word that the tolerance is 5 cm.
 import json
 import shutil
 
-from arrival.eval import summary
-
 from conftest import REPO, SCANS
+
+from arrival.eval import summary
 
 MEASURED = REPO / "tests" / "fixtures" / "measurements" / "hero_kitchen.json"
 
 
 def _cell(tape: dict) -> str:
-    row = {"room": "r", "geometry_source": "roomplan", "tape": tape,
-           "stages": {s: {"status": "not_run", "detail": ""} for s in summary.STAGES}}
+    row = {
+        "room": "r",
+        "geometry_source": "roomplan",
+        "tape": tape,
+        "stages": {s: {"status": "not_run", "detail": ""} for s in summary.STAGES},
+    }
     md = summary.to_markdown({"settings": {"episodes_per_room": 1, "res": 64, "people": 0}, "rooms": [row]})
     return next(ln for ln in md.splitlines() if ln.startswith("| r |")).split(" | ")[8]
 
@@ -42,18 +46,33 @@ def test_a_dimension_missing_from_the_twin_fails_the_cell(tmp_path, monkeypatch)
 
 
 def test_an_error_over_the_tolerance_fails_the_cell():
-    tape = {"max_abs_error_m": 0.06, "tolerance_m": 0.05, "ok": False, "tape_measured": True,
-            "dimensions": {"counter_length_m": 0.06, "counter_height_m": 0.0, "sink_width_m": 0.01}}
+    tape = {
+        "max_abs_error_m": 0.06,
+        "tolerance_m": 0.05,
+        "ok": False,
+        "tape_measured": True,
+        "dimensions": {"counter_length_m": 0.06, "counter_height_m": 0.0, "sink_width_m": 0.01},
+    }
     assert _cell(tape) == "6.0 cm max, FAIL: over the 5.0 cm tolerance"
 
 
 def test_both_reasons_are_given():
-    tape = {"max_abs_error_m": 0.08, "tolerance_m": 0.05, "ok": False, "tape_measured": True,
-            "dimensions": {"counter_length_m": 0.08, "counter_height_m": 0.0, "sink_width_m": None}}
+    tape = {
+        "max_abs_error_m": 0.08,
+        "tolerance_m": 0.05,
+        "ok": False,
+        "tape_measured": True,
+        "dimensions": {"counter_length_m": 0.08, "counter_height_m": 0.0, "sink_width_m": None},
+    }
     assert _cell(tape) == "8.0 cm max, FAIL: sink_width_m not in the twin, over the 5.0 cm tolerance"
 
 
 def test_a_passing_comparison_reads_as_before():
-    tape = {"max_abs_error_m": 0.012, "tolerance_m": 0.05, "ok": True, "tape_measured": False,
-            "dimensions": {"counter_length_m": 0.012, "counter_height_m": 0.0, "sink_width_m": 0.0}}
+    tape = {
+        "max_abs_error_m": 0.012,
+        "tolerance_m": 0.05,
+        "ok": True,
+        "tape_measured": False,
+        "dimensions": {"counter_length_m": 0.012, "counter_height_m": 0.0, "sink_width_m": 0.0},
+    }
     assert _cell(tape) == "1.2 cm max (authored, not tape)"

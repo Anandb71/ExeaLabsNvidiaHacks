@@ -31,12 +31,16 @@ from arrival.web.app import ID_RE, PREVIEW_RE, make_server, room_scan
 ATTR_RE = re.compile(r"""(href|src)=(['"])(.*?)\2""", re.S)
 SCRIPT_RE = re.compile(r"<script>.*?</script>", re.S)
 UPLOAD_MARK = "<h2>Upload a scan</h2>"
-STATIC_BANNER = ("<div class='warn'>Static snapshot of the local Arrival page. There is no server behind it: "
-                 "uploads and the jobs list are not available here. Run <code>python -m arrival serve</code> to "
-                 "scan your own room.</div>")
-STATIC_UPLOAD = ("<h2>Upload a scan</h2><div class='card empty'><b>Live upload is offline in this snapshot</b>"
-                 "Run <code>python -m arrival serve</code> and <code>python -m arrival work</code> locally to turn a "
-                 "RoomPlan export into a dataset.</div>")
+STATIC_BANNER = (
+    "<div class='warn'>Static snapshot of the local Arrival page. There is no server behind it: "
+    "uploads and the jobs list are not available here. Run <code>python -m arrival serve</code> to "
+    "scan your own room.</div>"
+)
+STATIC_UPLOAD = (
+    "<h2>Upload a scan</h2><div class='card empty'><b>Live upload is offline in this snapshot</b>"
+    "Run <code>python -m arrival serve</code> and <code>python -m arrival work</code> locally to turn a "
+    "RoomPlan export into a dataset.</div>"
+)
 RETRIES = 5
 
 
@@ -57,7 +61,7 @@ def _get(url: str, dest: Path | None = None) -> bytes:
                 return r.read()
         except urllib.error.HTTPError as e:
             if e.code in (429, 503) and attempt < RETRIES - 1:
-                time.sleep(min(float(e.headers.get("Retry-After") or 0.2 * 2 ** attempt), 5.0))
+                time.sleep(min(float(e.headers.get("Retry-After") or 0.2 * 2**attempt), 5.0))
                 continue
             raise ExportError(f"GET {url} -> HTTP {e.code}") from e
         except urllib.error.URLError as e:
@@ -75,7 +79,7 @@ def _rewrite(html: str, depth: int, zips: set[str]) -> str:
     html = html.replace("<main>", "<main>" + STATIC_BANNER, 1)
     if UPLOAD_MARK in html and "</main>" in html:
         head, rest = html.split(UPLOAD_MARK, 1)
-        html = head + STATIC_UPLOAD + rest[rest.index("</main>"):]
+        html = head + STATIC_UPLOAD + rest[rest.index("</main>") :]
     else:  # layout changed: still never ship a dead form; the link check reports what is left
         html = re.sub(r"<form.*?</form>", "", html, flags=re.S)
 
@@ -120,15 +124,31 @@ def room_data(room: str, out_dir: Path, scans_dir: Path) -> dict:
     for name in (room, f"{room}_sim"):
         info = _read(out_dir / "datasets" / name / "meta" / "info.json")
         if isinstance(info, dict):
-            keep = ("arrival_generator", "arrival_physically_valid", "arrival_appearance", "arrival_video_policy",
-                    "arrival_successes", "arrival_attempts", "total_episodes", "total_frames", "robot_type", "fps")
+            keep = (
+                "arrival_generator",
+                "arrival_physically_valid",
+                "arrival_appearance",
+                "arrival_video_policy",
+                "arrival_successes",
+                "arrival_attempts",
+                "total_episodes",
+                "total_frames",
+                "robot_type",
+                "fps",
+            )
             datasets[name] = {k: info.get(k) for k in keep if k in info}
-    return {"room_id": room, "geometry_source": scan.get("geometry_source"),
-            "twin_compiled": twin is not None,
-            "fixtures": [{k: f.get(k) for k in ("id", "type", "size", "position", "yaw")}
-                         for f in (src.get("fixtures") or []) if isinstance(f, dict)],
-            "datasets": datasets,
-            "report": _read(out_dir / "reports" / f"{room}_sim.json") or _read(out_dir / "reports" / f"{room}.json")}
+    return {
+        "room_id": room,
+        "geometry_source": scan.get("geometry_source"),
+        "twin_compiled": twin is not None,
+        "fixtures": [
+            {k: f.get(k) for k in ("id", "type", "size", "position", "yaw")}
+            for f in (src.get("fixtures") or [])
+            if isinstance(f, dict)
+        ],
+        "datasets": datasets,
+        "report": _read(out_dir / "reports" / f"{room}_sim.json") or _read(out_dir / "reports" / f"{room}.json"),
+    }
 
 
 def link_check(dest: Path) -> list[str]:
@@ -146,8 +166,13 @@ def link_check(dest: Path) -> list[str]:
     return broken
 
 
-def export_site(out_dir: str | Path = "out", scans_dir: str | Path = "scans", dest: str | Path = "out/static_site",
-                zips: bool = False, log=print) -> dict:
+def export_site(
+    out_dir: str | Path = "out",
+    scans_dir: str | Path = "scans",
+    dest: str | Path = "out/static_site",
+    zips: bool = False,
+    log=print,
+) -> dict:
     """Crawl the local page and write the static copy at ``dest`` (replaced if it exists). Returns a summary dict;
     raises ExportError when ``dest`` is a non-empty folder that is not an earlier export, when the crawl fails, or
     when the link check finds a broken link."""
@@ -182,8 +207,14 @@ def export_site(out_dir: str | Path = "out", scans_dir: str | Path = "scans", de
             pages = {"index.html": (index, 0)}
             for room in rooms:
                 pages[f"rooms/{room}/index.html"] = (_get(f"{base}/rooms/{room}").decode("utf-8"), 2)
-            previews = sorted({p for html, _ in pages.values() for p in re.findall(r"/previews/([A-Za-z0-9_.-]+)", html)
-                               if PREVIEW_RE.match(p)})
+            previews = sorted(
+                {
+                    p
+                    for html, _ in pages.values()
+                    for p in re.findall(r"/previews/([A-Za-z0-9_.-]+)", html)
+                    if PREVIEW_RE.match(p)
+                }
+            )
             for name in previews:
                 _get(f"{base}/previews/{name}", tmp / "previews" / name)
             zipped = set()
@@ -199,9 +230,19 @@ def export_site(out_dir: str | Path = "out", scans_dir: str | Path = "scans", de
             rows = [room_data(r, out_dir, scans_dir) for r in rooms if ID_RE.match(r)]
             for row in rows:
                 (tmp / "data" / f"{row['room_id']}.json").write_text(json.dumps(row, indent=2) + "\n", encoding="utf-8")
-            (tmp / "data" / "index.json").write_text(json.dumps(
-                {"rooms": [r["room_id"] for r in rows], "datasets_present": {r["room_id"]: sorted(r["datasets"]) for r in rows},
-                 "zips_included": sorted(zipped), "note": "static snapshot; no server, no uploads"}, indent=2) + "\n", encoding="utf-8")
+            (tmp / "data" / "index.json").write_text(
+                json.dumps(
+                    {
+                        "rooms": [r["room_id"] for r in rows],
+                        "datasets_present": {r["room_id"]: sorted(r["datasets"]) for r in rows},
+                        "zips_included": sorted(zipped),
+                        "note": "static snapshot; no server, no uploads",
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
             (tmp / ".nojekyll").write_text("", encoding="utf-8")
         finally:
             server.shutdown()
@@ -226,7 +267,15 @@ def export_site(out_dir: str | Path = "out", scans_dir: str | Path = "scans", de
 
     empty = [r["room_id"] for r in rows if not r["datasets"]]
     if empty:
-        log(f"[export-site] warning: no dataset under {out_dir}/datasets for {', '.join(empty)}; "
-            "those pages say 'not generated' (run python -m arrival demo first)")
-    return {"dest": str(dest), "rooms": [r["room_id"] for r in rows], "pages": len(pages), "previews": len(previews),
-            "zips": sorted(zipped), "rooms_without_dataset": empty}
+        log(
+            f"[export-site] warning: no dataset under {out_dir}/datasets for {', '.join(empty)}; "
+            "those pages say 'not generated' (run python -m arrival demo first)"
+        )
+    return {
+        "dest": str(dest),
+        "rooms": [r["room_id"] for r in rows],
+        "pages": len(pages),
+        "previews": len(previews),
+        "zips": sorted(zipped),
+        "rooms_without_dataset": empty,
+    }

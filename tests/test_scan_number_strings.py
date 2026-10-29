@@ -5,15 +5,16 @@
 and the worker queued the same upload again (the default is two retries). A wall
 height of "2.4" passed and the twin kept the str, so the sim failed on it later.
 """
+
 import json
 
 import pytest
+from conftest import SCANS
 
 from arrival.jobs.limits import Limits
 from arrival.jobs.queue import create_job
 from arrival.jobs.worker import load_upload, retryable, run_once
 from arrival.scan.bundle import ScanBundleError
-from conftest import SCANS
 
 EYE = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
 QUIET = lambda *_: None  # noqa: E731
@@ -26,9 +27,12 @@ def _scan(mutate) -> bytes:
 
 
 def _roomplan(mutate) -> bytes:
-    data = {"walls": [{"identifier": "w", "dimensions": [4.0, 2.5, 0.1], "transform": list(EYE)}],
-            "objects": [{"identifier": "table", "category": "table", "dimensions": [1.0, 1.0, 1.0],
-                         "transform": list(EYE)}]}
+    data = {
+        "walls": [{"identifier": "w", "dimensions": [4.0, 2.5, 0.1], "transform": list(EYE)}],
+        "objects": [
+            {"identifier": "table", "category": "table", "dimensions": [1.0, 1.0, 1.0], "transform": list(EYE)}
+        ],
+    }
     mutate(data)
     return json.dumps(data).encode()
 
@@ -36,13 +40,16 @@ def _roomplan(mutate) -> bytes:
 REFUSED = {
     "scan wall start": (lambda: _scan(lambda d: d["walls"][0]["start"].__setitem__(0, "0")), "wall wall_north"),
     "scan wall height": (lambda: _scan(lambda d: d["walls"][0].__setitem__("height", "2.4")), "wall wall_north"),
-    "scan object position": (lambda: _scan(lambda d: d["objects"][0]["position"].__setitem__(0, "1.0")),
-                             "object 'mug_1': position"),
+    "scan object position": (
+        lambda: _scan(lambda d: d["objects"][0]["position"].__setitem__(0, "1.0")),
+        "object 'mug_1': position",
+    ),
     "scan object yaw": (lambda: _scan(lambda d: d["objects"][0].__setitem__("yaw", "0.5")), "object 'mug_1': yaw"),
-    "scan fixture size": (lambda: _scan(lambda d: d["fixtures"][0]["size"].__setitem__(0, "1.45")),
-                          "fixture 'counter_a': size"),
-    "roomplan transform": (lambda: _roomplan(lambda d: d["walls"][0]["transform"].__setitem__(12, "0.5")),
-                           "transform"),
+    "scan fixture size": (
+        lambda: _scan(lambda d: d["fixtures"][0]["size"].__setitem__(0, "1.45")),
+        "fixture 'counter_a': size",
+    ),
+    "roomplan transform": (lambda: _roomplan(lambda d: d["walls"][0]["transform"].__setitem__(12, "0.5")), "transform"),
 }
 
 

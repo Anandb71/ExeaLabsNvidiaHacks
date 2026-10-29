@@ -6,11 +6,10 @@ import shutil
 import sys
 
 import pytest
+from conftest import REPO, SCANS
 
 from arrival.twin.accuracy import MeasurementError, compare, counter_runs, extract_dimensions, load_measurements
 from arrival.twin.compile import compile_twin
-
-from conftest import REPO, SCANS
 
 sys.path.insert(0, str(REPO / "scripts"))
 import scan_accuracy  # noqa: E402
@@ -20,9 +19,19 @@ MEASURED = sorted(SCANS.glob("*/measurements.json"))
 
 
 def _twin(fixtures, walls=()):
-    return compile_twin({"schema_version": "1", "room_id": "t", "units": "meters", "frame": "z_up",
-                         "geometry_source": "roomplan", "blocks_claims": [], "walls": list(walls),
-                         "fixtures": fixtures, "objects": []})
+    return compile_twin(
+        {
+            "schema_version": "1",
+            "room_id": "t",
+            "units": "meters",
+            "frame": "z_up",
+            "geometry_source": "roomplan",
+            "blocks_claims": [],
+            "walls": list(walls),
+            "fixtures": fixtures,
+            "objects": [],
+        }
+    )
 
 
 def _counter(i, x, y, sx, yaw=0.0, sy=0.65):
@@ -35,8 +44,7 @@ def test_real_room_within_tolerance(path):
     from arrival.scan import bundle
 
     res = compare(compile_twin(bundle.load_room(path.parent.name, SCANS)), load_measurements(path))
-    errs = {k: round(r["error_m"] * 100, 1) if r["error_m"] is not None else None
-            for k, r in res["dimensions"].items()}
+    errs = {k: round(r["error_m"] * 100, 1) if r["error_m"] is not None else None for k, r in res["dimensions"].items()}
     assert res["ok"], f"{path.parent.name} errors in cm (tolerance {res['tolerance_m'] * 100:g}): {errs}"
 
 
@@ -48,8 +56,9 @@ def test_hero_dimensions_match_scan_json(hero_twin):
     right = max(fx[i]["position"][0] + fx[i]["size"][0] / 2 for i in ("counter_a", "stove_1", "counter_b"))
     dims = extract_dimensions(hero_twin)
     assert dims["counter_length_m"] == pytest.approx(right - left, abs=1e-3)
-    assert dims["counter_height_m"] == pytest.approx(fx["counter_a"]["position"][2] + fx["counter_a"]["size"][2] / 2,
-                                                     abs=1e-3)
+    assert dims["counter_height_m"] == pytest.approx(
+        fx["counter_a"]["position"][2] + fx["counter_a"]["size"][2] / 2, abs=1e-3
+    )
     assert dims["sink_width_m"] == pytest.approx(fx["sink_1"]["size"][0], abs=1e-3)
     assert dims["fridge_width_m"] == pytest.approx(fx["fridge_1"]["size"][0], abs=1e-3)
     assert set(counter_runs(hero_twin)[0]["members"]) == {"counter_a", "stove_1", "counter_b"}
@@ -192,7 +201,7 @@ def test_an_integer_too_large_for_float_is_an_error_line_and_the_next_room_is_me
     """math.isfinite on a JSON integer past the float range raises OverflowError. scan_accuracy catches
     MeasurementError so one bad file does not stop the rooms after it; this integer missed that handler."""
     good = json.loads(HERO_FIXTURE.read_text(encoding="utf-8"))
-    huge = {**good, "counter_length_m": 10 ** 400}
+    huge = {**good, "counter_length_m": 10**400}
     path = tmp_path / "m.json"
     path.write_text(json.dumps(huge), encoding="utf-8")
     with pytest.raises(MeasurementError, match="counter_length_m"):

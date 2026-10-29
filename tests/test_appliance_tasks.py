@@ -12,22 +12,36 @@ from arrival.sim.scene import RACK_Z, build_mjcf, part_names  # noqa: E402
 from arrival.sim.tasks import SIM_FAMILIES, finish_task, make_tasks  # noqa: E402
 from arrival.twin.compile import compile_twin  # noqa: E402
 
-WALLS = [{"id": "n", "start": [0.0, 0.0], "end": [4.0, 0.0], "height": 2.4, "thickness": 0.02},
-         {"id": "e", "start": [4.0, 0.0], "end": [4.0, 3.0], "height": 2.4, "thickness": 0.02},
-         {"id": "s", "start": [4.0, 3.0], "end": [0.0, 3.0], "height": 2.4, "thickness": 0.02},
-         {"id": "w", "start": [0.0, 3.0], "end": [0.0, 0.0], "height": 2.4, "thickness": 0.02}]
+WALLS = [
+    {"id": "n", "start": [0.0, 0.0], "end": [4.0, 0.0], "height": 2.4, "thickness": 0.02},
+    {"id": "e", "start": [4.0, 0.0], "end": [4.0, 3.0], "height": 2.4, "thickness": 0.02},
+    {"id": "s", "start": [4.0, 3.0], "end": [0.0, 3.0], "height": 2.4, "thickness": 0.02},
+    {"id": "w", "start": [0.0, 3.0], "end": [0.0, 0.0], "height": 2.4, "thickness": 0.02},
+]
 
 
 @pytest.fixture(scope="module")
 def dishwasher_twin():
     """A counter with a sink, a cup on it, and a dishwasher at the counter's end (the hero scan has none)."""
-    fixtures = [{"id": "c_1", "category": "counter", "size": [2.0, 0.65, 0.92], "position": [1.0, 0.40, 0.46], "yaw": 0.0},
-                {"id": "sink_1", "category": "sink", "size": [0.6, 0.5, 0.25], "position": [0.8, 0.4, 0.85], "yaw": 0.0},
-                {"id": "dw_1", "category": "dishwasher", "size": [0.6, 0.6, 0.86], "position": [2.3, 0.40, 0.43], "yaw": 0.0}]
+    fixtures = [
+        {"id": "c_1", "category": "counter", "size": [2.0, 0.65, 0.92], "position": [1.0, 0.40, 0.46], "yaw": 0.0},
+        {"id": "sink_1", "category": "sink", "size": [0.6, 0.5, 0.25], "position": [0.8, 0.4, 0.85], "yaw": 0.0},
+        {"id": "dw_1", "category": "dishwasher", "size": [0.6, 0.6, 0.86], "position": [2.3, 0.40, 0.43], "yaw": 0.0},
+    ]
     cup = {"id": "cup_1", "label": "cup", "size": [0.07, 0.07, 0.09], "position": [1.7, 0.40, 0.965], "yaw": 0.0}
-    return compile_twin({"schema_version": "1", "room_id": "t", "units": "meters", "frame": "z_up",
-                         "geometry_source": "authored_sample", "blocks_claims": [], "walls": WALLS,
-                         "fixtures": fixtures, "objects": [cup]})
+    return compile_twin(
+        {
+            "schema_version": "1",
+            "room_id": "t",
+            "units": "meters",
+            "frame": "z_up",
+            "geometry_source": "authored_sample",
+            "blocks_claims": [],
+            "walls": WALLS,
+            "fixtures": fixtures,
+            "objects": [cup],
+        }
+    )
 
 
 def _task(twin, family, seed=1, people=0):
@@ -35,12 +49,15 @@ def _task(twin, family, seed=1, people=0):
 
 
 def test_families_are_registered_and_pooled(hero_twin, dishwasher_twin):
-    assert {"open_oven", "open_dishwasher", "turn_on_faucet", "load_dishwasher", "unload_dishwasher"} <= set(SIM_FAMILIES)
+    assert {"open_oven", "open_dishwasher", "turn_on_faucet", "load_dishwasher", "unload_dishwasher"} <= set(
+        SIM_FAMILIES
+    )
     hero = make_tasks(hero_twin, ["open_oven", "turn_on_faucet", "open_dishwasher"], 6, seed=0, log=lambda *_: None)
     assert {t["family"] for t in hero} == {"open_oven", "turn_on_faucet"}  # no dishwasher in the hero scan
     assert {t["fixture"] for t in hero} == {"stove_1", "sink_1"}
-    dw = make_tasks(dishwasher_twin, ["open_dishwasher", "load_dishwasher", "unload_dishwasher"], 6, seed=0,
-                    log=lambda *_: None)
+    dw = make_tasks(
+        dishwasher_twin, ["open_dishwasher", "load_dishwasher", "unload_dishwasher"], 6, seed=0, log=lambda *_: None
+    )
     assert {t["family"] for t in dw} == {"open_dishwasher", "load_dishwasher", "unload_dishwasher"}
     assert all(t["object_id"] == "cup_1" and t["source"] == "c_1" for t in dw if "object_id" in t)
 
@@ -81,7 +98,7 @@ def test_open_oven_stand_keeps_every_joint_off_its_stop(hero_twin):
     open_oven episodes; from OVEN_ALONG to the side of the bar no joint stays in the 3% band for LIMIT_STEPS."""
     from arrival.export.quality import check_trace
     from arrival.sim import robot
-    from arrival.sim.preflight import OVEN_ALONG, base_pose
+    from arrival.sim.stand import OVEN_ALONG, base_pose
     from arrival.twin.compile import to_local
 
     task = _task(hero_twin, "open_oven")
@@ -101,7 +118,8 @@ def test_open_oven_stands_on_the_other_side_when_one_side_is_against_a_wall(hero
 
     from arrival.export.quality import check_trace
     from arrival.sim import robot
-    from arrival.sim.preflight import OVEN_ALONG, base_pose, check_task
+    from arrival.sim.reach import check_task
+    from arrival.sim.stand import OVEN_ALONG, base_pose
     from arrival.twin.compile import to_local
 
     twin = copy.deepcopy(hero_twin)
@@ -190,9 +208,13 @@ def test_collect_and_eval_assign_handles_and_joints_with_one_function(hero_twin,
 
     import arrival.eval.manifest as manifest_mod
 
-    assert "finish_task" in inspect.getsource(manifest_mod.make_manifest)  # eval builds its tasks through the same function
-    for twin, fams in ((hero_twin, ("open_oven", "turn_on_faucet")),
-                       (dishwasher_twin, ("open_dishwasher", "load_dishwasher", "unload_dishwasher", "turn_on_faucet"))):
+    assert "finish_task" in inspect.getsource(
+        manifest_mod.make_manifest
+    )  # eval builds its tasks through the same function
+    for twin, fams in (
+        (hero_twin, ("open_oven", "turn_on_faucet")),
+        (dishwasher_twin, ("open_dishwasher", "load_dishwasher", "unload_dishwasher", "turn_on_faucet")),
+    ):
         model = mujoco.MjModel.from_xml_string(build_mjcf(twin, (1.3, 1.2, 0.75)))
         for fam in fams:
             t = _task(twin, fam)
@@ -205,8 +227,9 @@ def test_collect_writes_an_appliance_episode(dishwasher_twin, tmp_path):
     """The same path through collect(): a faucet task and a dishwasher load, one episode each, written and counted."""
     from arrival.sim.collect import collect
 
-    rep = collect(dishwasher_twin, ["turn_on_faucet", "load_dishwasher"], 2, out_dir=tmp_path, people=0, res=32,
-                  seed=1, log=QUIET)["report_data"]
+    rep = collect(
+        dishwasher_twin, ["turn_on_faucet", "load_dishwasher"], 2, out_dir=tmp_path, people=0, res=32, seed=1, log=QUIET
+    )["report_data"]
     assert rep["attempts"] == 2 and rep["successes"] == 2 and rep["skipped"] == 0, rep
     assert set(rep["families"]) == {"turn_on_faucet", "load_dishwasher"}
 
@@ -215,8 +238,10 @@ def test_eval_runs_every_appliance_family_one_episode_each(hero_twin, dishwasher
     """evaluate() turns a raised episode into a counted failure, so success and an empty error list both matter."""
     from arrival.eval.harness import evaluate
 
-    for twin, fams in ((hero_twin, ["open_oven", "turn_on_faucet"]),
-                       (dishwasher_twin, ["open_dishwasher", "load_dishwasher", "unload_dishwasher"])):
+    for twin, fams in (
+        (hero_twin, ["open_oven", "turn_on_faucet"]),
+        (dishwasher_twin, ["open_dishwasher", "load_dishwasher", "unload_dishwasher"]),
+    ):
         rep = evaluate(twin, fams, 1, res=32, people=0, out_dir=tmp_path, log=QUIET)
         assert set(rep["families"]) == set(fams)
         for fam, f in rep["families"].items():
@@ -226,23 +251,37 @@ def test_eval_runs_every_appliance_family_one_episode_each(hero_twin, dishwasher
 def _east_wall_twin():
     """The dishwasher layout turned to face -x (counter on the east wall, yaw 90 deg) with a stove added: the run's
     local x points along +y, so any world-x assumption in the base pose, the success check or the plans fails."""
-    walls = [{"id": "n", "start": [0.0, 0.0], "end": [4.0, 0.0], "height": 2.4, "thickness": 0.02},
-             {"id": "e", "start": [4.0, 0.0], "end": [4.0, 5.0], "height": 2.4, "thickness": 0.02},
-             {"id": "s", "start": [4.0, 5.0], "end": [0.0, 5.0], "height": 2.4, "thickness": 0.02},
-             {"id": "w", "start": [0.0, 5.0], "end": [0.0, 0.0], "height": 2.4, "thickness": 0.02}]
+    walls = [
+        {"id": "n", "start": [0.0, 0.0], "end": [4.0, 0.0], "height": 2.4, "thickness": 0.02},
+        {"id": "e", "start": [4.0, 0.0], "end": [4.0, 5.0], "height": 2.4, "thickness": 0.02},
+        {"id": "s", "start": [4.0, 5.0], "end": [0.0, 5.0], "height": 2.4, "thickness": 0.02},
+        {"id": "w", "start": [0.0, 5.0], "end": [0.0, 0.0], "height": 2.4, "thickness": 0.02},
+    ]
     x, yaw = 3.67, np.pi / 2
 
     def at(local):  # a position along the run, whose centre is (3.67, 2.5)
         return [x, 2.5 + local]
 
-    fixtures = [{"id": "c_1", "category": "counter", "size": [2.0, 0.65, 0.92], "position": [*at(0.0), 0.46], "yaw": yaw},
-                {"id": "sink_1", "category": "sink", "size": [0.6, 0.5, 0.25], "position": [*at(-0.2), 0.85], "yaw": yaw},
-                {"id": "dw_1", "category": "dishwasher", "size": [0.6, 0.6, 0.86], "position": [*at(1.3), 0.43], "yaw": yaw},
-                {"id": "stove_1", "category": "stove", "size": [0.70, 0.65, 0.90], "position": [*at(-1.4), 0.45], "yaw": yaw}]
+    fixtures = [
+        {"id": "c_1", "category": "counter", "size": [2.0, 0.65, 0.92], "position": [*at(0.0), 0.46], "yaw": yaw},
+        {"id": "sink_1", "category": "sink", "size": [0.6, 0.5, 0.25], "position": [*at(-0.2), 0.85], "yaw": yaw},
+        {"id": "dw_1", "category": "dishwasher", "size": [0.6, 0.6, 0.86], "position": [*at(1.3), 0.43], "yaw": yaw},
+        {"id": "stove_1", "category": "stove", "size": [0.70, 0.65, 0.90], "position": [*at(-1.4), 0.45], "yaw": yaw},
+    ]
     cup = {"id": "cup_1", "label": "cup", "size": [0.07, 0.07, 0.09], "position": [*at(0.7), 0.965], "yaw": 0.0}
-    return compile_twin({"schema_version": "1", "room_id": "t_east", "units": "meters", "frame": "z_up",
-                         "geometry_source": "authored_sample", "blocks_claims": [], "walls": walls,
-                         "fixtures": fixtures, "objects": [cup]})
+    return compile_twin(
+        {
+            "schema_version": "1",
+            "room_id": "t_east",
+            "units": "meters",
+            "frame": "z_up",
+            "geometry_source": "authored_sample",
+            "blocks_claims": [],
+            "walls": walls,
+            "fixtures": fixtures,
+            "objects": [cup],
+        }
+    )
 
 
 @pytest.mark.parametrize("family", APPLIANCE)

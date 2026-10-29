@@ -6,6 +6,7 @@ Needs the `gh` CLI (logged in) for the pull request list. Work that came in thro
 request is listed under its own heading with the commit author git recorded. Commits keep their original author
 through every merge, so `git shortlog -sn` and GitHub's contributor graph agree with this page.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -16,8 +17,11 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 FORK_WORK = [  # (title, GitHub login, branch it came from)
-    ("Synchronized ego, wrist and exocentric capture, side-by-side preview, optional three-camera GR00T config",
-     "rishith-c", "rishith-c/ExeaLabsNvidiaHacks:feat/ego-exocentric-capture"),
+    (
+        "Synchronized ego, wrist and exocentric capture, side-by-side preview, optional three-camera GR00T config",
+        "rishith-c",
+        "rishith-c/ExeaLabsNvidiaHacks:feat/ego-exocentric-capture",
+    ),
 ]
 
 
@@ -30,10 +34,15 @@ CORE_TAG = {"AvnehSBhatia": "repo owner, with Claude Code"}
 
 
 def readme_block(by_author: dict, fork_work: list) -> str:
-    rows = ["## Who built this", "",
-            "Pull requests opened against this repository, by author (merged, or consolidated into the rebased PRs). The full list, with commit counts, is in "
-            "[docs/CONTRIBUTORS.md](docs/CONTRIBUTORS.md); each to-do row below names who worked on it.", "",
-            "| who | pull requests | some of what they did |", "|---|---|---|"]
+    rows = [
+        "## Who built this",
+        "",
+        "Pull requests opened against this repository, by author (merged, or consolidated into the rebased PRs). The full list, with commit counts, is in "
+        "[docs/CONTRIBUTORS.md](docs/CONTRIBUTORS.md); each to-do row below names who worked on it.",
+        "",
+        "| who | pull requests | some of what they did |",
+        "|---|---|---|",
+    ]
     for login in sorted(by_author, key=lambda a: -len(by_author[a])):
         items = sorted(by_author[login], key=lambda p: p["number"])
         if login.startswith("app/"):
@@ -47,18 +56,29 @@ def readme_block(by_author: dict, fork_work: list) -> str:
 
 
 def main() -> int:
-    prs = json.loads(run("gh", "pr", "list", "--state", "all", "--limit", "500", "--json",
-                         "number,title,author,state,mergedAt"))
+    prs = json.loads(
+        run("gh", "pr", "list", "--state", "all", "--limit", "500", "--json", "number,title,author,state,mergedAt")
+    )
     by_author: dict[str, list[dict]] = defaultdict(list)
     for p in prs:
         by_author[p["author"]["login"]].append(p)
-    out = ["# Contributors", "",
-           "Who worked on what. Pull request authors come from GitHub; the commit counts are `git shortlog -sn` on this "
-           "branch. Merges keep each commit's original author, so the git history credits the same people. Regenerate "
-           "with `python scripts/render_contributors.py`.", "",
-           "Work on this repository's laptop pass was done by the repo owner with Claude Code agents. Those commits end with "
-           "a `Co-Authored-By: Claude` line.", "", "## Commits by author", "", "```",
-           run("git", "shortlog", "-sn", "HEAD").rstrip(), "```", ""]
+    out = [
+        "# Contributors",
+        "",
+        "Who worked on what. Pull request authors come from GitHub; the commit counts are `git shortlog -sn` on this "
+        "branch. Merges keep each commit's original author, so the git history credits the same people. Regenerate "
+        "with `python scripts/render_contributors.py`.",
+        "",
+        "Work on this repository's laptop pass was done by the repo owner with Claude Code agents. Those commits end with "
+        "a `Co-Authored-By: Claude` line.",
+        "",
+        "## Commits by author",
+        "",
+        "```",
+        run("git", "shortlog", "-sn", "HEAD").rstrip(),
+        "```",
+        "",
+    ]
     out += ["## From forks, with no pull request", ""]
     for title, login, src in FORK_WORK:
         out.append(f"- **@{login}**: {title} (`{src}`)")

@@ -7,8 +7,14 @@ import pytest
 
 from arrival.policy_server import gr00t_shim
 from arrival.policy_server.mock_server import MockPolicyServer
-from arrival.policy_server.protocol import (ProtocolError, decode_image, decode_request, decode_response,
-                                            encode_request, encode_response)
+from arrival.policy_server.protocol import (
+    ProtocolError,
+    decode_image,
+    decode_request,
+    decode_response,
+    encode_request,
+    encode_response,
+)
 from arrival.sim.policy import VLAClient
 
 STATE = np.array([0.1, -0.2, 0.3, -1.5, 0.0, 1.2, 0.4, 0.04])
@@ -22,8 +28,9 @@ def _obs(res=16, wrist=True):
 
 
 def _post(url, path, body):
-    req = urllib.request.Request(url + path, data=json.dumps(body).encode(), method="POST",
-                                 headers={"Content-Type": "application/json"})
+    req = urllib.request.Request(
+        url + path, data=json.dumps(body).encode(), method="POST", headers={"Content-Type": "application/json"}
+    )
     return urllib.request.urlopen(req, timeout=5)
 
 
@@ -43,18 +50,21 @@ def test_request_without_wrist_camera_is_refused():
         encode_request(_obs(wrist=False), "x")
 
 
-@pytest.mark.parametrize("bad", [
-    {},
-    {"action.single_arm": [[0.0] * 7]},
-    {"action.single_arm": [[0.0] * 6], "action.gripper": [[0.0]]},
-    {"action.single_arm": [[0.0] * 7], "action.gripper": [[0.0, 0.0]]},
-    {"action.single_arm": [], "action.gripper": []},
-    {"action.single_arm": [0.0] * 7, "action.gripper": [0.0]},
-    {"action.single_arm": [[float("nan")] * 7], "action.gripper": [[0.0]]},
-    {"action.single_arm": [[0.0] * 7] * 2, "action.gripper": [[0.0]]},
-    {"action.single_arm": [["a"] * 7], "action.gripper": [[0.0]]},
-    [1, 2],
-])
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {},
+        {"action.single_arm": [[0.0] * 7]},
+        {"action.single_arm": [[0.0] * 6], "action.gripper": [[0.0]]},
+        {"action.single_arm": [[0.0] * 7], "action.gripper": [[0.0, 0.0]]},
+        {"action.single_arm": [], "action.gripper": []},
+        {"action.single_arm": [0.0] * 7, "action.gripper": [0.0]},
+        {"action.single_arm": [[float("nan")] * 7], "action.gripper": [[0.0]]},
+        {"action.single_arm": [[0.0] * 7] * 2, "action.gripper": [[0.0]]},
+        {"action.single_arm": [["a"] * 7], "action.gripper": [[0.0]]},
+        [1, 2],
+    ],
+)
 def test_malformed_response_raises(bad):
     with pytest.raises(ProtocolError):
         decode_response(bad)
@@ -79,6 +89,7 @@ def test_mock_noise_is_seeded():
     def run(seed):
         with MockPolicyServer(mode="noise", seed=seed) as srv:
             return decode_response(json.load(_post(srv.url, "/act", encode_request(_obs(), "x"))))
+
     a, b, c = run(1), run(1), run(2)
     assert np.allclose(a, b) and not np.allclose(a, c) and not np.allclose(a[0], STATE)
 
@@ -103,6 +114,7 @@ def test_server_answers_500_for_an_invalid_chunk():
     class Bad(MockPolicyServer):
         def act(self, state):
             return np.zeros((0, 8))
+
     with Bad() as srv:
         c = VLAClient(srv.url)
         c.reset(None, {"instruction": "x"})
@@ -134,6 +146,7 @@ def test_mock_refuses_a_chunk_shorter_than_one_step(chunk, capsys):
 
 def test_client_rejects_malformed_server_reply(monkeypatch):
     from arrival.policy_server import mock_server  # a reply the server's own encoder would refuse to build
+
     monkeypatch.setattr(mock_server, "encode_response", lambda chunk: {"action.single_arm": [], "action.gripper": []})
     with MockPolicyServer() as srv:
         c = VLAClient(srv.url)
@@ -203,6 +216,7 @@ def test_shim_handles_concurrent_requests_one_at_a_time():
 
 def test_shim_exits_without_gr00t(monkeypatch):
     import sys
+
     monkeypatch.setitem(sys.modules, "gr00t", None)
     with pytest.raises(SystemExit) as e:
         gr00t_shim.load_policy("m", "c.py", "cpu", "new_embodiment")
@@ -225,19 +239,36 @@ def twin():
 def test_eval_vla_against_hold_mock(twin, monkeypatch, tmp_path):
     with MockPolicyServer() as srv:
         monkeypatch.setenv("GR00T_POLICY_URL", srv.url)
-        rep = evaluate(twin, ["open_drawer"], 1, policy_name="vla", checkpoint_id="test-mock", people=0, res=64, out_dir=tmp_path,
-                       log=lambda *_: None)
+        rep = evaluate(
+            twin,
+            ["open_drawer"],
+            1,
+            policy_name="vla",
+            checkpoint_id="test-mock",
+            people=0,
+            res=64,
+            out_dir=tmp_path,
+            log=lambda *_: None,
+        )
         assert srv.requests > 0
     assert rep["totals"]["errors"] == 0 and rep["totals"]["episodes"] == 1
-
 
 
 def test_eval_report_records_which_server_answered(twin, monkeypatch, tmp_path):
     """A report from the mock must not read like one from GR00T: the server's /health answer is kept."""
     with MockPolicyServer() as srv:
         monkeypatch.setenv("GR00T_POLICY_URL", srv.url)
-        rep = evaluate(twin, ["open_drawer"], 1, policy_name="vla", checkpoint_id="test-mock", people=0, res=64, out_dir=tmp_path,
-                       log=lambda *_: None)
+        rep = evaluate(
+            twin,
+            ["open_drawer"],
+            1,
+            policy_name="vla",
+            checkpoint_id="test-mock",
+            people=0,
+            res=64,
+            out_dir=tmp_path,
+            log=lambda *_: None,
+        )
     assert rep["policy_server"] == {"ok": True, "server": "mock", "mode": "hold"}
     saved = json.loads((tmp_path / "eval" / rep["run_id"] / "report.json").read_text(encoding="utf-8"))
     assert saved["policy_server"] == rep["policy_server"]
@@ -257,16 +288,35 @@ def test_eval_vla_server_without_health_still_runs(twin, monkeypatch, tmp_path):
 
     with NoHealth() as srv:
         monkeypatch.setenv("GR00T_POLICY_URL", srv.url)
-        rep = evaluate(twin, ["open_drawer"], 1, policy_name="vla", checkpoint_id="test-mock", people=0, res=64, out_dir=tmp_path,
-                       log=lambda *_: None)
+        rep = evaluate(
+            twin,
+            ["open_drawer"],
+            1,
+            policy_name="vla",
+            checkpoint_id="test-mock",
+            people=0,
+            res=64,
+            out_dir=tmp_path,
+            log=lambda *_: None,
+        )
     assert rep["totals"]["errors"] == 0 and "404" in rep["policy_server"]["error"]
+
 
 def test_eval_vla_dead_server_takes_existing_failure_path(twin, monkeypatch, tmp_path):
     with MockPolicyServer(mode="fail_after_n", fail_after=2) as srv:
         monkeypatch.setenv("GR00T_POLICY_URL", srv.url)
         with pytest.raises(OSError):  # nothing finished before the server died: the CLI turns this into exit 2
-            evaluate(twin, ["open_drawer"], 1, policy_name="vla", checkpoint_id="test-mock", people=0, res=64, out_dir=tmp_path,
-                     log=lambda *_: None)
+            evaluate(
+                twin,
+                ["open_drawer"],
+                1,
+                policy_name="vla",
+                checkpoint_id="test-mock",
+                people=0,
+                res=64,
+                out_dir=tmp_path,
+                log=lambda *_: None,
+            )
 
 
 @pytest.mark.parametrize("cmd", ["sim", "eval"])
@@ -286,21 +336,61 @@ def test_cli_mobile_base_is_driven_by_a_served_policy(monkeypatch, tmp_path, cmd
     with Drive(chunk=4) as srv:
         monkeypatch.setenv("GR00T_POLICY_URL", srv.url)
         extra = ["--checkpoint-id", "test-mock"] if cmd == "eval" else []
-        assert main([cmd, "--families", "counter_to_counter", "--episodes", "1", "--people", "0", "--res", "32",
-                     "--base", "mobile", "--policy", "vla", "--out", str(tmp_path), *extra]) == 0
+        assert (
+            main(
+                [
+                    cmd,
+                    "--families",
+                    "counter_to_counter",
+                    "--episodes",
+                    "1",
+                    "--people",
+                    "0",
+                    "--res",
+                    "32",
+                    "--base",
+                    "mobile",
+                    "--policy",
+                    "vla",
+                    "--out",
+                    str(tmp_path),
+                    *extra,
+                ]
+            )
+            == 0
+        )
     assert seen and all(s.shape == (11,) for s in seen)
     assert seen[-1][8] > seen[0][8] + 0.1
 
 
 def test_cli_eval_vla_unset_exits_2(monkeypatch):
     from arrival.cli import main
+
     monkeypatch.delenv("GR00T_POLICY_URL", raising=False)
-    assert main(["eval", "--policy", "vla", "--checkpoint-id", "test-mock", "--episodes", "1", "--families", "open_drawer", "--people", "0",
-                 "--res", "64"]) == 2
+    assert (
+        main(
+            [
+                "eval",
+                "--policy",
+                "vla",
+                "--checkpoint-id",
+                "test-mock",
+                "--episodes",
+                "1",
+                "--families",
+                "open_drawer",
+                "--people",
+                "0",
+                "--res",
+                "64",
+            ]
+        )
+        == 2
+    )
 
 
 @pytest.mark.parametrize("encoder", ["request", "response"])
-@pytest.mark.parametrize("value", [True, 10 ** 400, "not-a-number"], ids=["boolean", "overflow", "text"])
+@pytest.mark.parametrize("value", [True, 10**400, "not-a-number"], ids=["boolean", "overflow", "text"])
 def test_encoders_use_protocol_numeric_validation(encoder, value):
     state = STATE.tolist()
     state[0] = value
