@@ -7,22 +7,24 @@ Work on this repository's laptop pass was done by the repo owner with Claude Cod
 ## Commits by author
 
 ```
-   539	redmythic1
+   544	redmythic1
    178	rishithc
    141	Aadi Tiwari
    100	aarochu
-    66	vrun-systems26
+    67	vrun-systems26
     46	Anand Biju
     29	amanx98
     20	Akshaj Shandilya
     20	Avneh Singh Bhatia
     14	Jahan Marbin
     12	IshaanM05
+    11	Advay Roongta
      7	Raunak Mondal
      5	dependabot[bot]
      5	man-coding-j
      2	Amelia Patel
      2	julie ye
+     1	Kr4ugs
 ```
 
 ## From forks, with no pull request
@@ -250,6 +252,50 @@ Work on this repository's laptop pass was done by the repo owner with Claude Cod
 - #248 Reject duplicate tape measurement keys during scan intake (merged)
 - #249 Ignore malformed Tavily cache entries (merged)
 
+### @vrun-systems26 (41)
+
+- #298 SIM: open_fridge push follows the fixture's yaw (side-wall fridge 0/4 -> 4/4) (merged)
+- #338 SIM: real kitchen cabinet doors work in a blind corner and on a narrow cabinet (6/12 -> 12/12) (merged)
+- #342 TWN: hinge a fridge on the side with less room in front (rotated kitchen's fridge was never opened) (merged)
+- #381 Tests: skip the frame-symlink test where the machine cannot create symlinks (Windows) (merged)
+- #383 DAT: today's datasets load in Isaac-GR00T's own loader (fixed arm, mobile base, three cameras) (merged)
+- #390 README: status rows for the VLA client and demo multiplication match the code (merged)
+- #391 docs/03-architecture: the Nebius mapping says where each step stands now (merged)
+- #392 Token Factory: a reply with no message text says so instead of IndexError/None (merged)
+- #393 accuracy: measure a real RoomPlan kitchen's storage base cabinets as counters (merged)
+- #394 Site: the pipeline animation's last card says the GR00T fine-tune ran (merged)
+- #395 To-do: G2 is done (shim ran on real GR00T); G7, G8, C5 say what landed (merged)
+- #397 config: an empty variable no longer hides the .env value (merged)
+- #398 mock policy server: refuse a chunk shorter than one step (merged)
+- #399 se3_retarget: refuse a source from another room before writing anything (merged)
+- #400 roomplan: a portal on a curved wall names the chord it sits on (merged)
+- #401 validate: --json alone runs the episode checks and writes its report (merged)
+- #403 Known limits: the 28-episode run holds at 224 px; the Menagerie arm measured with people (merged)
+- #404 teleop: log the largest IK error of an attempt, not the last (merged)
+- #405 nebius: a 200 reply that is not a JSON object is a ShardError (cancel_open keeps going) (merged)
+- #406 doctor: fail the disk check when a file sits on the --out path (merged)
+- #417 sim, eval and fanout read a room that has only a RoomPlan export (real phone scans) (merged)
+- #418 G6 / TWN-4: twin layouts built in real RoboCasa (hero + real iPhone kitchen, within 2.5 cm) (merged)
+- #420 Real Franka opens the oven: drop the flap tilt whose hand body meets the stove (12/14 -> 14/14) (merged)
+- #421 The study's desk gets move_on_table tasks (was 0 episodes in every run) (merged)
+- #422 Fridge visitor keeps out of the door the robot works (rotated_kitchen: robot touched a person, 2 -> 0) (merged)
+- #423 Mobile base: yaw servo stiff enough that wipe strokes don't turn the parked base (u_kitchen wipe 0/4 -> 4/4) (merged)
+- #424 Mobile base: a parked base no longer waits for people; a driving one waits only for those on its route (merged)
+- #434 Floor walks keep clear of the robot base (real iPhone kitchen: contact at step 0, walkers within 0.6 m 49 -> 1) (merged)
+- #436 README Join in: task statuses match what landed (SIM-5, MAN-3, MAN-6, POL-3, DAT-1/2 were still 'open') (merged)
+- #437 Teams: lead for PPL (people & safety), which had none (merged)
+- #438 To-do: S04, S07, S19 and G1 list the merged PRs that took them to the real kitchens (#298, #338, #342, #383, #393) (merged)
+- #439 G7 / issue #62: 104 physics-checked counter_to_sink episodes from 14 human teleop seeds (retarget --teleop) (merged)
+- #440 Contributors: regenerate for Oct 28, and render_contributors.py no longer crashes on Windows (UTF-8 titles) (merged)
+- #442 To-do after the Oct 28 merges: G6 shipped (#418), DAT-4 says issue #62's benchmark ran (#439), header counts (merged)
+- #444 web: a room with only a phone capture's roomplan.json is listed and has a page (was 'No rooms yet' after sim built it) (merged)
+- #445 Quick start on Windows: the first sim command no longer warns and stretches its preview; 'open out/previews' has a Windows form (merged)
+- #446 teleop, retarget and check_layout read a phone capture's roomplan.json, as sim does since #417 (was 'no scan for room') (merged)
+- #467 Site export keeps readers-lines.json: a re-export deleted the film script and broke the /readers sign-up page (merged)
+- #468 web: the front page's placeholder warning shows only when a room has the placeholder (it told every visitor their physics-checked data was 'not physically valid') (merged)
+- #469 Demo site: re-export for Oct 28 (teleop comparison now measured, MuJoCo 3.17) and fix the first screen's contradictions (11 vs 8 state, 'no real kitchen scanned') (merged)
+- #479 Submission checklist: G2, G6, C4 and Cosmos were listed as 'not done'; each line now matches main (open)
+
 ### @Anandb71 (40)
 
 - #152 close_door, open_oven: keep every arm joint off its stops (merged)
@@ -291,50 +337,7 @@ Work on this repository's laptop pass was done by the repo owner with Claude Cod
 - #453 scan_accuracy: a tape integer too large for float is an error line, and the next room is still measured (merged)
 - #454 Upload: an integer too large for a float is a bad scan, not a retried OverflowError (merged)
 - #455 fanout: a shard that exits 0 without meta files is recorded as fetch, not marker (merged)
-- #478 Upload: a number written as a string is a bad scan, not a retried TypeError (open)
-
-### @vrun-systems26 (40)
-
-- #298 SIM: open_fridge push follows the fixture's yaw (side-wall fridge 0/4 -> 4/4) (merged)
-- #338 SIM: real kitchen cabinet doors work in a blind corner and on a narrow cabinet (6/12 -> 12/12) (merged)
-- #342 TWN: hinge a fridge on the side with less room in front (rotated kitchen's fridge was never opened) (merged)
-- #381 Tests: skip the frame-symlink test where the machine cannot create symlinks (Windows) (merged)
-- #383 DAT: today's datasets load in Isaac-GR00T's own loader (fixed arm, mobile base, three cameras) (merged)
-- #390 README: status rows for the VLA client and demo multiplication match the code (merged)
-- #391 docs/03-architecture: the Nebius mapping says where each step stands now (merged)
-- #392 Token Factory: a reply with no message text says so instead of IndexError/None (merged)
-- #393 accuracy: measure a real RoomPlan kitchen's storage base cabinets as counters (merged)
-- #394 Site: the pipeline animation's last card says the GR00T fine-tune ran (merged)
-- #395 To-do: G2 is done (shim ran on real GR00T); G7, G8, C5 say what landed (merged)
-- #397 config: an empty variable no longer hides the .env value (merged)
-- #398 mock policy server: refuse a chunk shorter than one step (merged)
-- #399 se3_retarget: refuse a source from another room before writing anything (merged)
-- #400 roomplan: a portal on a curved wall names the chord it sits on (merged)
-- #401 validate: --json alone runs the episode checks and writes its report (merged)
-- #403 Known limits: the 28-episode run holds at 224 px; the Menagerie arm measured with people (merged)
-- #404 teleop: log the largest IK error of an attempt, not the last (merged)
-- #405 nebius: a 200 reply that is not a JSON object is a ShardError (cancel_open keeps going) (merged)
-- #406 doctor: fail the disk check when a file sits on the --out path (merged)
-- #417 sim, eval and fanout read a room that has only a RoomPlan export (real phone scans) (merged)
-- #418 G6 / TWN-4: twin layouts built in real RoboCasa (hero + real iPhone kitchen, within 2.5 cm) (merged)
-- #420 Real Franka opens the oven: drop the flap tilt whose hand body meets the stove (12/14 -> 14/14) (merged)
-- #421 The study's desk gets move_on_table tasks (was 0 episodes in every run) (merged)
-- #422 Fridge visitor keeps out of the door the robot works (rotated_kitchen: robot touched a person, 2 -> 0) (merged)
-- #423 Mobile base: yaw servo stiff enough that wipe strokes don't turn the parked base (u_kitchen wipe 0/4 -> 4/4) (merged)
-- #424 Mobile base: a parked base no longer waits for people; a driving one waits only for those on its route (merged)
-- #434 Floor walks keep clear of the robot base (real iPhone kitchen: contact at step 0, walkers within 0.6 m 49 -> 1) (merged)
-- #436 README Join in: task statuses match what landed (SIM-5, MAN-3, MAN-6, POL-3, DAT-1/2 were still 'open') (merged)
-- #437 Teams: lead for PPL (people & safety), which had none (merged)
-- #438 To-do: S04, S07, S19 and G1 list the merged PRs that took them to the real kitchens (#298, #338, #342, #383, #393) (merged)
-- #439 G7 / issue #62: 104 physics-checked counter_to_sink episodes from 14 human teleop seeds (retarget --teleop) (merged)
-- #440 Contributors: regenerate for Oct 28, and render_contributors.py no longer crashes on Windows (UTF-8 titles) (merged)
-- #442 To-do after the Oct 28 merges: G6 shipped (#418), DAT-4 says issue #62's benchmark ran (#439), header counts (merged)
-- #444 web: a room with only a phone capture's roomplan.json is listed and has a page (was 'No rooms yet' after sim built it) (merged)
-- #445 Quick start on Windows: the first sim command no longer warns and stretches its preview; 'open out/previews' has a Windows form (merged)
-- #446 teleop, retarget and check_layout read a phone capture's roomplan.json, as sim does since #417 (was 'no scan for room') (merged)
-- #467 Site export keeps readers-lines.json: a re-export deleted the film script and broke the /readers sign-up page (open)
-- #468 web: the front page's placeholder warning shows only when a room has the placeholder (it told every visitor their physics-checked data was 'not physically valid') (open)
-- #469 Demo site: re-export for Oct 28 (teleop comparison now measured, MuJoCo 3.17) and fix the first screen's contradictions (11 vs 8 state, 'no real kitchen scanned') (open)
+- #478 Upload: a number written as a string is a bad scan, not a retried TypeError (merged)
 
 ### @AvnehSBhatia (40)
 
@@ -502,6 +505,14 @@ Work on this repository's laptop pass was done by the repo owner with Claude Cod
 
 - #347 [POL] Planner benchmark v2: more inventories, blind requests, rejected-plan rate, intervals (merged)
 - #402 [POL] Planner prompt lists the room's families, not 9 of 15: unlisted requests 0/20 -> measured (merged)
+
+### @AdvayRoongta (1)
+
+- #481 Cleanup: no import cycles, cohesive modules, docstrings, one lint and format style (open)
+
+### @Kr4ugs (1)
+
+- #480 Hygiene: imports at the top of the module, one import per line, docstrings inside the 120-column limit (open)
 
 ### @julieyixuanye-vm (1)
 

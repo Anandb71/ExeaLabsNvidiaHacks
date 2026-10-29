@@ -19,7 +19,7 @@
 - **Nemotron plans every task, live on Nebius Token Factory.** On indirect requests ("let me check if we're out of milk") Nemotron 3 Super picks the right task 13 times in 15; the keyword parser it replaced, 6 ([benchmark](docs/results/planner-benchmark-2026-10-26.json)).
 - **Hours become minutes.** 1,000 teleoperated demos would take a person 17.1 hours (61.5 s each, [measured](docs/results/p3-teleop-2026-10-21/README.md)); Arrival makes 1,000 physics-checked demos in about 55 minutes on one laptop (3.3 s each).
 - **Sim to real look, geometry kept.** NVIDIA Cosmos Transfer2.5-2B restyled sim episodes into photoreal kitchens; all 279 frames kept the physics' geometry ([results](docs/results/cosmos-transfer-2026-10-27/README.md)).
-- **Built in the open.** 415 merged pull requests from 14 contributors, about 2,270 tests, CI on Linux, macOS and Windows.
+- **Built in the open.** 418 merged pull requests from 16 contributors, about 2,280 tests, CI on Linux, macOS and Windows.
 
 ## What this is
 
@@ -31,7 +31,7 @@ General robot policies like NVIDIA GR00T are trained on generic kitchens. When a
 4. **Capture.** Every successful episode is written as a [GR00T](https://github.com/NVIDIA/Isaac-GR00T)-compatible LeRobot v2 dataset: joint states, actions, ego and wrist camera video, and language instructions.
 5. **Fine-tune.** GR00T N1.7 ([weights](https://huggingface.co/Ish1105/arrival-gr00t-n17-run4), NVIDIA Open Model License) has been trained on that room's data (39 of 48 against 26 of 48; small samples, and the base-GR00T and generic-RoboCasa cells are not run).
 
-Built in the open by Exea Labs for the Nebius × NVIDIA Global AI Hackathon, Physical AI track: 49 people on the team, 14 of them with merged code ([who built this](#who-built-this)). There is no physical robot: everything the robot does happens in the simulated twin of a real, scanned room. The product spec is [plan.pdf](plan.pdf).
+Built in the open by Exea Labs for the Nebius × NVIDIA Global AI Hackathon, Physical AI track: 53 people on the team, 16 of them with merged code ([who built this](#who-built-this)). There is no physical robot: everything the robot does happens in the simulated twin of a real, scanned room. The product spec is [plan.pdf](plan.pdf).
 
 ## Get started (5 minutes)
 
@@ -117,7 +117,7 @@ Token Factory is the Nebius service Arrival runs on, live: one OpenAI-compatible
 - **The training language writes itself.** `nvidia/Nemotron-3_5-Lightning` writes varied training wordings and a held-out evaluation set for each task family, where the offline path uses fixed templates. The planner got 52 of 54 of those wordings right, the keyword parser 47.
 - **Scan frames are read without hand labels.** `nvidia/Nemotron-3.5-Super-VL` finds the small objects that RoomPlan does not report: on rendered frames of the twin it found the mug in every frame that has one and nothing in the empty ones, and the mug was placed 1.2 cm from its true centre.
 - **Live research reaches the planner.** Tavily's findings for each scanned appliance go into the Nemotron prompt (`sim --planner vlm --tavily`), so the fridge plan knows the door opens with at most 66.7 N.
-- **Fast to iterate.** No rate limit was hit in more than 150 calls in about ten minutes; answers are cached under `out/cache/`, so re-runs cost nothing; and with no key every path falls back offline and says so, so the 2,270-test suite needs no key.
+- **Fast to iterate.** No rate limit was hit in more than 150 calls in about ten minutes; answers are cached under `out/cache/`, so re-runs cost nothing; and with no key every path falls back offline and says so, so the 2,280-test suite needs no key.
 
 The evidence is committed: `docs/results/live-apis-2026-10-26.json`, `docs/results/planner-benchmark-2026-10-26.json` and `docs/results/live-detect-2026-10-26.json`. Re-run them with `python scripts/smoke_live_apis.py` and `python scripts/planner_benchmark.py`.
 
@@ -226,8 +226,8 @@ Pull requests opened against this repository, by author (merged, or consolidated
 |---|---|---|
 | @Aadi-Tiwari | 117 | Open doors: tilted grasp, clearance path, via-point pull; Sample kitchen: fridge, counters and stove tile the wall wit; Scan regression suite and full RoomPlan coverage |
 | @aarochu | 96 | CAP-4: Add field scanning protocol; DEM-3: Refresh release status and setup guidance; TWN: Avoid duplicate counters over scanned base cabinets |
+| @vrun-systems26 | 41 | SIM: open_fridge push follows the fixture's yaw (side-wall f; SIM: real kitchen cabinet doors work in a blind corner and o; TWN: hinge a fridge on the side with less room in front (rot |
 | @Anandb71 | 40 | close_door, open_oven: keep every arm joint off its stops; Draw RoomPlan doors, windows and openings in the sim as visu; Upload worker: retry a failed job a bounded number of times |
-| @vrun-systems26 | 40 | SIM: open_fridge push follows the fixture's yaw (side-wall f; SIM: real kitchen cabinet doors work in a blind corner and o; TWN: hinge a fridge on the side with less room in front (rot |
 | @AvnehSBhatia (repo owner, with Claude Code) | 40 | Add tonight's MVP handoff; Integrate 16 open PRs, 40+ bug fixes, new web page, refreshe; Before the deadline: blocked items, laptop sprint, known bug |
 | @rishith-c | 37 | CAP-2: Preserve complete frame archives when ZIP creation fa; CAP-1: Reject unsupported capture server URL schemes; CAP-1: Match iOS capture UI to Arrival and protect saved sur |
 | @amanx98 | 19 | [POL-2] Wire Nemotron VLMPlanner into sim colle…; Implement Tavily AI Research Agent for appliance manuals and; Mobile Manipulator Base & 100% Physics-Checked Counter-to-Co |
@@ -236,6 +236,8 @@ Pull requests opened against this repository, by author (merged, or consolidated
 | @IshaanM05 | 6 | DEM-3: pin video writer to the FFMPEG backend; DAT-1: GR00T N1.7 modality config for the sim Panda; POL-3: gr00t_shim run against real GR00T, plus GPU run notes |
 | @man-coding-j | 5 | Include arm-link bodies in walker safety yield under --base ; Object-centric SE(3) trajectory retargeting for counter_to_s; TWN-3: Draw visual door leaf and knob for open RoomPlan door |
 | @raunak2007 | 2 | Planner benchmark v2: more inventories, blind requests, reje; Planner prompt lists the room's families, not 9 of 15: unlis |
+| @AdvayRoongta | 1 | Cleanup: no import cycles, cohesive modules, docstrings, one |
+| @Kr4ugs | 1 | Hygiene: imports at the top of the module, one import per li |
 | @julieyixuanye-vm | 1 | docs: align architecture with implementation and formalize T |
 | @wwpatel | 1 | SIM-1, MAN-1: kitchen and Panda arm visuals |
 | @rishith-c (fork branch) | 0 | Synchronized ego, wrist and exocentric capture, side-by-side preview, optional t |
@@ -246,7 +248,7 @@ Pull requests opened against this repository, by author (merged, or consolidated
 
 <!-- todo:start (generated by scripts/render_todo_readme.py from site/data/todo.json) -->
 
-As of 2026-10-28: **66** shipped, **0** in review, **1** next, **13** blocked, of **80** items. 415 pull requests merged, 2 open. The same list is on the demo site (`site/data/todo.json`). A row is shipped only when its pull request is merged on `main`.
+As of 2026-10-28: **66** shipped, **0** in review, **1** next, **13** blocked, of **80** items. 418 pull requests merged, 2 open. The same list is on the demo site (`site/data/todo.json`). A row is shipped only when its pull request is merged on `main`.
 
 Sizes: S under half a day, M about a day, L several days. Priority: **must** (the demo or the core claim breaks without it), **should**, nice. Anything that needs real data reports "not measured" until the blocked rows land.
 
