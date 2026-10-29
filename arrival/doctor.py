@@ -1,8 +1,8 @@
 """L22: ``python -m arrival doctor`` checks this machine before a run, offline.
 
-Checks the Python version, the core dependencies, MuJoCo and off-screen rendering, an ffmpeg binary, which optional credentials and URLs
-are configured, and free disk for the output folder. A key is reported only as set or not set, with where it was
-found; its value is never read into the output, never printed and never sent anywhere.
+Checks the Python version, the core dependencies, MuJoCo and off-screen rendering, an ffmpeg binary, which optional
+credentials and URLs are configured, and free disk for the output folder. A key is reported only as set or not set,
+with where it was found; its value is never read into the output, never printed and never sent anywhere.
 """
 
 from __future__ import annotations
@@ -18,11 +18,12 @@ import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from arrival.jobs.nebius import JOB_SETTINGS, STORE_SETTINGS
+
 MIN_PYTHON = (3, 11)
 # import name -> distribution name, for the dependencies in pyproject.toml
 CORE = {"numpy": "numpy", "pyarrow": "pyarrow", "yaml": "pyyaml", "PIL": "pillow", "imageio": "imageio",
         "imageio_ffmpeg": "imageio-ffmpeg"}
-from arrival.jobs.nebius import JOB_SETTINGS, STORE_SETTINGS
 
 NEBIUS_PURPOSES = {
     "NEBIUS_IAM_TOKEN": "Nebius Serverless AI Jobs access token (fanout --backend nebius)",
